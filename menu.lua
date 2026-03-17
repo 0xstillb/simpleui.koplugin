@@ -1398,11 +1398,14 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 callback     = function()
                     local on = G_reader_settings:nilOrTrue("simpleui_enabled")
                     G_reader_settings:saveSetting("simpleui_enabled", not on)
+                    -- Flush immediately so a hard reboot / crash cannot leave the
+                    -- setting unsaved, which would cause a white-screen boot loop
+                    -- the next time KOReader starts with the plugin installed.
+                    G_reader_settings:flush()
                     UIManager:show(ConfirmBox:new{
                         text        = string.format(_("Simple UI will be %s after restart.\n\nRestart now?"), on and _("disabled") or _("enabled")),
                         ok_text     = _("Restart"), cancel_text = _("Later"),
                         ok_callback = function()
-                            G_reader_settings:flush()
                             local ok_exit, ExitCode = pcall(require, "exitcode")
                             UIManager:quit((ok_exit and ExitCode and ExitCode.restart) or 85)
                         end,

@@ -73,7 +73,18 @@ function M.patchFileManagerClass(plugin)
 
     FileManager.setupLayout = function(fm_self)
         local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
-        fm_self._navbar_height = Bottombar.TOTAL_H() + (topbar_on and require("topbar").TOTAL_TOP_H() or 0)
+        local topbar_h  = 0
+        if topbar_on then
+            local ok_tb, tb_mod = pcall(require, "topbar")
+            if ok_tb and tb_mod and tb_mod.TOTAL_TOP_H then
+                topbar_h = tb_mod.TOTAL_TOP_H()
+            else
+                -- topbar unavailable; disable for this session to avoid a crash loop
+                topbar_on = false
+                logger.warn("simpleui: topbar unavailable in setupLayout, disabling topbar")
+            end
+        end
+        fm_self._navbar_height = Bottombar.TOTAL_H() + topbar_h
 
         -- Patch FileChooser.init once on the class so repeated FM rebuilds
         -- don't re-wrap. Reduces height to the content area.
@@ -146,8 +157,19 @@ function M.patchFileManagerClass(plugin)
 
         local tabs = Config.loadTabConfig()
 
-        local navbar_container, wrapped, bar, topbar, bar_idx, topbar_on2, topbar_idx =
-            UI.wrapWithNavbar(inner_widget, plugin.active_action, tabs)
+        local ok_wrap, wrap_err
+        local navbar_container, wrapped, bar, topbar, bar_idx, topbar_on2, topbar_idx
+        ok_wrap, wrap_err = pcall(function()
+            navbar_container, wrapped, bar, topbar, bar_idx, topbar_on2, topbar_idx =
+                UI.wrapWithNavbar(inner_widget, plugin.active_action, tabs)
+        end)
+        if not ok_wrap then
+            logger.err("simpleui: wrapWithNavbar failed in setupLayout:", tostring(wrap_err))
+            -- Fall back to the unwrapped widget so the FM is at least functional.
+            fm_self[1] = inner_widget
+            plugin:_registerTouchZones(fm_self)
+            return
+        end
         UI.applyNavbarState(fm_self, navbar_container, bar, topbar, bar_idx, topbar_on2, topbar_idx, tabs)
         fm_self[1] = wrapped
 
