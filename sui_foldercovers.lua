@@ -492,7 +492,22 @@ local function _installItemCache()
         if not M.getItemCache() then
             return _orig_getListItem(fc, dirpath, f, fullpath, attributes, collate)
         end
-        local filter = fc.show_filter and fc.show_filter.status or ""
+        local filter_raw = fc.show_filter and fc.show_filter.status or ""
+        local filter
+        if type(filter_raw) == "table" then
+            -- Newer KOReader stores active status filters as a set table.
+            -- Sort keys so equivalent filter states produce the same cache key.
+            local parts = {}
+            for k, v in pairs(filter_raw) do
+                if v then
+                    parts[#parts + 1] = tostring(k)
+                end
+            end
+            table.sort(parts)
+            filter = table.concat(parts, "\1")
+        else
+            filter = tostring(filter_raw)
+        end
         local key = tostring(dirpath) .. "\0" .. tostring(f) .. "\0"
                  .. tostring(fullpath) .. "\0" .. filter
         if not _cache[key] then
