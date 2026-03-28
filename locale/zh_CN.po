@@ -951,3 +951,168 @@ msgstr "路径选择器不可用。"
 
 msgid "e.g. Comics…"
 msgstr "例如：漫画…"
+
+msgid "%d days of reading"
+msgstr "%d 天阅读"
+
+msgid "%d%%"
+msgstr "%d%%"
+
+msgid "%s remaining"
+msgstr "剩余 %s"
+
+msgid "1 day of reading"
+msgstr "1 天阅读"
+
+msgid "April"
+msgstr "四月"
+
+msgid "August"
+msgstr "八月"
+
+msgid "Badge position: Bottom"
+msgstr "徽章位置：底部"
+
+msgid "Badge position: Top"
+msgstr "徽章位置：顶部"
+
+msgid "Bottom Margin"
+msgstr "底部边距"
+
+msgid "Bottom Margin — %d%%"
+msgstr "底部边距 — %d%%"
+
+msgid "Codepoint out of valid Unicode range (0–10FFFF)."
+msgstr "码点超出有效 Unicode 范围 (0–10FFFF)。"
+
+msgid "Confirm"
+msgstr "确认"
+
+msgid "Days of reading"
+msgstr "阅读天数"
+
+msgid "December"
+msgstr "十二月"
+
+msgid "Enter the Unicode codepoint (hex) of a Nerd Fonts symbol.\nYou can look up codes with wakamaifondue.com using the file:\n  /koreader/fonts/nerdfonts/symbols.ttf\nLeave blank and press OK to remove a Nerd Font icon."
+msgstr "输入 Nerd Fonts 符号的 Unicode 码点（十六进制）。\n您可以使用以下文件在 wakamaifondue.com 上查找代码：\n  /koreader/fonts/nerdfonts/symbols.ttf\n留空并按确定以移除 Nerd Font 图标。"
+
+msgid "February"
+msgstr "二月"
+
+msgid "Fetching bookmarks…"
+msgstr "正在获取书签…"
+
+msgid "Flat"
+msgstr "扁平"
+
+msgid "Friday"
+msgstr "星期五"
+
+msgid "Hide Text"
+msgstr "隐藏文本"
+
+msgid "Invalid input. Please enter 1–6 hexadecimal digits (0–9, A–F)."
+msgstr "输入无效。请输入 1–6 位十六进制数字（0–9，A–F）。"
+
+msgid "January"
+msgstr "一月"
+
+msgid "July"
+msgstr "七月"
+
+msgid "June"
+msgstr "六月"
+
+msgid "March"
+msgstr "三月"
+
+msgid "May"
+msgstr "五月"
+
+msgid "Monday"
+msgstr "星期一"
+
+msgid "Nerd Font Icon"
+msgstr "Nerd Font 图标"
+
+msgid "Nerd Font symbol…"
+msgstr "Nerd Font 符号…"
+
+msgid "New"
+msgstr "新"
+
+msgid "New Books"
+msgstr "新书"
+
+msgid "No folder, collection or plugin configured.\nGo to Simple UI → Settings → Quick Actions to set one."
+msgstr "未配置文件夹、书单或插件。\n前往 Simple UI → 设置 → 快捷操作进行设置。"
+
+msgid "November"
+msgstr "十一月"
+
+msgid "October"
+msgstr "十月"
+
+msgid "Path"
+msgstr "路径"
+
+msgid "Percentage overlay on cover"
+msgstr "封面上的百分比覆盖"
+
+msgid "Percentage text"
+msgstr "百分比文本"
+
+msgid "Progress bar style"
+msgstr "进度条样式"
+
+msgid "Saturday"
+msgstr "星期六"
+
+msgid "Scale for the label text.\n100% is the default size."
+msgstr "标签文本的缩放比例。\n100% 为默认大小。"
+
+msgid "September"
+msgstr "九月"
+
+msgid "Simple"
+msgstr "简单"
+
+msgid "Size of the text inside the stat cards.\nDoes not affect card size or padding.\n100% is the default size."
+msgstr "统计卡片内文本的大小。\n不影响卡片大小或内边距。\n100% 为默认大小。"
+
+msgid "Space below the bottom navigation bar.\n100% is the default spacing."
+msgstr "底部导航栏下方的空间。\n100% 为默认间距。"
+
+msgid "Sunday"
+msgstr "星期日"
+
+msgid "Text Size — %d%%"
+msgstr "文本大小 — %d%%"
+
+msgid "Thursday"
+msgstr "星期四"
+
+msgid "Time read"
+msgstr "阅读时间"
+
+msgid "Time remaining"
+msgstr "剩余时间"
+
+msgid "Top Margin  (%d%%)"
+msgstr "顶部边距  (%d%%)"
+
+msgid "Tuesday"
+msgstr "星期二"
+
+msgid "Vertical space above this module.\n100% is the default spacing."
+msgstr "此模块上方的垂直空间。\n100% 为默认间距。"
+
+msgid "Wednesday"
+msgstr "星期三"
+
+msgid "With percentage"
+msgstr "带百分比"
+
+msgid "hex code, e.g. E001"
+msgstr "十六进制代码，例如：E001"

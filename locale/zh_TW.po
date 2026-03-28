@@ -907,3 +907,195 @@ msgstr "進度列"
 
 msgid "Percentage read"
 msgstr "已讀百分比"
+
+msgid "%d days of reading"
+msgstr "%d 天閱讀"
+
+msgid "%d%%"
+msgstr "%d%%"
+
+msgid "%s remaining"
+msgstr "剩餘 %s"
+
+msgid "1 day of reading"
+msgstr "1 天閱讀"
+
+msgid "April"
+msgstr "四月"
+
+msgid "August"
+msgstr "八月"
+
+msgid "Badge position: Bottom"
+msgstr "徽章位置：底部"
+
+msgid "Badge position: Top"
+msgstr "徽章位置：頂部"
+
+msgid "Bottom Margin"
+msgstr "底部邊距"
+
+msgid "Bottom Margin — %d%%"
+msgstr "底部邊距 — %d%%"
+
+msgid "Codepoint out of valid Unicode range (0–10FFFF)."
+msgstr "碼點超出有效 Unicode 範圍 (0–10FFFF)。"
+
+msgid "Confirm"
+msgstr "確認"
+
+msgid "Days of reading"
+msgstr "閱讀天數"
+
+msgid "December"
+msgstr "十二月"
+
+msgid "Enter the Unicode codepoint (hex) of a Nerd Fonts symbol.\nYou can look up codes with wakamaifondue.com using the file:\n  /koreader/fonts/nerdfonts/symbols.ttf\nLeave blank and press OK to remove a Nerd Font icon."
+msgstr "輸入 Nerd Fonts 符號的 Unicode 碼點（十六進制）。\n您可以使用以下檔案在 wakamaifondue.com 上查詢代碼：\n  /koreader/fonts/nerdfonts/symbols.ttf\n留空並按確定以移除 Nerd Font 圖示。"
+
+msgid "February"
+msgstr "二月"
+
+msgid "Fetching bookmarks…"
+msgstr "正在取得書籤…"
+
+msgid "Flat"
+msgstr "扁平"
+
+msgid "Folder Name"
+msgstr "資料夾名稱"
+
+msgid "Friday"
+msgstr "星期五"
+
+msgid "Hide Text"
+msgstr "隱藏文字"
+
+msgid "Invalid arrangement.\nKeep the Left, Center and Right separators in order."
+msgstr "排列無效。\n請保持左、中、右分隔符的順序。"
+
+msgid "Invalid input. Please enter 1–6 hexadecimal digits (0–9, A–F)."
+msgstr "輸入無效。請輸入 1–6 位十六進制數字（0–9，A–F）。"
+
+msgid "January"
+msgstr "一月"
+
+msgid "July"
+msgstr "七月"
+
+msgid "June"
+msgstr "六月"
+
+msgid "March"
+msgstr "三月"
+
+msgid "May"
+msgstr "五月"
+
+msgid "Monday"
+msgstr "星期一"
+
+msgid "Nerd Font Icon"
+msgstr "Nerd Font 圖示"
+
+msgid "Nerd Font symbol…"
+msgstr "Nerd Font 符號…"
+
+msgid "New"
+msgstr "新"
+
+msgid "New Books"
+msgstr "新書"
+
+msgid "No folder, collection or plugin configured.\nGo to Simple UI → Settings → Quick Actions to set one."
+msgstr "未設定資料夾、書單或外掛程式。\n前往 Simple UI → 設定 → 快捷操作進行設定。"
+
+msgid "November"
+msgstr "十一月"
+
+msgid "Number of Books in Folder"
+msgstr "資料夾中的書籍數量"
+
+msgid "Number of Pages"
+msgstr "頁數"
+
+msgid "October"
+msgstr "十月"
+
+msgid "Open"
+msgstr "開啟"
+
+msgid "Overlays"
+msgstr "覆蓋層"
+
+msgid "Path"
+msgstr "路徑"
+
+msgid "Path chooser not available."
+msgstr "路徑選擇器不可用。"
+
+msgid "Percentage overlay on cover"
+msgstr "封面的百分比覆蓋"
+
+msgid "Percentage text"
+msgstr "百分比文字"
+
+msgid "Progress bar style"
+msgstr "進度列樣式"
+
+msgid "Saturday"
+msgstr "星期六"
+
+msgid "Scale for the label text.\n100% is the default size."
+msgstr "標籤文字的縮放比例。\n100% 為預設大小。"
+
+msgid "September"
+msgstr "九月"
+
+msgid "Simple"
+msgstr "簡單"
+
+msgid "Size of the text inside the stat cards.\nDoes not affect card size or padding.\n100% is the default size."
+msgstr "統計卡片內文字的大小。\n不影響卡片大小或內邊距。\n100% 為預設大小。"
+
+msgid "Space below the bottom navigation bar.\n100% is the default spacing."
+msgstr "底部導覽列下方的空間。\n100% 為預設間距。"
+
+msgid "Sunday"
+msgstr "星期日"
+
+msgid "Text Size — %d%%"
+msgstr "文字大小 — %d%%"
+
+msgid "Thursday"
+msgstr "星期四"
+
+msgid "Time read"
+msgstr "閱讀時間"
+
+msgid "Time remaining"
+msgstr "剩餘時間"
+
+msgid "Top Margin  (%d%%)"
+msgstr "頂部邊距  (%d%%)"
+
+msgid "Tuesday"
+msgstr "星期二"
+
+msgid "Uniformize Covers (2:3)"
+msgstr "統一封面比例 (2:3)"
+
+msgid "Vertical space above this module.\n100% is the default spacing."
+msgstr "此模組上方的垂直空間。\n100% 為預設間距。"
+
+msgid "Wednesday"
+msgstr "星期三"
+
+msgid "With percentage"
+msgstr "帶百分比"
+
+msgid "e.g. Comics…"
+msgstr "例如：漫畫…"
+
+msgid "hex code, e.g. E001"
+msgstr "十六進制代碼，例如：E001"
