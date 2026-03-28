@@ -153,6 +153,9 @@ msgstr "Alt Çubuk"
 msgid "Bottom Bar Size"
 msgstr "Alt Çubuk Boyutu"
 
+msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
+msgstr "Yeni çubuk boyutunu tüm düzenlere uygulamak için yeniden başlatma gerekiyor.\n\nŞimdi yeniden başlatılsın mı?"
+
 msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
 msgstr "Alt çubuk yeniden başlatmanın ardından %s olacak.\n\nŞimdi yeniden başlatılsın mı?"
 
@@ -872,6 +875,9 @@ msgstr "Pazar"
 
 msgid "Swipe Indicator"
 msgstr "Kaydırma Göstergesi"
+
+msgid "Hide Wi-Fi icon when off"
+msgstr "Wi-Fi kapalıyken simgeyi gizle"
 
 msgid "System Actions"
 msgstr "Sistem Eylemleri"

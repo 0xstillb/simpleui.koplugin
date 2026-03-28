@@ -213,6 +213,9 @@ msgstr "Barra Inferior"
 msgid "Bottom Bar Size"
 msgstr "Tamanho da Barra Inferior"
 
+msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
+msgstr "É necessário reiniciar para aplicar o novo tamanho da barra em todos os ecrãs.\n\nReiniciar agora?"
+
 #: sui_menu.lua:626
 msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
 msgstr "A barra inferior ficará %s após reiniciar.\n\nReiniciar agora?"
@@ -1323,6 +1326,9 @@ msgstr "Domingo"
 #: sui_menu.lua:417
 msgid "Swipe Indicator"
 msgstr "Indicador de Deslize"
+
+msgid "Hide Wi-Fi icon when off"
+msgstr "Esconder ícone Wi-Fi quando desligado"
 
 #: sui_quickactions.lua:706
 msgid "System Actions"

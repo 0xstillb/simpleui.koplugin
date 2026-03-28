@@ -500,6 +500,14 @@ end
 -- Optimistic Wi-Fi state, updated immediately on toggle.
 M.wifi_optimistic = nil
 
+-- Hide the Wi-Fi icon when Wi-Fi is off (instead of showing the off icon).
+function M.getWifiHideWhenOff()
+    return G_reader_settings:isTrue("navbar_topbar_wifi_hide_when_off")
+end
+function M.setWifiHideWhenOff(v)
+    G_reader_settings:saveSetting("navbar_topbar_wifi_hide_when_off", v)
+end
+
 function M.homeLabel()
     return _("Library")
 end

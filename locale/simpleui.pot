@@ -205,6 +205,10 @@ msgstr ""
 msgid "Bottom Bar Size"
 msgstr ""
 
+#: sui_menu.lua
+msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
+msgstr ""
+
 #: sui_menu.lua:626
 msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
 msgstr ""
@@ -1314,6 +1318,10 @@ msgstr ""
 
 #: sui_menu.lua:417
 msgid "Swipe Indicator"
+msgstr ""
+
+#: sui_menu.lua:427
+msgid "Hide Wi-Fi icon when off"
 msgstr ""
 
 #: sui_quickactions.lua:706

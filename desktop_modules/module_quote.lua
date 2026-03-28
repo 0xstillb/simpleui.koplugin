@@ -756,9 +756,13 @@ local function buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
 
     if h.authors and h.authors ~= "" then attr = attr .. ",  " .. h.authors end
 
-    -- Strip any existing leading/trailing quotation marks (straight or curly)
-    -- before wrapping, to avoid double quotes on highlights that start/end with one.
+    -- Strip leading/trailing quote marks before wrapping to avoid double quotes.
+    -- Also strip leading em/en dashes (dialogue markers from books): they are
+    -- typographic artefacts of the source text and the cfont used by TextBoxWidget
+    -- does not have a fallback glyph for U+2014/U+2013 when they are the very
+    -- first character of a text run, causing a replacement glyph to be shown.
     local text = h.text:gsub('^["\u{201C}\u{2018}%s]+', ''):gsub('["\u{201D}\u{2019}%s]+$', '')
+    text = text:gsub('^[\u{2014}\u{2013}]%s*', '')
     return buildWidget(inner_w, "\u{201C}" .. text .. "\u{201D}", attr, face_quote, face_attr, vspan_gap),
            h.filepath, h.title, h.pos0, h.page
 

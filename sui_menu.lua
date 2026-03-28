@@ -422,6 +422,15 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     not G_reader_settings:nilOrTrue("navbar_topbar_swipe_indicator"))
                 plugin:_scheduleRebuild()
             end,
+        }
+        items[#items + 1] = {
+            text           = _("Hide Wi-Fi icon when off"),
+            keep_menu_open = true,
+            checked_func   = function() return Config.getWifiHideWhenOff() end,
+            callback = function()
+                Config.setWifiHideWhenOff(not Config.getWifiHideWhenOff())
+                plugin:_scheduleRebuild()
+            end,
             separator = true,
         }
 
@@ -657,6 +666,15 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                             plugin:_rewrapAllWidgets()
                             local ok_hs, HS = pcall(require, "sui_homescreen")
                             if ok_hs and HS then HS.refresh(true) end
+                            UIManager:show(ConfirmBox():new{
+                                text       = _("A restart is required to apply the new bar size across all layouts.\n\nRestart now?"),
+                                ok_text    = _("Restart"),
+                                cancel_text = _("Later"),
+                                ok_callback = function()
+                                    G_reader_settings:flush()
+                                    UIManager:restartKOReader()
+                                end,
+                            })
                         end,
                     })
                 end,

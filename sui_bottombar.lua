@@ -1331,6 +1331,8 @@ function M.rewrapAllWidgets(plugin)
     local tabs      = Config.loadTabConfig()
     local stack     = UI.getWindowStack()  -- read once for the entire operation
     local seen      = {}
+    local content_h = UI.getContentHeight()
+    local content_y = UI.getContentTop()
 
     local function rewrapWidget(w)
         if not w or not w._navbar_container or seen[w] then return end
@@ -1344,6 +1346,52 @@ function M.rewrapAllWidgets(plugin)
             UI.wrapWithNavbar(inner, plugin.active_action or tabs[1] or "home", tabs)
         UI.applyNavbarState(w, new_container, bar, topbar, bar_idx, topbar_on2, topbar_idx, tabs)
         w[1] = wrapped
+
+        -- ── Resize the actual content widget to the new content area ──
+        -- wrapWithNavbar sets inner.dimen.h but many widgets also carry a
+        -- separate .height field (FileChooser, Menu) and a _navbar_height_reduced
+        -- guard that blocks re-reduction in patches.lua.  We must reset both so
+        -- the widget redraws at the correct size.
+
+        -- 1. inner.dimen is already set by wrapWithNavbar; also update .height/.y
+        --    for widgets that use those fields directly (FileChooser, Menu).
+        if inner.height ~= nil then
+            inner.height = content_h
+        end
+        if inner.y ~= nil then
+            inner.y = content_y
+        end
+        -- Allow patches.lua injection hook to re-apply on the next show.
+        inner._navbar_height_reduced = nil
+
+        -- 2. FileChooser inside the FM widget (plugin.ui / fm).
+        local fc = w.file_chooser
+        if fc then
+            fc.height = content_h
+            fc.y      = content_y
+            -- Trigger a full relayout so item rows are recalculated.
+            local ok_rc = pcall(function() fc:_recalculateDimen() end)
+            if not ok_rc then
+                -- Fallback: just update dimen directly.
+                if fc.dimen then fc.dimen.h = content_h; fc.dimen.y = content_y end
+            end
+        end
+
+        -- 3. Injected widgets (History, Collections, etc.) that set
+        --    .dimen on themselves and their first child.
+        if w._navbar_injected then
+            w._navbar_height_reduced = nil
+            if w.dimen then w.dimen.h = content_h; w.dimen.y = content_y end
+            if w[1] and w[1].dimen then w[1].dimen.h = content_h; w[1].dimen.y = content_y end
+            -- Recalculate item layout if the widget supports it.
+            local ok_rc = pcall(function() w:_recalculateDimen() end)
+            if not ok_rc then
+                pcall(function()
+                    if w[1] then w[1]:_recalculateDimen() end
+                end)
+            end
+        end
+
         plugin:_registerTouchZones(w)
         UIManager:setDirty(w, "ui")  -- single setDirty — container is a child of w
     end

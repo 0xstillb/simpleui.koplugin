@@ -316,6 +316,9 @@ function M.buildTopbarWidget()
             if info.wifi then
                 return "\u{ECA8}", nil, true   -- ícone wifi ligado
             elseif hwHasWifi() then
+                if Config.getWifiHideWhenOff() then
+                    return nil, nil             -- esconde quando desligado
+                end
                 return "\u{ECA9}", nil, true   -- ícone wifi desligado
             end
             return nil, nil

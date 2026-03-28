@@ -1079,6 +1079,29 @@ function M.patchMenuInitForPagination(plugin)
 
     Menu.init = function(menu_self, ...)
         orig_menu_init(menu_self, ...)
+
+        -- Fix: Menu:onSwipe does not return true, so horizontal swipe events
+        -- propagate down to the FM's filemanager_swipe touch zone and advance
+        -- two pages instead of one.  Install an instance-level onSwipe that
+        -- calls the original and then returns true to consume the event.
+        -- Applied to all named target menus (history, collections, coll_list)
+        -- and any fullscreen borderless menu that gets navbar-injected.
+        local is_target = TARGET_NAMES[menu_self.name]
+            or (menu_self.covers_fullscreen
+                and menu_self.is_borderless
+                and menu_self.title_bar_fm_style)
+        if is_target then
+            local orig_onSwipe = menu_self.onSwipe  -- may be nil (inherits from Menu)
+            menu_self.onSwipe = function(self_m, arg, ges_ev)
+                if orig_onSwipe then
+                    orig_onSwipe(self_m, arg, ges_ev)
+                else
+                    Menu.onSwipe(self_m, arg, ges_ev)
+                end
+                return true  -- consume: prevent propagation to FM's filemanager_swipe
+            end
+        end
+
         if G_reader_settings:nilOrTrue("navbar_pagination_visible") then return end
         if not TARGET_NAMES[menu_self.name]
            and not (menu_self.covers_fullscreen
