@@ -760,7 +760,7 @@ function M.install()
         -- recursively (up to 3 levels), then fall back to the placeholder cover.
         if not has_files then
             local cover = nil
-            if has_subfolders and M.getRecursiveCover() then
+            if has_subfolders and M.getSubfolderCover() and M.getRecursiveCover() then
                 cover = _findCoverRecursive(self.menu, dir_path, 1, 3, BookInfoManager)
             end
             if cover then
