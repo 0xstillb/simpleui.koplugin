@@ -427,23 +427,34 @@ end
 
 -- Opens a ButtonDialog listing the books inside dir_path so the user can
 -- pick which one's cover to use.
+
+-- Collects all book entries under dir_path, optionally recursing into
+-- subfolders up to max_depth levels when recursive cover scan is enabled.
+local function _collectBooks(menu, dir_path, depth, max_depth, out)
+    menu._dummy = true
+    local entries = menu:genItemTableFromPath(dir_path)
+    menu._dummy = false
+    if not entries then return end
+    for _, entry in ipairs(entries) do
+        if entry.is_file or entry.file then
+            out[#out + 1] = entry
+        elseif depth < max_depth and not entry.is_file and not entry.file then
+            _collectBooks(menu, entry.path, depth + 1, max_depth, out)
+        end
+    end
+end
+
 local function _openFolderCoverPicker(dir_path, menu, BookInfoManager)
     local UIManager    = require("ui/uimanager")
     local ButtonDialog = require("ui/widget/buttondialog")
     local InfoMessage  = require("ui/widget/infomessage")
 
-    menu._dummy = true
-    local entries = menu:genItemTableFromPath(dir_path)
-    menu._dummy = false
-
+    -- When recursive cover scan is enabled, collect books from subfolders too
+    -- (same max_depth=3 used by the automatic scan), so the user can pick from
+    -- the same set of covers that the auto-scan finds.
     local books = {}
-    if entries then
-        for _, entry in ipairs(entries) do
-            if entry.is_file or entry.file then
-                books[#books + 1] = entry
-            end
-        end
-    end
+    local max_depth = M.getRecursiveCover() and 3 or 1
+    _collectBooks(menu, dir_path, 1, max_depth, books)
 
     if #books == 0 then
         UIManager:show(InfoMessage:new{
@@ -469,9 +480,14 @@ local function _openFolderCoverPicker(dir_path, menu, BookInfoManager)
     for _, entry in ipairs(books) do
         local fp = entry.path
         local bookinfo = BookInfoManager:getBookInfo(fp, false)
-        local label = (bookinfo and bookinfo.title and bookinfo.title ~= "")
+        local title = (bookinfo and bookinfo.title and bookinfo.title ~= "")
             and bookinfo.title
             or (fp:match("([^/]+)%.[^%.]+$") or fp)
+        -- When the book is in a subfolder, append the relative path so the
+        -- user can tell apart books with the same title in different subfolders.
+        local rel = fp:sub(#dir_path + 2) -- strip "dir_path/" prefix
+        local subfolder = rel:match("^(.+)/[^/]+$") -- everything before the filename
+        local label = subfolder and (title .. "  [" .. subfolder .. "]") or title
         local _fp = fp
         buttons[#buttons + 1] = {{
             text = ((cur_override == _fp) and "✓ " or "  ") .. label,
