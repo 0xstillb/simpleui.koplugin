@@ -1208,12 +1208,29 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
             home = Device.home_dir
         end
         if not home then return false end
-        if fc.path == home then
-            -- Already at home. Always go to page 1 and refresh — this mirrors
-            -- the "Go to HOME folder" button behaviour: if the user is on a
-            -- sub-page of the library, tapping the tab again scrolls back to
-            -- the top. Suppress onPathChanged in both cases (re-tap and
-            -- cross-tab) because the bar was already rebuilt by onTabTap.
+        -- If we are inside a virtual series folder, exit it first.
+        -- Virtual folders keep fc.path pointing at the real parent directory,
+        -- so the fc.path == home check below would incorrectly treat a virtual
+        -- folder whose parent is the home dir as "already at home" and call
+        -- refreshPath(), which re-enters the virtual folder instead of closing it.
+        local in_virtual = fc.item_table and fc.item_table._sg_is_series_view
+        if in_virtual then
+            -- Clear the virtual-folder flag so changeToPath (and the patched
+            -- refreshPath) won't try to restore the series view.
+            -- The patched changeToPath in sui_foldercovers will take the
+            -- "else" branch (normal filesystem navigation) and clear
+            -- _sg_current automatically, since _sg_is_series_view is now false.
+            fc.item_table._sg_is_series_view = false
+            -- Clear the back-button flag used by the title bar.
+            fc._simpleui_has_go_up = false
+        end
+        if fc.path == home and not in_virtual then
+            -- Already at home (and not in a virtual folder). Always go to
+            -- page 1 and refresh — this mirrors the "Go to HOME folder" button
+            -- behaviour: if the user is on a sub-page of the library, tapping
+            -- the tab again scrolls back to the top. Suppress onPathChanged in
+            -- both cases (re-tap and cross-tab) because the bar was already
+            -- rebuilt by onTabTap.
             target_fm._navbar_suppress_path_change = true
             pcall(function() fc:onGotoPage(1) end)
             pcall(function() fc:refreshPath() end)

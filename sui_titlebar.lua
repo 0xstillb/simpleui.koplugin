@@ -544,12 +544,17 @@ function M.apply(fm_self)
                         local ok, result = pcall(orig_onGotoPage, fc_self, page, ...)
                         fc_self._simpleui_in_goto = nil
                         
-                        -- Determine if we are at "Root" based on path
+                        -- Determine if we are at "Root" based on path.
+                        -- _simpleui_has_go_up is set to true by _sgOpenGroup when
+                        -- entering a virtual series folder (whose path equals the
+                        -- real parent, not a subfolder on disk). Honour that flag
+                        -- so the back button appears even when lock_home_folder is on.
                         local current_path = fc_self.path or ""
                         local is_at_home_or_root = (current_path == "/" or _isLockedAtHome(current_path))
                         
-                        -- If we are NOT at root/home, is_sub is true (we want the back button)
-                        local is_sub = not is_at_home_or_root
+                        -- If we are NOT at root/home, is_sub is true (we want the back button).
+                        -- Also treat a virtual series folder as a sub-level regardless of path.
+                        local is_sub = not is_at_home_or_root or (fc_self._simpleui_has_go_up == true)
                         
                         -- Synchronize the internal flag
                         fc_self._simpleui_has_go_up = is_sub

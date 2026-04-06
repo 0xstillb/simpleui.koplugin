@@ -1940,3 +1940,28 @@ msgstr "Remover de Quero Ler"
 #: desktop_modules/module_tbr.lua
 msgid "To Be Read"
 msgstr "Quero Ler"
+
+#: sui_foldercovers.lua sui_menu.lua
+msgid "Group Books by Series"
+msgstr "Agrupar Livros por Série"
+
+#: sui_menu.lua
+msgid "Series Index"
+msgstr "Índice de Série"
+
+#: sui_foldercovers.lua
+msgid "Series cover"
+msgstr "Capa da série"
+
+#: sui_foldercovers.lua
+msgid "Set series cover…"
+msgstr "Definir capa da série…"
+
+#: sui_foldercovers.lua
+msgid "No books found in this series."
+msgstr "Nenhum livro encontrado nesta série."
+
+
+#: sui_foldercovers.lua
+msgid "Scan subfolders for cover"
+msgstr "Pesquisar subpastas para capa"

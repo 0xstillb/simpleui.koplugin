@@ -1746,7 +1746,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                     local FM = package.loaded["apps/filemanager/filemanager"]
                                     local fm = FM and FM.instance
                                     if fm and fm.file_chooser then
-                                        fm.file_chooser:updateItems()
+                                        -- refreshPath rebuilds the item list from scratch and
+                                        -- passes it through switchItemTable, which is where the
+                                        -- series-grouping hook (_sgProcessItemTable) runs.
+                                        -- updateItems alone skips that hook, so grouping would
+                                        -- only appear after a manual refresh.
+                                        fm.file_chooser:refreshPath()
                                     end
                                 end
                                 return {
@@ -1767,6 +1772,16 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                             else
                                                 pcall(FC.uninstall)
                                             end
+                                            _refreshFC()
+                                        end,
+                                    },
+                                    {
+                                        text           = _("Group Books by Series"),
+                                        checked_func   = function() return FC.getSeriesGrouping() end,
+                                        keep_menu_open = true,
+                                        callback       = function()
+                                            FC.setSeriesGrouping(not FC.getSeriesGrouping())
+                                            FC.invalidateCache()
                                             _refreshFC()
                                         end,
                                     },
@@ -1811,6 +1826,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                                 checked_func   = function() return FC.getOverlayPages() end,
                                                 keep_menu_open = true,
                                                 callback       = function() FC.setOverlayPages(not FC.getOverlayPages()); FC.invalidateCache(); _refreshFC() end,
+                                            },
+                                            {
+                                                text           = _("Series Index"),
+                                                checked_func   = function() return FC.getOverlaySeries() end,
+                                                keep_menu_open = true,
+                                                callback       = function() FC.setOverlaySeries(not FC.getOverlaySeries()); FC.invalidateCache(); _refreshFC() end,
                                             },
                                             {
                                                 text         = _("Folder Name"),
@@ -1897,7 +1918,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                         end,
                                     },
                                     {
-                                        text           = _("  Scan subfolders for cover"),
+                                        text           = _("Scan subfolders for cover"),
                                         checked_func   = function() return FC.getRecursiveCover() end,
                                         enabled_func   = function() return FC.isEnabled() and FC.getSubfolderCover() end,
                                         keep_menu_open = true,
