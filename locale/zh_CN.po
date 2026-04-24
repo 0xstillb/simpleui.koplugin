@@ -4,7 +4,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: simpleui\n"
-"PO-Revision-Date: 2026-04-21 12:00+0000\n"
+"PO-Revision-Date: 2026-04-07 12:00+0000\n"
 "Language-Team: Chinese (Simplified)\n"
 "Language: zh_CN\n"
 "MIME-Version: 1.0\n"
@@ -1947,83 +1947,3 @@ msgstr "\n\n是否立即下载并安装？"
 #: desktop_modules/module_reading_goals.lua:617
 msgid "  Set Goal  (%d book in %s)"
 msgstr "  设置目标  (%d 本书，%s)"
-
-#: sui_browsemeta.lua:57
-msgid "Authors"
-msgstr "作者"
-
-#: sui_titlebar.lua:57
-msgid "Browse"
-msgstr "浏览"
-
-#: sui_browsemeta.lua:421
-msgid "Browse by"
-msgstr "浏览方式"
-
-#: sui_menu.lua:1983
-msgid "Browse by Author / Series"
-msgstr "按作者 / 系列浏览"
-
-#: sui_bottombar.lua:1412
-msgid "Browse by Authors/Series not available."
-msgstr "按作者 / 系列浏览不可用。"
-
-#: sui_titlebar.lua:817
-msgid "Browse library"
-msgstr "浏览书库"
-
-#: sui_titlebar.lua:835
-msgid "By author"
-msgstr "按作者"
-
-#: sui_titlebar.lua:848
-msgid "By series"
-msgstr "按系列"
-
-#: desktop_modules/module_quote.lua:1262
-msgid "Custom File"
-msgstr "自定义文件"
-
-#: sui_bottombar.lua:1416
-msgid "Enable 'Browse by Author / Series' in the library menu first."
-msgstr "请先在书库菜单中启用\"按作者 / 系列浏览\"。"
-
-#: desktop_modules/module_quote.lua:1275
-msgid "No .lua files found in custom_quotes/"
-msgstr "在 custom_quotes/ 中未找到 .lua 文件。"
-
-#: sui_browsemeta.lua:731
-msgid "No books found."
-msgstr "未找到书籍。"
-
-#: desktop_modules/module_quote.lua:831
-msgid "No custom quotes found. Add a .lua file to the plugin's desktop_modules/custom_quotes/ folder and select it in Settings."
-msgstr "未找到自定义名言。请在插件的 desktop_modules/custom_quotes/ 文件夹中添加 .lua 文件，然后在设置中选择。"
-
-#: desktop_modules/module_quote.lua:1300
-msgid "Place .lua files in the plugin's desktop_modules/custom_quotes/ folder"
-msgstr "请将 .lua 文件放入插件的 desktop_modules/custom_quotes/ 文件夹。"
-
-#: sui_browsemeta.lua:58
-msgid "Series"
-msgstr "系列"
-
-#: sui_foldercovers.lua:691
-msgid "Set virtual folder cover…"
-msgstr "设置虚拟文件夹封面…"
-
-#: sui_browsemeta.lua:778
-msgid "Virtual folder cover"
-msgstr "虚拟文件夹封面"
-
-#: sui_bottombar.lua:983
-msgid "Fetching bookmarks\\xe2\\x80\\xa6"
-msgstr "msgstr "正在获取书签…""
-
-#: desktop_modules/module_quote.lua:831
-msgid "No custom quotes found. Add a .lua file to the plugin\\'s desktop_modules/custom_quotes/ folder and select it in Settings."
-msgstr "未找到自定义名言。请在插件的 desktop_modules/custom_quotes/ 文件夹中添加 .lua 文件，然后在设置中选择。"
-
-#: sui_quickactions.lua:1302
-msgid "No folder, collection or plugin configured.\nGo to Simple UI \\xe2\\x86\\x92 Settings \\xe2\\x86\\x92 Quick Actions to set one."
-msgstr "未配置文件夹、收藏夹或插件。\n请前往 Simple UI → 设置 → 快捷操作进行配置。"
