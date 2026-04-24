@@ -20,12 +20,18 @@
 --   M.removeTBR(filepath)
 --   M.genTBRButton(file, close_cb)                       → button table
 
+local Blitbuffer      = require("ffi/blitbuffer")
+local Font            = require("ui/font")
 local FrameContainer  = require("ui/widget/container/framecontainer")
 local Geom            = require("ui/geometry")
 local GestureRange    = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan  = require("ui/widget/horizontalspan")
 local InputContainer  = require("ui/widget/container/inputcontainer")
+local LineWidget      = require("ui/widget/linewidget")
+local OverlapGroup    = require("ui/widget/overlapgroup")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local TextWidget      = require("ui/widget/textwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
 local UIManager       = require("ui/uimanager")
 local lfs             = require("libs/libkoreader-lfs")
@@ -45,10 +51,29 @@ end
 local Config = require("sui_config")
 local UI     = require("sui_core")
 local PAD    = UI.PAD
+local Screen = require("device").screen
+
+local CLR_TEXT_SUB    = UI.CLR_TEXT_SUB
+local _BASE_RB_PCT_FS = Screen:scaleBySize(8)  -- "XX% Read" label font size — base value
 
 local TBR_MAX       = 5
 local TBR_SETTING   = "sui_tbr_list"    -- G_reader_settings key (kept in sync)
 local TBR_COLL_NAME = "To Be Read"      -- KOReader collection name for the TBR list
+
+-- Settings keys (prefixed with ctx.pfx at runtime)
+local SETTING_PROGRESS = "tbr_show_progress"  -- default OFF
+local SETTING_TEXT     = "tbr_show_text"       -- default OFF
+local SETTING_OVERLAY  = "tbr_show_overlay"    -- default OFF
+
+local function showProgress(pfx)
+    return G_reader_settings:readSetting(pfx .. SETTING_PROGRESS) == true
+end
+local function showText(pfx)
+    return G_reader_settings:readSetting(pfx .. SETTING_TEXT) == true
+end
+local function showOverlay(pfx)
+    return G_reader_settings:readSetting(pfx .. SETTING_OVERLAY) == true
+end
 
 -- ---------------------------------------------------------------------------
 -- ReadCollection accessor (lazy — RC singleton may not exist at require time)
@@ -290,13 +315,26 @@ function M.build(w, ctx)
     local SH          = getSH()
     local scale       = Config.getModuleScale("tbr", ctx.pfx)
     local thumb_scale = Config.getThumbScale("tbr", ctx.pfx)
+    local lbl_scale   = Config.getItemLabelScale("tbr", ctx.pfx)
     local D           = SH.getDims(scale, thumb_scale)
+    local pct_fs      = math.max(8, math.floor(_BASE_RB_PCT_FS * scale * lbl_scale))
 
     local cols    = math.min(#tbr_fps, 5)
     local cw      = D.RECENT_W
     local ch      = D.RECENT_H
     local inner_w = w - PAD * 2
     local gap     = math.floor((inner_w - 5 * cw) / 4)
+    local pct_face = Font:getFace("smallinfofont", pct_fs)
+
+    local show_progress = showProgress(ctx.pfx)
+    local show_text     = showText(ctx.pfx)
+    local use_overlay   = showOverlay(ctx.pfx)
+
+    local draw_progress = show_progress and not use_overlay
+    local draw_text     = show_text     and not use_overlay
+
+    local badge_r = math.floor(cw * 0.28)
+    local cell_h  = use_overlay and (ch + badge_r) or D.RECENT_CELL_H
 
     local row = HorizontalGroup:new{ align = "top" }
     for i = 1, cols do
@@ -304,14 +342,60 @@ function M.build(w, ctx)
         local bd    = SH.getBookData(fp, ctx.prefetched and ctx.prefetched[fp])
         local cover = SH.getBookCover(fp, cw, ch, nil, 0.10) or SH.coverPlaceholder(bd.title, cw, ch)
 
-        -- No progress bar, no percentage — just the cover.
-        local cell = VerticalGroup:new{
-            align = "center",
-            cover,
-        }
+        local cover_widget
+        if use_overlay then
+            local pct_int = math.floor((bd.percent or 0) * 100)
+            local badge_d = badge_r * 2
+            local badge = FrameContainer:new{
+                bordersize  = 0,
+                background  = Blitbuffer.gray(0.15),
+                padding     = 0,
+                dimen       = Geom:new{ w = badge_d, h = badge_d },
+                radius      = badge_r,
+                CenterContainer:new{
+                    dimen = Geom:new{ w = badge_d, h = badge_d },
+                    TextWidget:new{
+                        text    = string.format(_("%d%%"), pct_int),
+                        face    = pct_face,
+                        bold    = true,
+                        fgcolor = Blitbuffer.COLOR_BLACK,
+                    },
+                },
+            }
+            badge.overlap_offset = {
+                math.floor((cw - badge_d) / 2),
+                ch - badge_r,
+            }
+            cover_widget = OverlapGroup:new{
+                dimen = Geom:new{ w = cw, h = ch + badge_r },
+                cover,
+                badge,
+            }
+        else
+            cover_widget = cover
+        end
+
+        local cell = VerticalGroup:new{ align = "center", cover_widget }
+
+        if draw_progress then
+            cell[#cell+1] = SH.vspan(D.RB_GAP1, ctx.vspan_pool)
+            cell[#cell+1] = SH.progressBar(cw, bd.percent, D.RB_BAR_H)
+        end
+
+        if draw_text then
+            cell[#cell+1] = SH.vspan(draw_progress and D.RB_GAP2 or D.RB_GAP1, ctx.vspan_pool)
+            cell[#cell+1] = TextWidget:new{
+                text      = string.format(_("%d%% Read"), (bd.percent or 0) * 100),
+                face      = pct_face,
+                bold      = true,
+                fgcolor   = CLR_TEXT_SUB,
+                width     = cw,
+                alignment = "center",
+            }
+        end
 
         local tappable = InputContainer:new{
-            dimen    = Geom:new{ w = cw, h = D.RECENT_H },
+            dimen    = Geom:new{ w = cw, h = cell_h },
             [1]      = cell,
             _fp      = fp,
             _open_fn = ctx.open_fn,
@@ -329,8 +413,21 @@ function M.build(w, ctx)
             return true
         end
 
+        local cell_widget = tappable
+        if ctx.kb_recent_focus_idx == i then
+            local bw = Screen:scaleBySize(3)
+            cell_widget = OverlapGroup:new{
+                dimen = Geom:new{ w = cw, h = cell_h },
+                tappable,
+                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = Blitbuffer.COLOR_BLACK },
+                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, cell_h - bw} },
+                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = Blitbuffer.COLOR_BLACK },
+                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = Blitbuffer.COLOR_BLACK, overlap_offset = {cw - bw, 0} },
+            }
+        end
+
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-        row[#row + 1] = tappable
+        row[#row + 1] = cell_widget
     end
 
     return FrameContainer:new{
@@ -344,11 +441,26 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.getHeight(_ctx)
-    local SH = getSH()
-    local D  = SH.getDims(Config.getModuleScale("tbr", _ctx and _ctx.pfx),
-                           Config.getThumbScale("tbr", _ctx and _ctx.pfx))
-    -- Cell is cover only (no progress bar / label), so height = cover height.
-    return D.RECENT_H
+    local SH  = getSH()
+    local pfx = _ctx and _ctx.pfx or ""
+    local D   = SH.getDims(Config.getModuleScale("tbr", pfx),
+                            Config.getThumbScale("tbr", pfx))
+    local use_overlay = showOverlay(pfx)
+    local h = D.RECENT_H
+    if use_overlay then
+        local badge_r = math.floor(D.RECENT_W * 0.28)
+        h = h + badge_r
+    else
+        if showProgress(pfx) then
+            h = h + D.RB_GAP1 + D.RB_BAR_H
+            if showText(pfx) then h = h + D.RB_GAP2 end
+        end
+        if showText(pfx) then
+            if not showProgress(pfx) then h = h + D.RB_GAP1 end
+            h = h + D.RB_LABEL_H
+        end
+    end
+    return require("sui_config").getScaledLabelH() + h
 end
 
 -- ---------------------------------------------------------------------------
@@ -388,6 +500,7 @@ end
 function M.getMenuItems(ctx_menu)
     local _lc      = ctx_menu._
     local refresh  = ctx_menu.refresh
+    local pfx      = ctx_menu.pfx
     local SortWidget = ctx_menu.SortWidget
     local _UIManager = ctx_menu.UIManager
     local InfoMessage = ctx_menu.InfoMessage
@@ -395,7 +508,53 @@ function M.getMenuItems(ctx_menu)
     local items = {}
 
     items[#items + 1] = _makeScaleItem(ctx_menu)
+    items[#items + 1] = Config.makeScaleItem({
+        text_func = function() return _lc("Text Size") end,
+        title     = _lc("Text Size"),
+        info      = _lc("Scale for the percentage read text.\n100% is the default size."),
+        get       = function() return Config.getItemLabelScalePct("tbr", pfx) end,
+        set       = function(v) Config.setItemLabelScale(v, "tbr", pfx) end,
+        refresh   = refresh,
+    })
     items[#items + 1] = Config.makeLabelToggleItem("tbr", _("To Be Read"), refresh, _lc)
+    items[#items + 1] = Config.makeScaleItem({
+        text_func = function() return _lc("Cover size") end,
+        separator = true,
+        title     = _lc("Cover size"),
+        info      = _lc("Scale for the cover thumbnails only.\nText and progress bar follow the module scale.\n100% is the default size."),
+        get       = function() return Config.getThumbScalePct("tbr", pfx) end,
+        set       = function(v) Config.setThumbScale(v, "tbr", pfx) end,
+        refresh   = refresh,
+    })
+    items[#items + 1] = {
+        text           = _lc("Progress bar"),
+        checked_func   = function() return showProgress(pfx) end,
+        enabled_func   = function() return not showOverlay(pfx) end,
+        keep_menu_open = true,
+        callback       = function()
+            G_reader_settings:saveSetting(pfx .. SETTING_PROGRESS, not showProgress(pfx))
+            refresh()
+        end,
+    }
+    items[#items + 1] = {
+        text           = _lc("Percentage text"),
+        checked_func   = function() return showText(pfx) end,
+        enabled_func   = function() return not showOverlay(pfx) end,
+        keep_menu_open = true,
+        callback       = function()
+            G_reader_settings:saveSetting(pfx .. SETTING_TEXT, not showText(pfx))
+            refresh()
+        end,
+    }
+    items[#items + 1] = {
+        text           = _lc("Percentage overlay on cover"),
+        checked_func   = function() return showOverlay(pfx) end,
+        keep_menu_open = true,
+        callback       = function()
+            G_reader_settings:saveSetting(pfx .. SETTING_OVERLAY, not showOverlay(pfx))
+            refresh()
+        end,
+    }
 
     -- Arrange TBR list — SortWidget with covers_fullscreen, same as Collections.
     items[#items + 1] = {
