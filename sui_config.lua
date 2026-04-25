@@ -935,7 +935,7 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
         end)
     end
 
-    -- CORREÇÃO: Verificar se a tentativa de extração já foi feita
+    -- If extraction was already attempted, use the cached result.
     if bookinfo and bookinfo.cover_fetched then
         if bookinfo.has_cover and bookinfo.cover_bb then
             local src_w = bookinfo.cover_bb:getWidth()
@@ -948,8 +948,8 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
             _bim_cover_count = _bim_cover_count + 1
             return bb
         else
-            -- Já tentámos extrair antes e sabemos que não tem capa (ou falhou).
-            -- Devolve nil imediatamente para não desencadear um poll loop.
+            -- Extraction was attempted before and found no cover (or failed).
+            -- Return nil immediately to avoid triggering a poll loop.
             return nil
         end
     end

@@ -1501,11 +1501,11 @@ function HomescreenWidget:_buildCtx()
         local SH = _getBookShared()
         if SH then
             if show_c or show_r then
-                -- coverdeck exibe até 5 slots (center + 2 side + 2 far) que podem
-                -- mapear para qualquer posição dentro de MAX_RECENT_FPS=10.
-                -- Prefetch 10 entradas para que ctx.prefetched cubra todos os slots
-                -- e getBookData() nunca caia no slow-path (DS.open síncrono) durante build().
-                local max_recent = (mod_cd and Registry.isEnabled(mod_cd, PFX)) and 10 or 5
+                -- The carousel always starts at index 1 (most recent book) and
+                -- navigates linearly, so the 5 visible slots never need data beyond
+                -- fps[1..5]. Prefetching 5 entries is sufficient; the scheduleIn(0)
+                -- warm-up in build() handles the next cover on demand after each swipe.
+                local max_recent = 5
                 -- show_finished is true if ANY active module has opted in.
                 local show_finished =
                     (mod_r  and Registry.isEnabled(mod_r,  PFX) and
@@ -1636,9 +1636,9 @@ function HomescreenWidget:_updateFooter(current_page, total_pages, topbar_on)
     local content_h = self._layout_content_h or (self._navbar_content_h or Screen:getHeight())
     -- Visibility rules for the homescreen footer:
     -- • Navpager on          → dot pager always (arrows handled externally)
-    -- • Geral = Predefinido  → show footer (dots or koreader chevrons)
-    -- • Geral = Oculto + Dot Pager → still show dots (user chose dots explicitly)
-    -- • Geral = Oculto + KOReader  → hide footer completely
+    -- • General = Default     → show footer (dots or koreader chevrons)
+    -- • General = Hidden + Dot Pager → still show dots (user chose dots explicitly)
+    -- • General = Hidden + KOReader  → hide footer completely
     local navpager_on   = Config.isNavpagerEnabled()
     local dot_pager_on  = Config.isDotPagerEnabled()  -- navbar_dotpager_always
     local pag_visible   = G_reader_settings:nilOrTrue("navbar_pagination_visible")
@@ -2388,6 +2388,14 @@ end
 
 -- Immediate full rebuild — bypasses debounce. Used by showSettingsMenu's
 -- onCloseWidget to guarantee the HS reflects changes before the next paint.
+-- Called by the coverdeck tappable after a swipe/tap navigation so that
+-- the session-scoped index survives the keep_cache=true rebuild.
+function HomescreenWidget:_setCoverdeckIdx(idx)
+    if self._ctx_cache then
+        self._ctx_cache.coverdeck_cur_idx = idx
+    end
+end
+
 function HomescreenWidget:_refreshImmediate(keep_cache)
     self._pending_refresh_token = {}
     self._refresh_scheduled     = false

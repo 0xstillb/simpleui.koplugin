@@ -1449,7 +1449,18 @@ function M.install()
             local menu_ref = self.menu
             local UIManager = require("ui/uimanager")
             UIManager:nextTick(function()
+                -- Always clear the flag first so the updateItems call below
+                -- does not re-enter the deferral path and schedule another tick.
                 menu_ref._fc_hs_deferred = false
+                -- If the HS is still visible the FM is still in the background;
+                -- covers will be built when the user navigates to the FM.
+                local HS2 = package.loaded["sui_homescreen"]
+                if HS2 and HS2._instance then return end
+                -- If the FM is already tearing down (e.g. user tapped a book on
+                -- the HS cover deck before this tick fired) there is nothing to
+                -- render — skip to avoid a stale updateItems on a dead menu.
+                local fm = package.loaded["apps/filemanager/filemanager"]
+                if not fm or not fm.instance or fm.instance.tearing_down then return end
                 menu_ref:updateItems()
             end)
             return

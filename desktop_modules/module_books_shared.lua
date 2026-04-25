@@ -1,7 +1,7 @@
 -- module_books_shared.lua — Simple UI
--- Helpers partilhados pelos módulos Currently Reading e Recent Books:
+-- Helpers shared by the Currently Reading and Recent Books modules:
 -- cover loading, book data, progress bar, prefetch, formatTimeLeft.
--- Não é um módulo — não tem id nem build(). Apenas utilitários partilhados.
+-- Not a module — no id or build(). Pure shared utilities.
 
 local Blitbuffer      = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
