@@ -39,6 +39,7 @@ local VerticalGroup    = require("ui/widget/verticalgroup")
 local VerticalSpan     = require("ui/widget/verticalspan")
 local logger           = require("logger")
 local _ = require("sui_i18n").translate
+local N_ = require("sui_i18n").ngettext
 local T                = require("ffi/util").template
 local Config           = require("sui_config")
 local Registry         = require("desktop_modules/moduleregistry")
@@ -1705,6 +1706,7 @@ function HomescreenWidget:_getHsCtxMenu()
         end,
         UIManager     = UIManager,
         _             = _,
+        N_            = N_,
         MAX_LABEL_LEN = Config.MAX_LABEL_LEN,
         _cover_picker = nil,
     }, {
