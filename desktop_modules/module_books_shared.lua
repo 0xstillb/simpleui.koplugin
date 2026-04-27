@@ -20,6 +20,47 @@ local Config          = require("sui_config")
 local SH = {}
 
 -- ---------------------------------------------------------------------------
+-- applyCustomProps — overlay custom_metadata.lua overrides onto doc_props.
+--
+-- KOReader stores user-edited title/author in a *separate* file called
+-- custom_metadata.lua (next to the main metadata.*.lua sidecar).  The
+-- structure inside it is:
+--   custom_props = { title = "...", authors = "..." }   <- user overrides
+--   doc_props    = { title = "...", authors = "..." }   <- original copy
+--
+-- DS.open() only reads the main sidecar, so ds:readSetting("doc_props")
+-- always returns the original (unedited) values.  We must open
+-- custom_metadata.lua separately and let its custom_props win.
+--
+-- This mirrors what BookInfo.extendProps() does in KOReader core, which is
+-- why History and the library show the correct custom values while SimpleUI
+-- homescreen modules (Currently Reading, Recent) showed the originals.
+-- ---------------------------------------------------------------------------
+local _DS_for_custom = nil
+local function _getDS()
+    if not _DS_for_custom then
+        local ok, ds = pcall(require, "docsettings")
+        if ok then _DS_for_custom = ds end
+    end
+    return _DS_for_custom
+end
+
+local function applyCustomProps(fp, title, authors)
+    local DS = _getDS()
+    if not DS then return title, authors end
+    -- findCustomMetadataFile is an instance method (:), so pass DS as self + fp as arg.
+    local ok, custom_file = pcall(DS.findCustomMetadataFile, DS, fp)
+    if not ok or not custom_file then return title, authors end
+    -- openSettingsFile is a STATIC function (.), not an instance method.
+    -- Correct call: DS.openSettingsFile(custom_file) — do NOT pass DS as first arg.
+    local ok2, cs = pcall(DS.openSettingsFile, custom_file)
+    if not ok2 or not cs then return title, authors end
+    local custom_props = cs:readSetting("custom_props") or {}
+    return custom_props.title   or title,
+           custom_props.authors or authors
+end
+
+-- ---------------------------------------------------------------------------
 -- Base dimensions — computed once at load time from device DPI.
 -- These are the 100%-scale reference values; never modify them at runtime.
 -- ---------------------------------------------------------------------------
@@ -262,6 +303,13 @@ local function _cacheGet(fp)
         _sidecar_cache[fp] = nil
         return nil
     end
+    -- Also invalidate when custom_metadata.lua has changed (user edited title/author).
+    -- custom_mtime is nil when no custom_metadata.lua existed at cache-fill time;
+    -- a new non-nil mtime means the file was just created → invalidate.
+    if e.custom_mtime ~= lfs.attributes(e.custom_path or "", "modification") then
+        _sidecar_cache[fp] = nil
+        return nil
+    end
     return e.data
 end
 
@@ -271,10 +319,23 @@ local function _cachePut(fp, source_candidate, data)
     if not source_candidate then return end
     local mtime = lfs.attributes(source_candidate, "modification")
     if not mtime then return end
+    -- Also record the custom_metadata.lua path and mtime so _cacheGet can
+    -- detect when the user edits title/author via "Book information".
+    local DS_c = _getDS()
+    local custom_path, custom_mtime
+    if DS_c then
+        local ok, cp = pcall(DS_c.findCustomMetadataFile, DS_c, fp)
+        if ok and cp then
+            custom_path  = cp
+            custom_mtime = lfs.attributes(cp, "modification")
+        end
+    end
     _sidecar_cache[fp] = {
         sidecar_path  = source_candidate,
         mtime         = mtime,
         preferred_loc = _prefLoc(),
+        custom_path   = custom_path,
+        custom_mtime  = custom_mtime,
         data          = data,
     }
 end
@@ -322,8 +383,7 @@ function SH.getBookData(filepath, prefetched)
                 md5             = ds:readSetting("partial_md5_checksum")
                 local rp        = ds:readSetting("doc_props") or {}
                 local rs        = ds:readSetting("stats") or {}
-                meta.title      = rp.title
-                meta.authors    = rp.authors
+                meta.title, meta.authors = applyCustomProps(filepath, rp.title, rp.authors)
                 stat_pages      = rs.pages
                 stat_total_time = rs.total_time_in_sec
             end
@@ -401,16 +461,30 @@ function SH.prefetchBooks(show_currently, show_recent, max_recent, show_finished
                 if DS then
                     local cached = _cacheGet(fp)
                     if cached then
-                        state.prefetched_data[fp] = cached
+                        -- Re-apply custom props on the cache-hit path.
+                        -- The cached title/authors may predate a metadata edit
+                        -- or predate this fix. applyCustomProps is cheap (stat calls only).
+                        local _ct, _ca = applyCustomProps(fp, cached.title, cached.authors)
+                        if _ct ~= cached.title or _ca ~= cached.authors then
+                            -- Clone only when values differ to avoid mutating the shared cache entry.
+                            local patched = {}
+                            for k, v in pairs(cached) do patched[k] = v end
+                            patched.title   = _ct
+                            patched.authors = _ca
+                            state.prefetched_data[fp] = patched
+                        else
+                            state.prefetched_data[fp] = cached
+                        end
                     else
                         local ok2, ds = pcall(DS.open, DS, fp)
                         if ok2 and ds then
                             local rp = ds:readSetting("doc_props") or {}
                             local rs = ds:readSetting("stats") or {}
+                            local _t, _a = applyCustomProps(fp, rp.title, rp.authors)
                             local data = {
                                 percent              = ds:readSetting("percent_finished") or 0,
-                                title                = rp.title,
-                                authors              = rp.authors,
+                                title                = _t,
+                                authors              = _a,
                                 doc_pages            = ds:readSetting("doc_pages"),
                                 partial_md5_checksum = ds:readSetting("partial_md5_checksum"),
                                 stat_pages           = rs.pages,
@@ -437,7 +511,17 @@ function SH.prefetchBooks(show_currently, show_recent, max_recent, show_finished
                     if cached then
                         pct = cached.percent
                         book_summary = cached.summary
-                        state.prefetched_data[fp] = cached
+                        -- Re-apply custom props on the cache-hit path.
+                        local _ct, _ca = applyCustomProps(fp, cached.title, cached.authors)
+                        if _ct ~= cached.title or _ca ~= cached.authors then
+                            local patched = {}
+                            for k, v in pairs(cached) do patched[k] = v end
+                            patched.title   = _ct
+                            patched.authors = _ca
+                            state.prefetched_data[fp] = patched
+                        else
+                            state.prefetched_data[fp] = cached
+                        end
                     else
                         local ok2, ds = pcall(DS.open, DS, fp)
                         if ok2 and ds then
@@ -445,10 +529,11 @@ function SH.prefetchBooks(show_currently, show_recent, max_recent, show_finished
                             book_summary = ds:readSetting("summary")
                             local rp = ds:readSetting("doc_props") or {}
                             local rs = ds:readSetting("stats") or {}
+                            local _t, _a = applyCustomProps(fp, rp.title, rp.authors)
                             local data = {
                                 percent              = pct,
-                                title                = rp.title,
-                                authors              = rp.authors,
+                                title                = _t,
+                                authors              = _a,
                                 doc_pages            = ds:readSetting("doc_pages"),
                                 partial_md5_checksum = ds:readSetting("partial_md5_checksum"),
                                 stat_pages           = rs.pages,

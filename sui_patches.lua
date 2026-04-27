@@ -2,17 +2,29 @@
 -- Monkey-patches applied to KOReader classes on plugin load.
 -- All patches are reversible; teardownAll() restores every original function.
 
-local UIManager    = require("ui/uimanager")
-local Device       = require("device")
-local Screen       = Device.screen
-local logger       = require("logger")
-local _ = require("sui_i18n").translate
-local FocusManager = require("ui/widget/focusmanager")
+local UIManager = require("ui/uimanager")
+local Device    = require("device")
+local Screen    = Device.screen
+local logger    = require("logger")
+local _         = require("sui_i18n").translate
 
 local Config    = require("sui_config")
 local UI        = require("sui_core")
 local Bottombar = require("sui_bottombar")
-local Titlebar  = require("sui_titlebar")
+
+-- Lazy: only needed on D-pad devices, inside gesture event handlers.
+local _FocusManager
+local function FocusManager()
+    _FocusManager = _FocusManager or require("ui/widget/focusmanager")
+    return _FocusManager
+end
+
+-- Lazy: only needed inside patchFileManagerClass callbacks, not at load time.
+local _Titlebar
+local function Titlebar()
+    _Titlebar = _Titlebar or require("sui_titlebar")
+    return _Titlebar
+end
 
 local M = {}
 
@@ -316,7 +328,7 @@ function M.patchFileManagerClass(plugin)
         -- it is a no-op on subsequent calls (e.g. after a rotation reinit) unless
         -- the flag is cleared first.  The restore step is safe on a brand-new
         -- title_bar because apply() overwrites all geometry afterwards anyway.
-        Titlebar.reapply(fm_self)
+        Titlebar().reapply(fm_self)
 
         -- Use _navbar_inner to prevent wrapping the wrapper on repeated
         -- setupLayout calls (e.g. after closing a book). Exception: when the
@@ -538,7 +550,7 @@ function M.patchFileManagerClass(plugin)
                     local fm2i = liveFM()
                     local fc   = FC and fm2i and fm2i.file_chooser
                     if fc and fc.layout then
-                        fc:moveFocusTo(1, #fc.layout, FocusManager.FORCED_FOCUS)
+                        fc:moveFocusTo(1, #fc.layout, FocusManager().FORCED_FOCUS)
                     end
                 end
             end
@@ -1267,7 +1279,7 @@ function M.patchUIManagerShow(plugin)
         end
 
         -- Apply title-bar customisations for injected widgets.
-        Titlebar.applyToInjected(widget)
+        Titlebar().applyToInjected(widget)
 
         local tabs      = Config.loadTabConfig()
         local tabs_set  = tabsToSet(tabs)
@@ -1366,7 +1378,7 @@ function M.patchUIManagerShow(plugin)
                     if dy > 0 and self_w.page == (self_w.total_pages or 1) then
                         M.enterNavbarKbFocus(function()
                             if self_w.layout and self_w.moveFocusTo then
-                                self_w:moveFocusTo(1, #self_w.layout, FocusManager.FORCED_FOCUS)
+                                self_w:moveFocusTo(1, #self_w.layout, FocusManager().FORCED_FOCUS)
                             end
                         end)
                         return true
@@ -1619,7 +1631,16 @@ function M.patchUIManagerClose(plugin)
                             _hs_pending_after_reader = true
                         end
                         -- Refresh the file list in the background after the session.
-                        UIManager:scheduleIn(0, function()
+                        -- When the homescreen will be shown on top of the FM
+                        -- (return_to_folder=false), delay the refresh so it does not
+                        -- compete with the HS widget build and first e-ink paint in the
+                        -- same event-loop tick. The user is looking at the HS, not the FM
+                        -- file list, so a short delay is imperceptible.
+                        -- When returning directly to the folder (return_to_folder=true),
+                        -- the FM is the visible target — refresh immediately so the list
+                        -- reflects any changes from the reading session.
+                        local refresh_delay = return_to_folder and 0 or 0.5
+                        UIManager:scheduleIn(refresh_delay, function()
                             local fm_ref = liveFM()
                             if fm_ref and fm_ref.file_chooser then
                                 fm_ref.file_chooser:refreshPath()

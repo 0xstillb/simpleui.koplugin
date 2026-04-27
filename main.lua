@@ -81,6 +81,85 @@ function SimpleUIPlugin:init()
         -- something invalid, so the common no-op case costs only a few reads.
         Config.sanitizeQASlots()
         self.ui.menu:registerToMainMenu(self)
+
+        -- -------------------------------------------------------------------
+        -- Tab injection: add a dedicated "Simple UI" tab to the KOReader menu
+        -- bar (both FileManager and Reader), positioned right after the
+        -- QuickSettings tab.  We patch setUpdateItemTable on the menu class
+        -- once — the flag __sui_tab_patched prevents double-patching on
+        -- subsequent plugin reloads within the same KOReader session.
+        -- This mirrors the approach used by Zen UI.
+        --
+        -- sui_menu is loaded lazily: the pre-bootstrap buildTabItems below
+        -- triggers require("sui_menu") on the first menu open, which registers
+        -- the icon and installs the real buildTabItems before the tab is built.
+        -- This removes sui_menu (and its lfs + IconWidget introspection) from
+        -- the critical startup path.
+        -- -------------------------------------------------------------------
+        do
+            -- Pre-bootstrap buildTabItems: installed now so setUpdateItemTable
+            -- always finds a callable.  On first call it loads sui_menu (which
+            -- replaces this function with the real cached version) and
+            -- delegates immediately to the real implementation.
+            if not rawget(SimpleUIPlugin, "buildTabItems") then
+                SimpleUIPlugin.buildTabItems = function(plugin_self)
+                    -- Trigger the full sui_menu load + installer.
+                    -- addToMainMenu is the bootstrap stub; calling it with a
+                    -- dummy table runs the installer, which replaces both
+                    -- addToMainMenu and buildTabItems on SimpleUIPlugin.
+                    plugin_self:addToMainMenu({})
+                    -- Delegate to the real buildTabItems now installed.
+                    local real = rawget(SimpleUIPlugin, "buildTabItems")
+                    if type(real) == "function" then
+                        return real(plugin_self)
+                    end
+                    return {}
+                end
+            end
+
+            local plugin_self = self
+
+            local function find_quicksettings_pos(tab_table)
+                for i, tab in ipairs(tab_table) do
+                    for _, field in ipairs({ "id", "name", "icon" }) do
+                        local v = tab[field]
+                        if type(v) == "string" then
+                            local norm = v:lower():gsub("[%s_%-]+", "")
+                            if norm == "quicksettings" then return i end
+                        end
+                    end
+                end
+                return nil
+            end
+
+            local function inject_sui_tab(menu_class)
+                if not menu_class or menu_class.__sui_tab_patched then return end
+                menu_class.__sui_tab_patched = true
+                local orig_sut = menu_class.setUpdateItemTable
+                menu_class.setUpdateItemTable = function(m_self)
+                    orig_sut(m_self)
+                    if type(m_self.tab_item_table) ~= "table" then return end
+                    local build_fn = rawget(SimpleUIPlugin, "buildTabItems")
+                    if type(build_fn) ~= "function" then return end
+                    local ok, tab_items = pcall(build_fn, plugin_self)
+                    if not ok or type(tab_items) ~= "table" then return end
+                    -- Mirror exactly how Zen UI does it: set icon as a field on
+                    -- the items array itself (not a wrapper table), then insert
+                    -- that array directly into tab_item_table.
+                    tab_items.icon = "simpleui_settings"
+                    local qs_pos     = find_quicksettings_pos(m_self.tab_item_table)
+                    local insert_pos = qs_pos and (qs_pos + 1) or 1
+                    table.insert(m_self.tab_item_table, insert_pos, tab_items)
+                end
+            end
+
+            -- Inject the SUI tab only into FileManager (and HomeScreen), not into
+            -- the Reader menu. The SimpleUI settings tab should not appear while
+            -- a document is open.
+            local ok_fm, FileManagerMenu = pcall(require, "apps/filemanager/filemanagermenu")
+            if ok_fm and FileManagerMenu then inject_sui_tab(FileManagerMenu) end
+        end
+        -- -------------------------------------------------------------------
         if G_reader_settings:nilOrTrue("simpleui_enabled") then
             Patches.installAll(self)
             -- Register the TBR button in the Library hold dialog (single book).
@@ -295,6 +374,13 @@ function SimpleUIPlugin:onTeardown()
     -- (files replaced on disk without restarting KOReader) picks up new code
     -- on the next plugin load, instead of reusing the old in-memory versions.
     _menu_installer = nil
+    -- Nil buildTabItems so its upvalue cache (_tab_items_cache) is released,
+    -- and the patch can rebuild fresh on next plugin load.
+    SimpleUIPlugin.buildTabItems = nil
+    -- Clear the tab-injection flag so the patch can be re-applied if the
+    -- plugin is reloaded within the same KOReader session.
+    local fm_menu = package.loaded["apps/filemanager/filemanagermenu"]
+    if fm_menu then fm_menu.__sui_tab_patched = nil end
     for _, mod in ipairs(_PLUGIN_MODULES) do
         package.loaded[mod] = nil
     end
@@ -584,6 +670,52 @@ function SimpleUIPlugin:onCloseDocument()
     -- via shouldRunTimer, so this is safe to call unconditionally here.
     if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
         Topbar.scheduleRefresh(self, 0)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- onBookMetadataChanged — fired by KOReader when the user edits a book's
+-- title, author, or other doc_props via "Book information" → "Set custom".
+--
+-- SimpleUI reads title/author from the sidecar's doc_props via prefetchBooks()
+-- and caches the result in both the sidecar mtime-cache (_sidecar_cache in
+-- module_books_shared) and the homescreen's _cached_books_state table.
+--
+-- Without this handler, editing metadata has no visible effect on the
+-- Currently Reading (and Recent) modules: _cached_books_state is never
+-- cleared, so prefetchBooks() is never re-called, and the old stale values
+-- are shown even though the sidecar on disk is already correct.
+--
+-- Fix: when BookMetadataChanged fires, flush the sidecar cache entirely (we
+-- don't know which file was edited from the event alone; prop_updated carries
+-- a filepath key in some call-sites but not all, so a full flush is safest
+-- and cheap — it only costs one extra DS.open on the next render), discard
+-- _cached_books_state to force a full prefetchBooks() pass, and schedule a
+-- homescreen refresh so the corrected metadata appears immediately.
+-- ---------------------------------------------------------------------------
+function SimpleUIPlugin:onBookMetadataChanged(_prop_updated)
+    if self._simpleui_suspended then return end
+
+    local HS = package.loaded["sui_homescreen"]
+    if not HS then return end
+
+    -- Flush the entire sidecar mtime-cache.  The next prefetchBooks() will
+    -- re-open each sidecar and repopulate the cache from fresh disk state.
+    local SH = package.loaded["desktop_modules/module_books_shared"]
+    if SH and SH.invalidateSidecarCache then
+        SH.invalidateSidecarCache()  -- nil → flush all
+    end
+
+    -- Discard the cached prefetch state on both the class and any live
+    -- instance so _buildCtx() is forced to call prefetchBooks() from scratch.
+    if HS._instance then
+        HS._instance._cached_books_state = nil
+    end
+    HS._cached_books_state = nil
+
+    -- Trigger a homescreen refresh (keep_cache=false, books_only=true).
+    if HS._instance then
+        HS.refresh(false, true)
     end
 end
 

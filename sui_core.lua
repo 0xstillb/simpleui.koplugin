@@ -3,10 +3,14 @@
 -- OverlapGroup composition (wrapWithNavbar), topbar replacement
 -- and access to the UIManager window stack.
 
-local FrameContainer = require("ui/widget/container/framecontainer")
-local OverlapGroup   = require("ui/widget/overlapgroup")
-local LineWidget     = require("ui/widget/linewidget")
-local Geom           = require("ui/geometry")
+-- Widget classes — required lazily on first use (wrapWithNavbar and friends).
+-- Blitbuffer, Device, Screen and logger are kept eager because they are used
+-- at module level to compute the shared layout constants below.
+local _FrameContainer, _OverlapGroup, _LineWidget, _Geom
+local function FrameContainer() _FrameContainer = _FrameContainer or require("ui/widget/container/framecontainer"); return _FrameContainer end
+local function OverlapGroup()   _OverlapGroup   = _OverlapGroup   or require("ui/widget/overlapgroup");             return _OverlapGroup   end
+local function LineWidget()     _LineWidget     = _LineWidget     or require("ui/widget/linewidget");               return _LineWidget     end
+local function Geom()           _Geom           = _Geom           or require("ui/geometry");                        return _Geom           end
 local Blitbuffer     = require("ffi/blitbuffer")
 local Device         = require("device")
 local Screen         = Device.screen
@@ -199,12 +203,12 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
         inner_widget.dimen.h = content_h
         inner_widget.dimen.w = screen_w
     else
-        inner_widget.dimen = Geom:new{ w = screen_w, h = content_h }
+        inner_widget.dimen = Geom():new{ w = screen_w, h = content_h }
     end
 
     local bar_idx
     local overlap_items = {
-        dimen = Geom:new{ w = screen_w, h = screen_h },
+        dimen = Geom():new{ w = screen_w, h = screen_h },
         inner_widget,
     }
 
@@ -218,12 +222,12 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
         local side_m = Bottombar.SIDE_M()
         -- Separator line with the same lateral padding as the bar itself,
         -- matching the original per-tab separator visual exactly.
-        local sep_line = LineWidget:new{
-            dimen      = Geom:new{ w = screen_w - side_m * 2, h = sep_h },
+        local sep_line = LineWidget():new{
+            dimen      = Geom():new{ w = screen_w - side_m * 2, h = sep_h },
             background = sep_color,
         }
-        local bot_pad = LineWidget:new{
-            dimen      = Geom:new{ w = screen_w, h = Bottombar.BOT_SP() },
+        local bot_pad = LineWidget():new{
+            dimen      = Geom():new{ w = screen_w, h = Bottombar.BOT_SP() },
             background = Blitbuffer.COLOR_WHITE,
         }
         -- Separator sits immediately above the bar content (flush with the indicator).
@@ -243,10 +247,10 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
     end
 
     local topbar_idx       = topbar_on and #overlap_items or nil
-    local navbar_container = OverlapGroup:new(overlap_items)
+    local navbar_container = OverlapGroup():new(overlap_items)
 
     return navbar_container,
-           FrameContainer:new{
+           FrameContainer():new{
                bordersize = 0, padding = 0, margin = 0,
                background = Blitbuffer.COLOR_WHITE,
                navbar_container,

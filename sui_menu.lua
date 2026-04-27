@@ -32,6 +32,39 @@ local Bottombar = require("sui_bottombar")
 
 return function(SimpleUIPlugin)
 
+-- Register the plugin icon into KOReader's icon cache once per installer call
+-- (guarded by the icons_path["simpleui_settings"] nil-check so it is a no-op
+-- on subsequent reloads within the same session).
+-- Moved here from module-level so it only runs when the menu is first opened,
+-- not at plugin startup.
+do
+    local src = debug.getinfo(1, "S").source or ""
+    local plugin_root = (src:sub(1,1) == "@") and src:sub(2):match("^(.*)/[^/]+$") or nil
+    if plugin_root then
+        local lfs_ok, lfs = pcall(require, "libs/libkoreader-lfs")
+        local iw_ok,  iw  = pcall(require, "ui/widget/iconwidget")
+        if lfs_ok and iw_ok and iw then
+            local iw_init = rawget(iw, "init")
+            if type(iw_init) == "function" then
+                local icons_path
+                for i = 1, 64 do
+                    local uname, uval = debug.getupvalue(iw_init, i)
+                    if uname == nil then break end
+                    if uname == "ICONS_PATH" and type(uval) == "table" then
+                        icons_path = uval; break
+                    end
+                end
+                if icons_path and not icons_path["simpleui_settings"] then
+                    local p = plugin_root .. "/icons/settings.svg"
+                    if lfs.attributes(p, "mode") == "file" then
+                        icons_path["simpleui_settings"] = p
+                    end
+                end
+            end
+        end
+    end
+end
+
 SimpleUIPlugin.addToMainMenu = function(self, menu_items)
     local plugin = self
 
@@ -1931,289 +1964,282 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 separator = true,
             },
             {
-                text               = _("Settings"),
+                text = _("Top"),
+                sub_item_table = {
+                    { text = _("Status Bar"), sub_item_table_func = makeTopbarMenu   },
+                    { text = _("Title Bar"),  sub_item_table_func = makeTitleBarMenu },
+                },
+            },
+            { text = _("Home Screen"), sub_item_table_func = makeHomescreenMenu },
+            {
+                text = _("Bottom"),
+                sub_item_table = {
+                    { text = _("Navigation Bar"), sub_item_table_func = makeNavbarMenu          },
+                    { text = _("Pagination Bar"), sub_item_table_func = makePaginationBarMenu   },
+                },
+            },
+            {
+                text_func = function()
+                    local n   = #getCustomQAList()
+                    local rem = MAX_CUSTOM_QA - n
+                    if n == 0 then return _("Quick Actions") end
+                    if rem <= 0 then
+                        return string.format(_("Quick Actions  (%d/%d — at limit)"), n, MAX_CUSTOM_QA)
+                    end
+                    return string.format(_("Quick Actions  (%d/%d — %d left)"), n, MAX_CUSTOM_QA, rem)
+                end,
+                sub_item_table_func = makeQuickActionsMenu,
+            },
+            {
+                text = _("Library"),
                 sub_item_table_func = function()
+                    local ok_fc, FC = pcall(require, "sui_foldercovers")
+                    if not ok_fc or not FC then return {} end
+                    -- Refresh the mosaic view immediately after any setting change.
+                    local function _refreshFC()
+                        local FM = package.loaded["apps/filemanager/filemanager"]
+                        local fm = FM and FM.instance
+                        if fm and fm.file_chooser then
+                            -- refreshPath rebuilds the item list from scratch and
+                            -- passes it through switchItemTable, which is where the
+                            -- series-grouping hook (_sgProcessItemTable) runs.
+                            -- updateItems alone skips that hook, so grouping would
+                            -- only appear after a manual refresh.
+                            fm.file_chooser:refreshPath()
+                        end
+                    end
                     return {
                         {
-                            text = _("Top"),
-                            sub_item_table = {
-                                { text = _("Status Bar"), sub_item_table_func = makeTopbarMenu   },
-                                { text = _("Title Bar"),  sub_item_table_func = makeTitleBarMenu },
-                            },
-                        },
-                        { text = _("Home Screen"), sub_item_table_func = makeHomescreenMenu },
-                        {
-                            text = _("Bottom"),
-                            sub_item_table = {
-                                { text = _("Navigation Bar"), sub_item_table_func = makeNavbarMenu          },
-                                { text = _("Pagination Bar"), sub_item_table_func = makePaginationBarMenu   },
-                            },
-                        },
-                        {
-                            text_func = function()
-                                local n   = #getCustomQAList()
-                                local rem = MAX_CUSTOM_QA - n
-                                if n == 0 then return _("Quick Actions") end
-                                if rem <= 0 then
-                                    return string.format(_("Quick Actions  (%d/%d — at limit)"), n, MAX_CUSTOM_QA)
-                                end
-                                return string.format(_("Quick Actions  (%d/%d — %d left)"), n, MAX_CUSTOM_QA, rem)
+                            text         = _("Browse by Author / Series"),
+                            checked_func = function()
+                                local ok_bm, BM = pcall(require, "sui_browsemeta")
+                                return ok_bm and BM and BM.isEnabled()
                             end,
-                            sub_item_table_func = makeQuickActionsMenu,
+                            separator    = true,
+                            callback     = function()
+                                local ok_bm, BM = pcall(require, "sui_browsemeta")
+                                if not (ok_bm and BM) then return end
+                                local enabling = not BM.isEnabled()
+                                BM.setEnabled(enabling)
+                                -- Teardown titlebar FIRST so the fc.genItemTable hook
+                                -- (which holds BM upvalues) is removed before
+                                -- BM.uninstall() nils _orig_genItemTable.
+                                local FM2 = package.loaded["apps/filemanager/filemanager"]
+                                local fm2 = FM2 and FM2.instance
+                                if fm2 then
+                                    local ok_tb, TB = pcall(require, "sui_titlebar")
+                                    if ok_tb and TB then pcall(TB.restore, fm2) end
+                                end
+                                if enabling then
+                                    pcall(BM.install)
+                                else
+                                    -- Exit virtual tree before uninstalling.
+                                    local fc2 = fm2 and fm2.file_chooser
+                                    if fc2 and fc2.path then
+                                        if fc2.path:find("/\u{E257}", 1, true) then
+                                            BM.exitToNormal(fc2, fm2)
+                                        end
+                                    end
+                                    -- Safety net: ensure "normal" is persisted even
+                                    -- when the FC was already on a real path (so
+                                    -- exitToNormal was skipped) or if exitToNormal
+                                    -- errored before reaching setSavedMode. Must run
+                                    -- before uninstall so the patches are still intact
+                                    -- when changeToPath fires from exitToNormal above.
+                                    BM.setSavedMode("normal")
+                                    pcall(BM.uninstall)
+                                end
+                                -- Rebuild titlebar (with or without browse button).
+                                if fm2 then
+                                    local ok_tb, TB = pcall(require, "sui_titlebar")
+                                    if ok_tb and TB then pcall(TB.apply, fm2) end
+                                end
+                            end,
                         },
                         {
-                            text = _("Library"),
-                            sub_item_table_func = function()
-                                local ok_fc, FC = pcall(require, "sui_foldercovers")
-                                if not ok_fc or not FC then return {} end
-                                -- Refresh the mosaic view immediately after any setting change.
-                                local function _refreshFC()
-                                    local FM = package.loaded["apps/filemanager/filemanager"]
-                                    local fm = FM and FM.instance
-                                    if fm and fm.file_chooser then
-                                        -- refreshPath rebuilds the item list from scratch and
-                                        -- passes it through switchItemTable, which is where the
-                                        -- series-grouping hook (_sgProcessItemTable) runs.
-                                        -- updateItems alone skips that hook, so grouping would
-                                        -- only appear after a manual refresh.
-                                        fm.file_chooser:refreshPath()
-                                    end
+                            text         = _("Folder Covers"),
+                            checked_func = function() return FC.isEnabled() end,
+                            separator    = true,
+                            callback     = function()
+                                local enabling = not FC.isEnabled()
+                                FC.setEnabled(enabling)
+                                -- Install or uninstall the MosaicMenuItem patch
+                                -- at toggle time so that third-party user-patches
+                                -- (e.g. 2-browser-folder-cover.lua) that rely on
+                                -- userpatch.getUpValue(MosaicMenuItem.update, …)
+                                -- find the original function when FC is off.
+                                if enabling then
+                                    pcall(FC.install)
+                                else
+                                    pcall(FC.uninstall)
                                 end
-                                return {
-                                    {
-                                        text         = _("Browse by Author / Series"),
-                                        checked_func = function()
-                                            local ok_bm, BM = pcall(require, "sui_browsemeta")
-                                            return ok_bm and BM and BM.isEnabled()
-                                        end,
-                                        separator    = true,
-                                        callback     = function()
-                                            local ok_bm, BM = pcall(require, "sui_browsemeta")
-                                            if not (ok_bm and BM) then return end
-                                            local enabling = not BM.isEnabled()
-                                            BM.setEnabled(enabling)
-                                            -- Teardown titlebar FIRST so the fc.genItemTable hook
-                                            -- (which holds BM upvalues) is removed before
-                                            -- BM.uninstall() nils _orig_genItemTable.
-                                            local FM2 = package.loaded["apps/filemanager/filemanager"]
-                                            local fm2 = FM2 and FM2.instance
-                                            if fm2 then
-                                                local ok_tb, TB = pcall(require, "sui_titlebar")
-                                                if ok_tb and TB then pcall(TB.restore, fm2) end
-                                            end
-                                            if enabling then
-                                                pcall(BM.install)
-                                            else
-                                                -- Exit virtual tree before uninstalling.
-                                                local fc2 = fm2 and fm2.file_chooser
-                                                if fc2 and fc2.path then
-                                                    if fc2.path:find("/\u{E257}", 1, true) then
-                                                        BM.exitToNormal(fc2, fm2)
-                                                    end
-                                                end
-                                                -- Safety net: ensure "normal" is persisted even
-                                                -- when the FC was already on a real path (so
-                                                -- exitToNormal was skipped) or if exitToNormal
-                                                -- errored before reaching setSavedMode. Must run
-                                                -- before uninstall so the patches are still intact
-                                                -- when changeToPath fires from exitToNormal above.
-                                                BM.setSavedMode("normal")
-                                                pcall(BM.uninstall)
-                                            end
-                                            -- Rebuild titlebar (with or without browse button).
-                                            if fm2 then
-                                                local ok_tb, TB = pcall(require, "sui_titlebar")
-                                                if ok_tb and TB then pcall(TB.apply, fm2) end
-                                            end
-                                        end,
-                                    },
-                                    {
-                                        text         = _("Folder Covers"),
-                                        checked_func = function() return FC.isEnabled() end,
-                                        separator    = true,
-                                        callback     = function()
-                                            local enabling = not FC.isEnabled()
-                                            FC.setEnabled(enabling)
-                                            -- Install or uninstall the MosaicMenuItem patch
-                                            -- at toggle time so that third-party user-patches
-                                            -- (e.g. 2-browser-folder-cover.lua) that rely on
-                                            -- userpatch.getUpValue(MosaicMenuItem.update, …)
-                                            -- find the original function when FC is off.
-                                            if enabling then
-                                                pcall(FC.install)
-                                            else
-                                                pcall(FC.uninstall)
-                                            end
-                                            _refreshFC()
-                                        end,
-                                    },
-                                    {
-                                        text           = _("Group Books by Series"),
-                                        checked_func   = function() return FC.getSeriesGrouping() end,
-                                        keep_menu_open = true,
-                                        enabled_func   = function() return FC.isEnabled() end,
-                                        callback       = function()
-                                            FC.setSeriesGrouping(not FC.getSeriesGrouping())
-                                            FC.invalidateCache()
-                                            _refreshFC()
-                                        end,
-                                    },
-                                    {
-                                        text         = _("Overlays"),
-                                        enabled_func = function() return FC.isEnabled() end,
-                                        sub_item_table = {
-                                            {
-                                                text         = _("Number of Books in Folder"),
-                                                sub_item_table = {
-                                                    {
-                                                        text           = _("Hidden"),
-                                                        checked_func   = function() return FC.getBadgeHidden() end,
-                                                        keep_menu_open = true,
-                                                        separator      = true,
-                                                        callback       = function()
-                                                            FC.setBadgeHidden(not FC.getBadgeHidden())
-                                                            FC.invalidateCache()
-                                                            _refreshFC()
-                                                        end,
-                                                    },
-                                                    {
-                                                        text           = _("Top"),
-                                                        radio          = true,
-                                                        checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "top" end,
-                                                        enabled_func   = function() return not FC.getBadgeHidden() end,
-                                                        keep_menu_open = true,
-                                                        callback       = function() FC.setBadgePosition("top"); _refreshFC() end,
-                                                    },
-                                                    {
-                                                        text           = _("Bottom"),
-                                                        radio          = true,
-                                                        checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "bottom" end,
-                                                        enabled_func   = function() return not FC.getBadgeHidden() end,
-                                                        keep_menu_open = true,
-                                                        callback       = function() FC.setBadgePosition("bottom"); _refreshFC() end,
-                                                    },
-                                                },
-                                            },
-                                            {
-                                                text           = _("Number of Pages"),
-                                                checked_func   = function() return FC.getOverlayPages() end,
-                                                keep_menu_open = true,
-                                                callback       = function() FC.setOverlayPages(not FC.getOverlayPages()); FC.invalidateCache(); _refreshFC() end,
-                                            },
-                                            {
-                                                text           = _("Series Index"),
-                                                checked_func   = function() return FC.getOverlaySeries() end,
-                                                keep_menu_open = true,
-                                                callback       = function() FC.setOverlaySeries(not FC.getOverlaySeries()); FC.invalidateCache(); _refreshFC() end,
-                                            },
-                                            {
-                                                text         = _("Folder Name"),
-                                                sub_item_table = {
-                                                    {
-                                                        text           = _("Hidden"),
-                                                        checked_func   = function() return FC.getLabelMode() == "hidden" end,
-                                                        keep_menu_open = true,
-                                                        separator      = true,
-                                                        callback       = function()
-                                                            FC.setLabelMode(FC.getLabelMode() == "hidden" and "overlay" or "hidden")
-                                                            _refreshFC()
-                                                        end,
-                                                    },
-                                                    {
-                                                        text           = _("Transparent"),
-                                                        checked_func   = function() return FC.getLabelStyle() == "alpha" end,
-                                                        enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
-                                                        keep_menu_open = true,
-                                                        separator      = true,
-                                                        callback       = function()
-                                                            FC.setLabelStyle(FC.getLabelStyle() == "alpha" and "solid" or "alpha")
-                                                            _refreshFC()
-                                                        end,
-                                                    },
-                                                    {
-                                                        text           = _("Top"),
-                                                        radio          = true,
-                                                        checked_func   = function() return FC.getLabelPosition() == "top" end,
-                                                        enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
-                                                        keep_menu_open = true,
-                                                        callback       = function() FC.setLabelPosition("top"); _refreshFC() end,
-                                                    },
-                                                    {
-                                                        text           = _("Center"),
-                                                        radio          = true,
-                                                        checked_func   = function() return FC.getLabelPosition() == "center" end,
-                                                        enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
-                                                        keep_menu_open = true,
-                                                        callback       = function() FC.setLabelPosition("center"); _refreshFC() end,
-                                                    },
-                                                    {
-                                                        text           = _("Bottom"),
-                                                        radio          = true,
-                                                        checked_func   = function() return FC.getLabelPosition() == "bottom" end,
-                                                        enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
-                                                        keep_menu_open = true,
-                                                        callback       = function() FC.setLabelPosition("bottom"); _refreshFC() end,
-                                                    },
-                                                    (function()
-                                                        local Config = require("sui_config")
-                                                        return Config.makeScaleItem({
-                                                            text_func    = function() return _("Text size") end,
-                                                            enabled_func = function() return FC.getLabelMode() ~= "hidden" end,
-                                                            title        = _("Folder Name Text Size"),
-                                                            info         = _("Scale for the folder name overlay text.\n100% is the default size."),
-                                                            get          = function() return FC.getLabelScalePct() end,
-                                                            set          = function(v) FC.setLabelScale(v) end,
-                                                            refresh      = function() FC.invalidateCache(); _refreshFC() end,
-                                                        })
-                                                    end)(),
-                                                },
-                                            },
+                                _refreshFC()
+                            end,
+                        },
+                        {
+                            text           = _("Group Books by Series"),
+                            checked_func   = function() return FC.getSeriesGrouping() end,
+                            keep_menu_open = true,
+                            enabled_func   = function() return FC.isEnabled() end,
+                            callback       = function()
+                                FC.setSeriesGrouping(not FC.getSeriesGrouping())
+                                FC.invalidateCache()
+                                _refreshFC()
+                            end,
+                        },
+                        {
+                            text         = _("Overlays"),
+                            enabled_func = function() return FC.isEnabled() end,
+                            sub_item_table = {
+                                {
+                                    text         = _("Number of Books in Folder"),
+                                    sub_item_table = {
+                                        {
+                                            text           = _("Hidden"),
+                                            checked_func   = function() return FC.getBadgeHidden() end,
+                                            keep_menu_open = true,
+                                            separator      = true,
+                                            callback       = function()
+                                                FC.setBadgeHidden(not FC.getBadgeHidden())
+                                                FC.invalidateCache()
+                                                _refreshFC()
+                                            end,
+                                        },
+                                        {
+                                            text           = _("Top"),
+                                            radio          = true,
+                                            checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "top" end,
+                                            enabled_func   = function() return not FC.getBadgeHidden() end,
+                                            keep_menu_open = true,
+                                            callback       = function() FC.setBadgePosition("top"); _refreshFC() end,
+                                        },
+                                        {
+                                            text           = _("Bottom"),
+                                            radio          = true,
+                                            checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "bottom" end,
+                                            enabled_func   = function() return not FC.getBadgeHidden() end,
+                                            keep_menu_open = true,
+                                            callback       = function() FC.setBadgePosition("bottom"); _refreshFC() end,
                                         },
                                     },
-                                    {
-                                        text           = _("Uniformize Covers (2:3)"),
-                                        checked_func   = function() return FC.getCoverMode() == "2_3" end,
-                                        enabled_func   = function() return FC.isEnabled() end,
-                                        keep_menu_open = true,
-                                        callback       = function()
-                                            FC.setCoverMode(FC.getCoverMode() == "2_3" and "default" or "2_3")
-                                            _refreshFC()
-                                        end,
+                                },
+                                {
+                                    text           = _("Number of Pages"),
+                                    checked_func   = function() return FC.getOverlayPages() end,
+                                    keep_menu_open = true,
+                                    callback       = function() FC.setOverlayPages(not FC.getOverlayPages()); FC.invalidateCache(); _refreshFC() end,
+                                },
+                                {
+                                    text           = _("Series Index"),
+                                    checked_func   = function() return FC.getOverlaySeries() end,
+                                    keep_menu_open = true,
+                                    callback       = function() FC.setOverlaySeries(not FC.getOverlaySeries()); FC.invalidateCache(); _refreshFC() end,
+                                },
+                                {
+                                    text         = _("Folder Name"),
+                                    sub_item_table = {
+                                        {
+                                            text           = _("Hidden"),
+                                            checked_func   = function() return FC.getLabelMode() == "hidden" end,
+                                            keep_menu_open = true,
+                                            separator      = true,
+                                            callback       = function()
+                                                FC.setLabelMode(FC.getLabelMode() == "hidden" and "overlay" or "hidden")
+                                                _refreshFC()
+                                            end,
+                                        },
+                                        {
+                                            text           = _("Transparent"),
+                                            checked_func   = function() return FC.getLabelStyle() == "alpha" end,
+                                            enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
+                                            keep_menu_open = true,
+                                            separator      = true,
+                                            callback       = function()
+                                                FC.setLabelStyle(FC.getLabelStyle() == "alpha" and "solid" or "alpha")
+                                                _refreshFC()
+                                            end,
+                                        },
+                                        {
+                                            text           = _("Top"),
+                                            radio          = true,
+                                            checked_func   = function() return FC.getLabelPosition() == "top" end,
+                                            enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
+                                            keep_menu_open = true,
+                                            callback       = function() FC.setLabelPosition("top"); _refreshFC() end,
+                                        },
+                                        {
+                                            text           = _("Center"),
+                                            radio          = true,
+                                            checked_func   = function() return FC.getLabelPosition() == "center" end,
+                                            enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
+                                            keep_menu_open = true,
+                                            callback       = function() FC.setLabelPosition("center"); _refreshFC() end,
+                                        },
+                                        {
+                                            text           = _("Bottom"),
+                                            radio          = true,
+                                            checked_func   = function() return FC.getLabelPosition() == "bottom" end,
+                                            enabled_func   = function() return FC.getLabelMode() ~= "hidden" end,
+                                            keep_menu_open = true,
+                                            callback       = function() FC.setLabelPosition("bottom"); _refreshFC() end,
+                                        },
+                                        (function()
+                                            local Config = require("sui_config")
+                                            return Config.makeScaleItem({
+                                                text_func    = function() return _("Text size") end,
+                                                enabled_func = function() return FC.getLabelMode() ~= "hidden" end,
+                                                title        = _("Folder Name Text Size"),
+                                                info         = _("Scale for the folder name overlay text.\n100% is the default size."),
+                                                get          = function() return FC.getLabelScalePct() end,
+                                                set          = function(v) FC.setLabelScale(v) end,
+                                                refresh      = function() FC.invalidateCache(); _refreshFC() end,
+                                            })
+                                        end)(),
                                     },
-                                    {
-                                        text           = _("Hide selection underline"),
-                                        checked_func   = function() return FC.getHideUnderline() end,
-                                        enabled_func   = function() return FC.isEnabled() end,
-                                        keep_menu_open = true,
-                                        callback       = function() FC.setHideUnderline(not FC.getHideUnderline()); _refreshFC() end,
-                                    },
-                                    {
-                                        text           = _("Placeholder cover for bookless folders"),
-                                        checked_func   = function() return FC.getSubfolderCover() end,
-                                        enabled_func   = function() return FC.isEnabled() end,
-                                        keep_menu_open = true,
-                                        callback       = function()
-                                            FC.setSubfolderCover(not FC.getSubfolderCover())
-                                            -- Disable recursive search when the parent option is turned off.
-                                            if not FC.getSubfolderCover() then
-                                                FC.setRecursiveCover(false)
-                                            end
-                                            FC.invalidateCache()
-                                            _refreshFC()
-                                        end,
-                                    },
-                                    {
-                                        text           = _("Scan subfolders for cover"),
-                                        checked_func   = function() return FC.getRecursiveCover() end,
-                                        enabled_func   = function() return FC.isEnabled() and FC.getSubfolderCover() end,
-                                        keep_menu_open = true,
-                                        callback       = function()
-                                            FC.setRecursiveCover(not FC.getRecursiveCover())
-                                            FC.invalidateCache()
-                                            _refreshFC()
-                                        end,
-                                    },
-                                }
+                                },
+                            },
+                        },
+                        {
+                            text           = _("Uniformize Covers (2:3)"),
+                            checked_func   = function() return FC.getCoverMode() == "2_3" end,
+                            enabled_func   = function() return FC.isEnabled() end,
+                            keep_menu_open = true,
+                            callback       = function()
+                                FC.setCoverMode(FC.getCoverMode() == "2_3" and "default" or "2_3")
+                                _refreshFC()
+                            end,
+                        },
+                        {
+                            text           = _("Hide selection underline"),
+                            checked_func   = function() return FC.getHideUnderline() end,
+                            enabled_func   = function() return FC.isEnabled() end,
+                            keep_menu_open = true,
+                            callback       = function() FC.setHideUnderline(not FC.getHideUnderline()); _refreshFC() end,
+                        },
+                        {
+                            text           = _("Placeholder cover for bookless folders"),
+                            checked_func   = function() return FC.getSubfolderCover() end,
+                            enabled_func   = function() return FC.isEnabled() end,
+                            keep_menu_open = true,
+                            callback       = function()
+                                FC.setSubfolderCover(not FC.getSubfolderCover())
+                                -- Disable recursive search when the parent option is turned off.
+                                if not FC.getSubfolderCover() then
+                                    FC.setRecursiveCover(false)
+                                end
+                                FC.invalidateCache()
+                                _refreshFC()
+                            end,
+                        },
+                        {
+                            text           = _("Scan subfolders for cover"),
+                            checked_func   = function() return FC.getRecursiveCover() end,
+                            enabled_func   = function() return FC.isEnabled() and FC.getSubfolderCover() end,
+                            keep_menu_open = true,
+                            callback       = function()
+                                FC.setRecursiveCover(not FC.getRecursiveCover())
+                                FC.invalidateCache()
+                                _refreshFC()
                             end,
                         },
                     }
@@ -2266,5 +2292,23 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         },
     }
 end -- addToMainMenu
+
+-- Build the item list for the dedicated SimpleUI settings tab.
+-- Called by the tab-injection patch in main.lua every time the menu opens.
+-- We call the real addToMainMenu once and cache the sub_item_table; subsequent
+-- calls reuse the cache so we don't reconstruct hundreds of closures on every
+-- menu open (which would be expensive on low-memory e-readers).
+-- The cache is cleared by onTeardown via SimpleUIPlugin.buildTabItems = nil.
+local _tab_items_cache = nil
+SimpleUIPlugin.buildTabItems = function(self)
+    if _tab_items_cache then return _tab_items_cache end
+    local fake_items = {}
+    -- addToMainMenu at this point is the REAL function installed by the
+    -- installer (not the bootstrap stub), so this is safe to call directly.
+    SimpleUIPlugin.addToMainMenu(self, fake_items)
+    local entry = fake_items.simpleui
+    _tab_items_cache = entry and entry.sub_item_table or {}
+    return _tab_items_cache
+end
 
 end -- installer function

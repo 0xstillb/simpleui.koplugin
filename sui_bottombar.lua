@@ -1,17 +1,24 @@
 -- bottombar.lua — Simple UI
 -- Bottom tab bar: dimensions, widget construction, touch zones, navigation, rebuild helpers.
 
-local FrameContainer  = require("ui/widget/container/framecontainer")
-local CenterContainer = require("ui/widget/container/centercontainer")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local VerticalGroup   = require("ui/widget/verticalgroup")
-local VerticalSpan    = require("ui/widget/verticalspan")
-local LineWidget      = require("ui/widget/linewidget")
-local OverlapGroup    = require("ui/widget/overlapgroup")
-local TextWidget      = require("ui/widget/textwidget")
-local ImageWidget     = require("ui/widget/imagewidget")
-local Geom            = require("ui/geometry")
-local Font            = require("ui/font")
+-- Widget classes — required lazily on first use so that require("sui_bottombar")
+-- at plugin load time does not force all these modules off disk.
+-- Each accessor caches its result in a module-local upvalue; subsequent calls
+-- are a single nil-check + table field read, with zero I/O.
+local _FrameContainer, _CenterContainer, _HorizontalGroup, _VerticalGroup
+local _VerticalSpan, _LineWidget, _OverlapGroup, _TextWidget, _ImageWidget
+local _Geom, _Font
+local function FrameContainer()  _FrameContainer  = _FrameContainer  or require("ui/widget/container/framecontainer");  return _FrameContainer  end
+local function CenterContainer() _CenterContainer = _CenterContainer or require("ui/widget/container/centercontainer"); return _CenterContainer end
+local function HorizontalGroup() _HorizontalGroup = _HorizontalGroup or require("ui/widget/horizontalgroup");           return _HorizontalGroup end
+local function VerticalGroup()   _VerticalGroup   = _VerticalGroup   or require("ui/widget/verticalgroup");             return _VerticalGroup   end
+local function VerticalSpan()    _VerticalSpan    = _VerticalSpan    or require("ui/widget/verticalspan");              return _VerticalSpan    end
+local function LineWidget()      _LineWidget      = _LineWidget      or require("ui/widget/linewidget");                return _LineWidget      end
+local function OverlapGroup()    _OverlapGroup    = _OverlapGroup    or require("ui/widget/overlapgroup");              return _OverlapGroup    end
+local function TextWidget()      _TextWidget      = _TextWidget      or require("ui/widget/textwidget");                return _TextWidget      end
+local function ImageWidget()     _ImageWidget     = _ImageWidget     or require("ui/widget/imagewidget");               return _ImageWidget     end
+local function Geom()            _Geom            = _Geom            or require("ui/geometry");                         return _Geom            end
+local function Font()            _Font            = _Font            or require("ui/font");                             return _Font            end
 local Blitbuffer      = require("ffi/blitbuffer")
 local UIManager       = require("ui/uimanager")
 local _InfoMessage
@@ -200,9 +207,9 @@ end
 -- The visible separator line is drawn full-width in wrapWithNavbar (sui_core.lua).
 function M.buildTabCell(action_id, active, tab_w, mode)
     local action = Config.getActionById(action_id)
-    local vg     = VerticalGroup:new{ align = "center" }
+    local vg     = VerticalGroup():new{ align = "center" }
 
-    if not _vspan_icon_top then _vspan_icon_top = VerticalSpan:new{ width = M.ICON_TOP_SP() } end
+    if not _vspan_icon_top then _vspan_icon_top = VerticalSpan():new{ width = M.ICON_TOP_SP() } end
     vg[#vg + 1] = _vspan_icon_top
 
     if mode == "icons" or mode == "both" then
@@ -210,18 +217,18 @@ function M.buildTabCell(action_id, active, tab_w, mode)
         if nerd_char then
             local icon_sz = M.ICON_SZ()
             -- Use tab_w as the outer width so the nerd glyph is centred
-            -- in exactly the same horizontal space as an SVG ImageWidget.
-            vg[#vg + 1] = CenterContainer:new{
-                dimen = Geom:new{ w = tab_w, h = icon_sz },
-                TextWidget:new{
+            -- in exactly the same horizontal space as an SVG ImageWidget().
+            vg[#vg + 1] = CenterContainer():new{
+                dimen = Geom():new{ w = tab_w, h = icon_sz },
+                TextWidget():new{
                     text    = nerd_char,
-                    face    = Font:getFace("symbols", math.floor(icon_sz * 0.6)),
+                    face    = Font():getFace("symbols", math.floor(icon_sz * 0.6)),
                     fgcolor = Blitbuffer.COLOR_BLACK,
                     padding = 0,
                 },
             }
         else
-            vg[#vg + 1] = ImageWidget:new{
+            vg[#vg + 1] = ImageWidget():new{
                 file    = action.icon,
                 width   = M.ICON_SZ(),
                 height  = M.ICON_SZ(),
@@ -233,38 +240,38 @@ function M.buildTabCell(action_id, active, tab_w, mode)
 
     if mode == "text" or mode == "both" then
         if mode == "both" then
-            if not _vspan_icon_txt then _vspan_icon_txt = VerticalSpan:new{ width = M.ICON_TXT_SP() } end
+            if not _vspan_icon_txt then _vspan_icon_txt = VerticalSpan():new{ width = M.ICON_TXT_SP() } end
             vg[#vg + 1] = _vspan_icon_txt
         end
-        vg[#vg + 1] = TextWidget:new{
+        vg[#vg + 1] = TextWidget():new{
             text    = action.label,
-            face    = Font:getFace("cfont", M.LABEL_FS()),
+            face    = Font():getFace("cfont", M.LABEL_FS()),
             fgcolor = active and Blitbuffer.COLOR_BLACK or M.COLOR_INACTIVE_TEXT,
         }
     end
 
     if mode == "icons" then
-        vg[#vg + 1] = VerticalSpan:new{ width = M.ICON_TOP_SP() + M.ICON_TXT_SP() }
+        vg[#vg + 1] = VerticalSpan():new{ width = M.ICON_TOP_SP() + M.ICON_TXT_SP() }
     end
 
     -- The content (icon/label) is centred inside BAR_H.
-    local content = CenterContainer:new{
-        dimen = Geom:new{ w = tab_w, h = M.BAR_H() },
+    local content = CenterContainer():new{
+        dimen = Geom():new{ w = tab_w, h = M.BAR_H() },
         vg,
     }
 
     -- The active indicator is pinned to the very top of the cell via OverlapGroup,
     -- independent of the vertical centering of the content.
     local indic_color = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
-    local indic = LineWidget:new{
-        dimen      = Geom:new{ w = tab_w, h = M.INDIC_H() },
+    local indic = LineWidget():new{
+        dimen      = Geom():new{ w = tab_w, h = M.INDIC_H() },
         background = indic_color,
         overlap_offset = { 0, 0 },
     }
 
-    return OverlapGroup:new{
+    return OverlapGroup():new{
         allow_mirroring = false,
-        dimen           = Geom:new{ w = tab_w, h = M.BAR_H() },
+        dimen           = Geom():new{ w = tab_w, h = M.BAR_H() },
         content,
         indic,
     }
@@ -288,9 +295,9 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
     local label     = is_prev and _("Prev") or _("Next")
     local color     = enabled and _NAVPAGER_COLOR_ACTIVE or _navpagerColor()
 
-    local vg = VerticalGroup:new{ align = "center" }
+    local vg = VerticalGroup():new{ align = "center" }
 
-    if not _vspan_icon_top then _vspan_icon_top = VerticalSpan:new{ width = M.ICON_TOP_SP() } end
+    if not _vspan_icon_top then _vspan_icon_top = VerticalSpan():new{ width = M.ICON_TOP_SP() } end
     vg[#vg + 1] = _vspan_icon_top
 
     -- References to mutable widgets stored on the OverlapGroup so
@@ -299,7 +306,7 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
 
     if mode == "icons" or mode == "both" then
         -- dim is read at paintTo time — set directly, no paintTo override needed.
-        iw = ImageWidget:new{
+        iw = ImageWidget():new{
             file    = icon_file,
             width   = M.ICON_SZ(),
             height  = M.ICON_SZ(),
@@ -312,37 +319,37 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
 
     if mode == "text" or mode == "both" then
         if mode == "both" then
-            if not _vspan_icon_txt then _vspan_icon_txt = VerticalSpan:new{ width = M.ICON_TXT_SP() } end
+            if not _vspan_icon_txt then _vspan_icon_txt = VerticalSpan():new{ width = M.ICON_TXT_SP() } end
             vg[#vg + 1] = _vspan_icon_txt
         end
-        tw = TextWidget:new{
+        tw = TextWidget():new{
             text    = label,
-            face    = Font:getFace("cfont", M.LABEL_FS()),
+            face    = Font():getFace("cfont", M.LABEL_FS()),
             fgcolor = color,
         }
         vg[#vg + 1] = tw
     end
 
     if mode == "icons" then
-        vg[#vg + 1] = VerticalSpan:new{ width = M.ICON_TOP_SP() + M.ICON_TXT_SP() }
+        vg[#vg + 1] = VerticalSpan():new{ width = M.ICON_TOP_SP() + M.ICON_TXT_SP() }
     end
 
-    local content = CenterContainer:new{
-        dimen = Geom:new{ w = tab_w, h = M.BAR_H() },
+    local content = CenterContainer():new{
+        dimen = Geom():new{ w = tab_w, h = M.BAR_H() },
         vg,
     }
 
     -- Arrow cells never have an active indicator; pin a white (invisible)
     -- LineWidget to the top for visual consistency with buildTabCell.
-    local indic = LineWidget:new{
-        dimen          = Geom:new{ w = tab_w, h = M.INDIC_H() },
+    local indic = LineWidget():new{
+        dimen          = Geom():new{ w = tab_w, h = M.INDIC_H() },
         background     = Blitbuffer.COLOR_WHITE,
         overlap_offset = { 0, 0 },
     }
 
-    local og = OverlapGroup:new{
+    local og = OverlapGroup():new{
         allow_mirroring = false,
-        dimen           = Geom:new{ w = tab_w, h = M.BAR_H() },
+        dimen           = Geom():new{ w = tab_w, h = M.BAR_H() },
         content,
         indic,
     }
@@ -355,7 +362,7 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
 end
 
 -- Updates the Prev/Next arrow cells of an existing navpager bar in-place.
--- Mutates only ImageWidget.dim and TextWidget.fgcolor on the two arrow cells
+-- Mutates only ImageWidget().dim and TextWidget().fgcolor on the two arrow cells
 -- rather than rebuilding the entire bar (~37 widget allocations per rebuild).
 -- Returns true when the update was applied, false when the bar structure is
 -- missing or unrecognised (caller must fall back to a full replaceBar).
@@ -418,23 +425,22 @@ function M.buildBarWidget(active_action_id, tab_config, num_tabs, mode)
         hg_args[#hg_args + 1] = M.buildTabCell(action_id, action_id == active_action_id, widths[i], mode)
     end
 
-    return FrameContainer:new{
+    return FrameContainer():new{
         bordersize    = 0,
         padding       = 0,
         padding_left  = side_m,
         padding_right = side_m,
         margin        = 0,
         background    = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup:new(hg_args),
+        HorizontalGroup():new(hg_args),
     }
 end
 
 -- Navpager-mode bar with explicit has_prev / has_next flags.
 -- Called both from buildBarWidget (which resolves flags via getNavpagerState)
 -- and from the updatePageInfo hook (which passes pre-snapshotted values).
-local HorizontalSpan = require("ui/widget/horizontalspan")
-
 function M.buildBarWidgetWithArrows(active_action_id, tab_config, mode, has_prev, has_next)
+    local HorizontalSpan = require("ui/widget/horizontalspan")
     mode = mode or Config.getNavbarMode()
     local screen_w  = Screen:getWidth()
     local side_m    = M.SIDE_M()
@@ -464,14 +470,14 @@ function M.buildBarWidgetWithArrows(active_action_id, tab_config, mode, has_prev
     hg_args[#hg_args + 1] = M.buildNavpagerArrowCell(false, has_next, widths[total_n], mode)
 
     -- Tag so updateNavpagerArrows knows whether this bar has arrows.
-    local fc = FrameContainer:new{
+    local fc = FrameContainer():new{
         bordersize    = 0,
         padding       = 0,
         padding_left  = side_m,
         padding_right = side_m,
         margin        = 0,
         background    = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup:new(hg_args),
+        HorizontalGroup():new(hg_args),
     }
     fc._navpager_has_arrows = true
     return fc
@@ -499,25 +505,25 @@ function M.buildBarWidgetWithKeyFocus(active_action_id, tab_config, kbfocus_idx,
 		if i == kbfocus_idx then
 			local tw    = widths[i]
 			local tab_h = M.BAR_H()
-			cell = OverlapGroup:new{
-				dimen = Geom:new{ w = tw, h = tab_h },
+			cell = OverlapGroup():new{
+				dimen = Geom():new{ w = tw, h = tab_h },
 				cell,
-				LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK },
-				LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, tab_h - bw} },
-				LineWidget:new{ dimen = Geom:new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK },
-				LineWidget:new{ dimen = Geom:new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK, overlap_offset = {tw - bw, 0} },
+				LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK },
+				LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, tab_h - bw} },
+				LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK },
+				LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK, overlap_offset = {tw - bw, 0} },
 			}
 		end
 		hg_args[#hg_args + 1] = cell
 	end
-	return FrameContainer:new{
+	return FrameContainer():new{
 		bordersize    = 0,
 		padding       = 0,
 		padding_left  = side_m,
 		padding_right = side_m,
 		margin        = 0,
 		background    = Blitbuffer.COLOR_WHITE,
-		HorizontalGroup:new(hg_args),
+		HorizontalGroup():new(hg_args),
 	}
 end
 
