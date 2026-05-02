@@ -1491,6 +1491,59 @@ end
 function HomescreenWidget:_buildCtx()
     local inner_w = self._layout_inner_w or (Screen:getWidth() - SIDE_PAD * 2)
 
+    -- ---------------------------------------------------------------------------
+    -- cfg bundle (Sugestão 1): pre-read all per-module settings once here so
+    -- module build() functions receive them via ctx.cfg and never call
+    -- Config.get* or G_reader_settings during widget construction.
+    --
+    -- cfg is also promoted cross-instance (Sugestão 2) via Homescreen._cfg_cache:
+    -- settings never change mid-session (only from menus, which call refresh()),
+    -- so the cached bundle from the previous HS instance is always valid.
+    -- When the user changes a setting, ctx_menu.refresh() calls _refresh(false),
+    -- which clears _cfg_cache before rebuilding — see _refresh() below.
+    -- ---------------------------------------------------------------------------
+    local cfg = self._cfg_cache
+    if not cfg then
+        cfg = {
+            currently = {
+                scale       = Config.getModuleScale("currently", PFX),
+                thumb_scale = Config.getThumbScale("currently", PFX),
+                lbl_scale   = Config.getItemLabelScale("currently", PFX),
+                bar_style   = G_reader_settings:readSetting(PFX .. "currently_bar_style") or "with_pct",
+                stats_style = G_reader_settings:readSetting(PFX .. "currently_stats_style") or "default",
+                elem_order  = G_reader_settings:readSetting(PFX .. "currently_elem_order"),
+                show = {
+                    title    = G_reader_settings:nilOrTrue(PFX .. "currently_show_title"),
+                    author   = G_reader_settings:nilOrTrue(PFX .. "currently_show_author"),
+                    progress = G_reader_settings:nilOrTrue(PFX .. "currently_show_progress"),
+                    percent  = G_reader_settings:nilOrTrue(PFX .. "currently_show_percent"),
+                    days     = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_days"),
+                    time     = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_time"),
+                    remain   = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_remaining"),
+                },
+            },
+            coverdeck = {
+                scale       = Config.getModuleScale("coverdeck", PFX),
+                thumb_scale = Config.getThumbScale("coverdeck", PFX),
+                lbl_scale   = Config.getItemLabelScale("coverdeck", PFX),
+                source      = G_reader_settings:readSetting(PFX .. "coverdeck_source") or "recent",
+                title_pos   = G_reader_settings:readSetting(PFX .. "coverdeck_title_position") or "below",
+                show_finished = G_reader_settings:readSetting(PFX .. "coverdeck_show_finished") == true,
+                show = {
+                    title    = G_reader_settings:nilOrTrue(PFX .. "flow_show_title"),
+                    author   = G_reader_settings:nilOrTrue(PFX .. "flow_show_author"),
+                    progress = G_reader_settings:nilOrTrue(PFX .. "flow_show_progress"),
+                    percent  = G_reader_settings:nilOrTrue(PFX .. "flow_show_percent"),
+                    days     = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_days"),
+                    time     = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_time"),
+                    remain   = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_remaining"),
+                },
+                elem_order  = G_reader_settings:readSetting(PFX .. "coverdeck_elem_order"),
+            },
+        }
+        self._cfg_cache = cfg
+    end
+
     local mod_c  = Registry.get("currently")
     local mod_r  = Registry.get("recent")
     local mod_cd = Registry.get("coverdeck")
@@ -1620,6 +1673,10 @@ function HomescreenWidget:_buildCtx()
         -- expose for empty-state check
         _show_c = show_c, _show_r = show_r,
         _has_content = (bs.current_fp and show_c) or (#bs.recent_fps > 0 and show_r),
+        -- Pre-read settings bundle (Sugestão 1). Modules read ctx.cfg.<mod_id>
+        -- instead of calling Config.get* / G_reader_settings during build().
+        -- Built once per _buildCtx() call and reused via _ctx_cache / _cfg_cache.
+        cfg = cfg,
     }
 end
 
@@ -2362,6 +2419,12 @@ function HomescreenWidget:_refresh(keep_cache, books_only)
     if not books_only then
         self._enabled_mods_cache = nil
         self._ctx_cache          = nil
+        -- Full invalidation: settings may have changed. Clear the cfg bundle so
+        -- _buildCtx() re-reads all settings on the next render.
+        -- Also clear the cross-instance cache so a tab-switch after a settings
+        -- change does not restore the pre-change bundle.
+        self._cfg_cache       = nil
+        Homescreen._cfg_cache = nil
     end
     if self._refresh_scheduled then return end
     self._refresh_scheduled = true
@@ -2549,6 +2612,7 @@ function HomescreenWidget:onSetRotationMode(mode)
     -- it into the new widget, skipping the expensive prefetchBooks() IO.
     Homescreen._cached_books_state = self._cached_books_state
     Homescreen._current_page       = self._current_page
+    Homescreen._cfg_cache          = self._cfg_cache
 
     -- Signal that a rotation reopen is pending. Our setupLayout patch in
     -- sui_patches.lua reads this flag and sets _hs_autoopen_pending on the
@@ -2585,13 +2649,15 @@ function HomescreenWidget:onCloseWidget()
     -- On a real close (FM exit, quit) we clear it so stale data is never used
     -- after a session boundary.
     if self._navbar_closing_intentionally then
-        -- Tab-switch: preserve book data and current page for the next open.
+        -- Tab-switch: preserve book data, current page, and cfg bundle for the next open.
         Homescreen._cached_books_state = self._cached_books_state
         Homescreen._current_page       = self._current_page
+        Homescreen._cfg_cache          = self._cfg_cache
     else
         -- Real close: discard stale data.
         Homescreen._cached_books_state = nil
         Homescreen._current_page       = nil
+        Homescreen._cfg_cache          = nil
     end
 
     -- Always free per-instance widget state — the widget is always destroyed,
@@ -2696,6 +2762,10 @@ function Homescreen.show(on_qa_tap, on_goal_tap)
         _cached_books_state = Homescreen._cached_books_state,
         -- Restore the last active page so tab-switching does not reset to p.1.
         _current_page       = Homescreen._current_page or 1,
+        -- Transfer the pre-read settings bundle so _buildCtx() skips all
+        -- Config.get* / G_reader_settings reads when settings haven't changed.
+        -- Cleared by _refresh(false) (settings menu) and on real close.
+        _cfg_cache          = Homescreen._cfg_cache,
     }
     Homescreen._instance = w
     UIManager:show(w)
@@ -2720,8 +2790,9 @@ function Homescreen.close()
         UIManager:close(Homescreen._instance)
         Homescreen._instance = nil
     end
-    -- Discard the promoted book cache on an explicit close (e.g. FM exit).
+    -- Discard the promoted book cache and cfg bundle on an explicit close (e.g. FM exit).
     Homescreen._cached_books_state = nil
+    Homescreen._cfg_cache          = nil
 end
 
 -- Clears the section-label widget cache.

@@ -275,10 +275,18 @@ local function _tick()
     -- that keeps firing throughout the entire suspend period.
     -- HomescreenWidget:onResume calls ClockMod.scheduleRefresh() to restart the
     -- chain on wakeup — no action needed here.
-    -- NOTE: hs._suspended is set by HomescreenWidget:onSuspend(). The field
-    -- _simpleui_suspended lives on the SimpleUIPlugin, not on the widget —
-    -- checking it here was a dead guard (always nil on hs).
-    if hs._suspended then
+    --
+    -- Two complementary guards:
+    -- • hs._suspended — set by HomescreenWidget:onSuspend() when the Suspend
+    --   event reaches the widget via broadcastEvent.
+    -- • plugin._simpleui_suspended — set by SimpleUIPlugin:onSuspend(), which
+    --   runs in the same broadcastEvent pass but may arrive before or after the
+    --   widget handler depending on stack order. Checking both closes the race
+    --   window where the UIManager has already dequeued this timer for execution
+    --   in the current tick before either flag was set.
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local plugin = FM and FM.instance and FM.instance._simpleui_plugin
+    if hs._suspended or (plugin and plugin._simpleui_suspended) then
         return
     end
 
@@ -368,11 +376,8 @@ local function _tick()
     -- os.time() at the same moment and calculate the same next-tick delay.
     -- After this call, both chains reschedule to the identical next boundary.
     --
-    -- Access the plugin via FM.instance._simpleui_plugin — the same pattern used
-    -- in sui_bottombar.lua. Guard against topbar being disabled or FM not yet ready.
+    -- `plugin` was resolved above for the suspend guard — reuse it here.
     -- ---------------------------------------------------------------------------
-    local FM = package.loaded["apps/filemanager/filemanager"]
-    local plugin = FM and FM.instance and FM.instance._simpleui_plugin
     if plugin and not plugin._simpleui_suspended then
         local Topbar = package.loaded["sui_topbar"]
         if Topbar then

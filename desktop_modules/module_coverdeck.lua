@@ -347,10 +347,13 @@ end
 
 function M.build(w, ctx)
     local pfx    = ctx.pfx
-    local source = getSource(pfx)
 
-    logger.dbg("coverdeck: build source=" .. tostring(source) 
-        .. " current_fp=" .. tostring(ctx.current_fp) 
+    -- Use pre-read settings bundle from ctx when available (normal HS path).
+    local c = ctx.cfg and ctx.cfg.coverdeck
+    local source = c and c.source or getSource(pfx)
+
+    logger.dbg("coverdeck: build source=" .. tostring(source)
+        .. " current_fp=" .. tostring(ctx.current_fp)
         .. " recent_fps=" .. tostring(ctx.recent_fps and #ctx.recent_fps or "nil"))
 
     local fps = getFps(source, ctx)
@@ -363,13 +366,41 @@ function M.build(w, ctx)
     if not SH then return nil end
 
     -- Scales
-    local scale       = Config.getModuleScale("coverdeck", pfx)
-    local thumb_scale = Config.getThumbScale("coverdeck", pfx)
-    local lbl_scale   = Config.getItemLabelScale("coverdeck", pfx)
+    local scale       = c and c.scale       or Config.getModuleScale("coverdeck", pfx)
+    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("coverdeck", pfx)
+    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("coverdeck", pfx)
     local cs          = scale * thumb_scale
 
-    -- Visibility flags (single source of truth shared with getHeight)
-    local vis           = getVisibleElements(pfx)
+    -- Visibility flags (use bundle when available, fall back to direct reads)
+    local vis
+    if c and c.show then
+        -- Build vis from the pre-read bundle, mirroring getVisibleElements().
+        local stats_order_saved = c.elem_order
+        local stats_order = (type(stats_order_saved) == "table" and #stats_order_saved > 0)
+            and (function()
+                local seen, result = {}, {}
+                for _, v in ipairs(stats_order_saved) do
+                    if _ELEM_LABELS[v] then seen[v] = true; result[#result+1] = v end
+                end
+                for _, v in ipairs(_ELEM_DEFAULT_ORDER) do
+                    if not seen[v] then result[#result+1] = v end
+                end
+                return result
+            end)()
+            or _ELEM_DEFAULT_ORDER
+        local has_stat = false
+        for _, key in ipairs(stats_order) do
+            if c.show[key] then has_stat = true; break end
+        end
+        vis = {
+            title       = c.show.title,
+            progress    = c.show.progress,
+            has_stat    = has_stat,
+            stats_order = stats_order,
+        }
+    else
+        vis = getVisibleElements(pfx)
+    end
     local show_title    = vis.title
     local show_progress = vis.progress
     local stats_order   = vis.stats_order
@@ -486,7 +517,7 @@ function M.build(w, ctx)
     local title_fs  = math.floor(Screen:scaleBySize(12) * scale * lbl_scale)
     local info_fs   = math.floor(Screen:scaleBySize(8)  * scale * lbl_scale)
     local bar_h     = math.max(1, math.floor(Screen:scaleBySize(7) * scale))
-    local title_pos = getTitlePos(pfx)
+    local title_pos = c and c.title_pos or getTitlePos(pfx)
     local face_title = Font:getFace("smallinfofont", math.max(8, title_fs))
     local face_info  = Font:getFace("smallinfofont", math.max(7, info_fs))
 

@@ -2291,6 +2291,17 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
             },
         },
     }
+    -- Update banner: injected as the first item of the main menu
+    -- when a newer version is available. Uses in-memory cache (zero I/O).
+    -- Kept separate from the table literal so sub_item_table remains a
+    -- plain table — buildTabItems reads it directly and requires that.
+    do
+        local ok_u, Updater = pcall(require, "sui_updater")
+        local banner = (ok_u and Updater) and Updater.build_update_banner_item() or nil
+        if banner then
+            table.insert(menu_items.simpleui.sub_item_table, 1, banner)
+        end
+    end
 end -- addToMainMenu
 
 -- Build the item list for the dedicated SimpleUI settings tab.

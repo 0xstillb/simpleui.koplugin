@@ -555,6 +555,13 @@ end
 
 function M.refresh(plugin)
     if not shouldRefreshTopbar(plugin) then return end
+    -- shouldRefreshTopbar already checks _simpleui_suspended, but there is a
+    -- narrow race on Kobo: the UIManager may have already dequeued this timer
+    -- for execution in the current event-loop tick *before* onSuspend ran and
+    -- set _simpleui_suspended = true. shouldRefreshTopbar therefore passed with
+    -- the flag still false. Re-check immediately after, before doing any work,
+    -- so we never build a widget or call setDirty during the suspend transition.
+    if plugin and plugin._simpleui_suspended then return end
     local UI    = require("sui_core")
     local stack = UI.getWindowStack()  -- read once
     -- Each widget gets its own topbar instance. Sharing a single object across

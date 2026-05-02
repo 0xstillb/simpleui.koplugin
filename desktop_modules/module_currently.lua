@@ -273,8 +273,9 @@ local _ELEM_LABELS = {
 
 -- Returns the user-saved element order, falling back to the default.
 -- Unknown keys are dropped; new keys are appended at the tail.
-local function _getElemOrder(pfx)
-    local saved = G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY)
+-- _resolveElemOrder accepts an already-read value (from ctx.cfg bundle or
+-- a direct G_reader_settings read) so the caller controls when the read happens.
+local function _resolveElemOrder(saved)
     if type(saved) ~= "table" or #saved == 0 then
         return _ELEM_DEFAULT_ORDER
     end
@@ -286,6 +287,10 @@ local function _getElemOrder(pfx)
         if not seen[v] then result[#result+1] = v end
     end
     return result
+end
+
+local function _getElemOrder(pfx)
+    return _resolveElemOrder(G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY))
 end
 
 
@@ -405,9 +410,27 @@ function M.build(w, ctx)
     local SH = getSH()
     if not SH then return nil end
 
-    local scale       = Config.getModuleScale("currently", ctx.pfx)
-    local thumb_scale = Config.getThumbScale("currently", ctx.pfx)
-    local lbl_scale   = Config.getItemLabelScale("currently", ctx.pfx)
+    -- Use pre-read settings bundle from ctx when available (normal HS path).
+    -- Falls back to direct reads only when called outside the homescreen.
+    local c = ctx.cfg and ctx.cfg.currently
+    local pfx         = ctx.pfx
+    local scale       = c and c.scale       or Config.getModuleScale("currently", pfx)
+    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently", pfx)
+    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently", pfx)
+    local bar_style   = c and c.bar_style   or getBarStyle(pfx)
+    local stats_style = c and c.stats_style or getStatsStyle(pfx)
+    local show        = c and c.show or {
+        title    = _showElem(pfx, "title"),
+        author   = _showElem(pfx, "author"),
+        progress = _showElem(pfx, "progress"),
+        percent  = _showElem(pfx, "percent"),
+        days     = _showElem(pfx, "book_days"),
+        time     = _showElem(pfx, "book_time"),
+        remain   = _showElem(pfx, "book_remaining"),
+    }
+    -- elem_order: use cached raw value from bundle; resolve lazily.
+    local elem_order  = _resolveElemOrder(c and c.elem_order or G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY))
+
     local D           = SH.getDims(scale, thumb_scale)
 
     -- Scale gaps (layout scale only).
@@ -431,18 +454,6 @@ function M.build(w, ctx)
     local face_pct    = Font:getFace("smallinfofont", pct_fs)
     local face_s      = Font:getFace("smallinfofont", stats_fs)
 
-    -- Read all visibility flags up-front to avoid repeated settings lookups.
-    local pfx = ctx.pfx
-    local show = {
-        title    = _showElem(pfx, "title"),
-        author   = _showElem(pfx, "author"),
-        progress = _showElem(pfx, "progress"),
-        percent  = _showElem(pfx, "percent"),
-        days     = _showElem(pfx, "book_days"),
-        time     = _showElem(pfx, "book_time"),
-        remain   = _showElem(pfx, "book_remaining"),
-    }
-
     -- Use prefetched book data. After onCloseDocument, _cached_books_state is
     -- cleared and prefetchBooks() re-reads the sidecar, so this is always fresh.
     local prefetched_entry = ctx.prefetched and ctx.prefetched[ctx.current_fp]
@@ -462,15 +473,9 @@ function M.build(w, ctx)
         bstats = fetchBookStats(book_md5, ctx.db_conn, ctx)
     end
 
-    local bar_style   = getBarStyle(pfx)
-    local stats_style = getStatsStyle(pfx)
-
     -- Pre-resolve the inline-pct font face once for buildProgressBarWithPct.
     local face_inlinepct = Font:getFace("smallinfofont",
         math.max(7, math.floor(_BASE_INLINEPCT_FS * scale * lbl_scale)))
-
-    -- Capture element order once; reused by both the main loop and compact inner loop.
-    local elem_order = _getElemOrder(pfx)
 
     -- Flag to ensure the compact stats row is rendered only once,
     -- at the position of the first visible stats element in the Arrange order.

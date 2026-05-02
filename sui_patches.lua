@@ -1601,6 +1601,26 @@ function M.patchUIManagerClose(plugin)
 
         local result = orig_close(um_self, widget, ...)
 
+        -- Lazy FM refresh: consume the flag set when the reader closed with
+        -- return_to_folder=false. The HS was on top — now that it is closing,
+        -- the FM is about to become visible. Schedule refreshPath() for the
+        -- next event-loop tick so it runs after the HS teardown is complete.
+        -- Guard: only when the HS is closing normally (not intentionally, which
+        -- is the tab-switch path that does not expose the FM file list).
+        if widget.name == "homescreen"
+                and not widget._navbar_closing_intentionally then
+            local fm_lazy = liveFM()
+            if fm_lazy and fm_lazy._sui_lazy_refresh_path then
+                fm_lazy._sui_lazy_refresh_path = nil
+                UIManager:scheduleIn(0, function()
+                    local fm_ref = liveFM()
+                    if fm_ref and fm_ref.file_chooser then
+                        fm_ref.file_chooser:refreshPath()
+                    end
+                end)
+            end
+        end
+
         -- Re-open the homescreen after a fullscreen widget closes, subject to guards.
         -- Exclude widgets that claim covers_fullscreen but are mere popups with no
         -- title_bar and no name (e.g. VocabBuilder's MenuDialog).
@@ -1629,23 +1649,26 @@ function M.patchUIManagerClose(plugin)
                         local return_to_folder = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
                         if not return_to_folder then
                             _hs_pending_after_reader = true
-                        end
-                        -- Refresh the file list in the background after the session.
-                        -- When the homescreen will be shown on top of the FM
-                        -- (return_to_folder=false), delay the refresh so it does not
-                        -- compete with the HS widget build and first e-ink paint in the
-                        -- same event-loop tick. The user is looking at the HS, not the FM
-                        -- file list, so a short delay is imperceptible.
-                        -- When returning directly to the folder (return_to_folder=true),
-                        -- the FM is the visible target — refresh immediately so the list
-                        -- reflects any changes from the reading session.
-                        local refresh_delay = return_to_folder and 0 or 0.5
-                        UIManager:scheduleIn(refresh_delay, function()
+                            -- Lazy refresh: the user is looking at the HS, not the FM
+                            -- file list. Deferring refreshPath() until the HS closes
+                            -- eliminates I/O contention with the HS widget build and
+                            -- first e-ink paint, making the book→HS transition faster.
+                            -- The flag is consumed in patchUIManagerClose when
+                            -- widget.name == "homescreen" closes (user taps Library/Back).
                             local fm_ref = liveFM()
-                            if fm_ref and fm_ref.file_chooser then
-                                fm_ref.file_chooser:refreshPath()
+                            if fm_ref then
+                                fm_ref._sui_lazy_refresh_path = true
                             end
-                        end)
+                        else
+                            -- Returning directly to the folder — FM is the visible
+                            -- target, so refresh immediately (0 delay, same tick).
+                            UIManager:scheduleIn(0, function()
+                                local fm_ref = liveFM()
+                                if fm_ref and fm_ref.file_chooser then
+                                    fm_ref.file_chooser:refreshPath()
+                                end
+                            end)
+                        end
                     end
                 else
                     UIManager:scheduleIn(0, function()
@@ -2313,6 +2336,10 @@ function M.teardownAll(plugin)
     _hs_pending_after_reader  = false
     _start_with_hs            = nil
     _navpager_rebuild_pending = false
+
+    -- Clear lazy-refresh flag on the FM instance, if any.
+    local fm_td = liveFM()
+    if fm_td then fm_td._sui_lazy_refresh_path = nil end
 
     if _navbar_kb_capture then
         UIManager:close(_navbar_kb_capture)

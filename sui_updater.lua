@@ -1,33 +1,45 @@
 -- sui_updater.lua — Simple UI OTA Updater
--- Manual check only: verifica no GitHub Releases se há uma versão mais recente,
--- informa o utilizador e pergunta se quer descarregar e instalar.
 --
--- Melhorias v2:
---   1. socketutil com timeouts corretos (evita bloqueios em redes instáveis)
---   2. ltn12.sink.file no download (stream direto para disco, sem carregar ZIP em RAM)
---   3. json.decode em vez de regex (parsing robusto da resposta da API)
---   4. Release notes mostradas antes de confirmar a atualização
---   5. Trapper:dismissableRunInSubprocess (UI não-bloqueante, cancelável)
+-- Two modes of operation:
+--   1. Silent automatic check on startup (24 h throttle via G_reader_settings).
+--      If an update is available, a banner appears at the top of the About menu.
+--   2. Manual check triggered by the user ("Check for Updates" menu item).
+--      Always hits the network, ignores the throttle.
 --
--- Uso (em sui_menu.lua):
---   local Updater = require("sui_updater")
---   Updater.checkForUpdates()
+-- Technical stack:
+--   • socketutil with timeouts (avoids hangs on unstable networks)
+--   • ltn12.sink.file for downloads (streams directly to disk, no ZIP in RAM)
+--   • Native KOReader json.decode; regex fallback if unavailable
+--   • Release notes shown before confirming install
+--   • Trapper:dismissableRunInSubprocess (non-blocking UI, cancellable)
+--   • State persisted in G_reader_settings (survives between sessions;
+--     the "update available" banner appears immediately on next startup)
 
 local UIManager   = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local ConfirmBox  = require("ui/widget/confirmbox")
 local logger      = require("logger")
-local _ = require("sui_i18n").translate
+local _           = require("sui_i18n").translate
 
 -- ---------------------------------------------------------------------------
--- Configuração — ajusta ao teu repositório
+-- Configuration
 -- ---------------------------------------------------------------------------
-local GITHUB_OWNER = "doctorhetfield-cmd"     -- ← o teu username GitHub
-local GITHUB_REPO  = "simpleui.koplugin"      -- ← nome do repositório
-local ASSET_NAME   = "simpleui.koplugin.zip"  -- ← nome do ficheiro no release
+local GITHUB_OWNER = "doctorhetfield-cmd"
+local GITHUB_REPO  = "simpleui.koplugin"
+local ASSET_NAME   = "simpleui.koplugin.zip"
 
--- Tempo de validade do cache em segundos. 0 = desativa cache.
-local CACHE_TTL    = 3600  -- 1 hora
+local AUTO_CHECK_INTERVAL = 24 * 3600  -- segundos entre checks automáticos
+
+-- G_reader_settings keys — prefixed with "sui_upd_" to avoid collisions.
+local GS_LAST_CHECK = "sui_upd_last_check"  -- number (timestamp)
+local GS_HAS_UPDATE = "sui_upd_has_update"  -- boolean
+local GS_LATEST_VER = "sui_upd_latest_ver"  -- string sem "v"
+local GS_DL_URL     = "sui_upd_dl_url"      -- string URL
+
+local _API_URL = string.format(
+    "https://api.github.com/repos/%s/%s/releases/latest",
+    GITHUB_OWNER, GITHUB_REPO
+)
 
 -- ---------------------------------------------------------------------------
 -- Internals
@@ -35,107 +47,118 @@ local CACHE_TTL    = 3600  -- 1 hora
 
 local M = {}
 
--- Diretório do plugin (resolvido a partir do caminho deste ficheiro).
+-- In-memory cache for the current session.
+-- Initialised lazily by _load_persisted_state().
+local _state_loaded = false
+local _has_update   = false
+local _latest_ver   = nil  -- string sem "v", ou nil
+local _dl_url       = nil  -- URL para o ZIP do asset, ou nil
+
+-- Plugin directory — resolved once at module load time.
 local _plugin_dir = (debug.getinfo(1, "S").source or ""):match("^@(.+)/[^/]+$")
-    or "/mnt/us/extensions/simpleui.koplugin"  -- fallback Kindle
-
-local _API_URL = string.format(
-    "https://api.github.com/repos/%s/%s/releases/latest",
-    GITHUB_OWNER, GITHUB_REPO
-)
-
--- Ficheiro de cache: guarda o último resultado da API para evitar requests
--- repetidos durante a sessão (TTL definido em CACHE_TTL).
-local function _cacheFile()
-    local ok, DS = pcall(require, "datastorage")
-    if ok and DS then
-        return DS:getSettingsDir() .. "/simpleui_update_cache.json"
-    end
-    return "/tmp/simpleui_update_cache.json"
-end
+    or "/mnt/us/extensions/simpleui.koplugin"
 
 -- ---------------------------------------------------------------------------
--- Cache
--- ---------------------------------------------------------------------------
-
-local function _loadCache()
-    if CACHE_TTL <= 0 then return nil end
-    local path = _cacheFile()
-    local fh = io.open(path, "r")
-    if not fh then return nil end
-    local raw = fh:read("*a")
-    fh:close()
-    local ok_j, json = pcall(require, "json")
-    if not ok_j then return nil end
-    local ok_d, data = pcall(json.decode, raw)
-    if not ok_d or type(data) ~= "table" then return nil end
-    if (os.time() - (data.timestamp or 0)) > CACHE_TTL then return nil end
-    return data.payload
-end
-
-local function _saveCache(payload)
-    if CACHE_TTL <= 0 then return end
-    local ok_j, json = pcall(require, "json")
-    if not ok_j then return end
-    local ok_e, encoded = pcall(json.encode, { timestamp = os.time(), payload = payload })
-    if not ok_e then return end
-    local fh = io.open(_cacheFile(), "w")
-    if fh then
-        fh:write(encoded)
-        fh:close()
-    end
-end
-
-local function _clearCache()
-    pcall(os.remove, _cacheFile())
-end
-
--- ---------------------------------------------------------------------------
--- Helpers
+-- Helpers: version
 -- ---------------------------------------------------------------------------
 
 local function _currentVersion()
-    local meta_path = _plugin_dir .. "/_meta.lua"
-    local ok, meta = pcall(dofile, meta_path)
-    if ok and type(meta) == "table" and meta.version then
-        return meta.version
-    end
+    -- Use dofile with the absolute path to guarantee we read *this* plugin's
+    -- _meta.lua, not a stale cached entry from another plugin (require caches
+    -- by module name, so require("_meta") may return the wrong table).
+    local ok, meta = pcall(dofile, _plugin_dir .. "/_meta.lua")
+    if ok and type(meta) == "table" and meta.version then return meta.version end
     local rok, rmeta = pcall(require, "_meta")
     return (rok and rmeta and rmeta.version) or "0.0.0"
 end
 
--- Retorna true se a versão `a` for inferior a `b` (comparação semver simples).
-local function _versionLessThan(a, b)
+-- Returns true if version `a` is strictly greater than `b`.
+-- Supports "v1.2.3", "1.2.3", "1.2.3-beta1" (suffixes are ignored).
+local function _versionGt(a, b)
     local function parts(v)
+        v = (v or ""):match("^v?(.-)[-+]") or (v or ""):match("^v?(.+)$") or ""
         local t = {}
-        for n in (v .. "."):gmatch("(%d+)%.") do t[#t + 1] = tonumber(n) end
+        for n in (v .. "."):gmatch("(%d+)%.") do t[#t + 1] = tonumber(n) or 0 end
         while #t < 3 do t[#t + 1] = 0 end
         return t
     end
     local pa, pb = parts(a), parts(b)
     for i = 1, 3 do
-        if pa[i] < pb[i] then return true end
-        if pa[i] > pb[i] then return false end
+        if pa[i] > pb[i] then return true end
+        if pa[i] < pb[i] then return false end
     end
     return false
 end
 
--- Mostra uma mensagem temporária.
-local function _toast(msg, timeout)
-    local w = InfoMessage:new{ text = msg, timeout = timeout or 4 }
-    UIManager:show(w)
-    return w
-end
-
-local function _closeWidget(w)
-    if w then UIManager:close(w) end
+local function _isValidAssetUrl(url)
+    return type(url) == "string"
+        and url:find("/releases/download/", 1, true) ~= nil
 end
 
 -- ---------------------------------------------------------------------------
--- HTTP com socketutil (melhoria 1 + 2)
+-- G_reader_settings accessor — guarded for use outside KOReader (e.g. tests)
 -- ---------------------------------------------------------------------------
 
--- GET para memória (chamadas à API — payload pequeno).
+local function _gs()
+    local ok, gs = pcall(function() return G_reader_settings end)
+    return ok and gs or nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Persistence
+-- ---------------------------------------------------------------------------
+
+local function _load_persisted_state()
+    if _state_loaded then return end
+    _state_loaded = true
+
+    local gs = _gs()
+    if not gs then return end
+
+    _has_update = gs:readSetting(GS_HAS_UPDATE) == true
+    local ver   = gs:readSetting(GS_LATEST_VER)
+    _latest_ver = (type(ver) == "string" and ver ~= "") and ver or nil
+    local url   = gs:readSetting(GS_DL_URL)
+    _dl_url     = _isValidAssetUrl(url) and url or nil
+
+    -- Discard stale state (e.g. update already installed).
+    if _has_update and not _versionGt(_latest_ver or "", _currentVersion()) then
+        _has_update = false
+        _latest_ver = nil
+        _dl_url     = nil
+        gs:saveSetting(GS_HAS_UPDATE, false)
+        gs:saveSetting(GS_LATEST_VER, "")
+        gs:saveSetting(GS_DL_URL,     "")
+        pcall(gs.flush, gs)
+    end
+end
+
+local function _persist_state(now)
+    local gs = _gs()
+    if not gs then return end
+    if now then gs:saveSetting(GS_LAST_CHECK, now) end
+    gs:saveSetting(GS_HAS_UPDATE, _has_update)
+    gs:saveSetting(GS_LATEST_VER, _latest_ver or "")
+    gs:saveSetting(GS_DL_URL,     _dl_url     or "")
+    pcall(gs.flush, gs)
+end
+
+local function _clear_update_state()
+    _has_update = false
+    _latest_ver = nil
+    _dl_url     = nil
+    local gs = _gs()
+    if not gs then return end
+    gs:saveSetting(GS_HAS_UPDATE, false)
+    gs:saveSetting(GS_LATEST_VER, "")
+    gs:saveSetting(GS_DL_URL,     "")
+    pcall(gs.flush, gs)
+end
+
+-- ---------------------------------------------------------------------------
+-- HTTP
+-- ---------------------------------------------------------------------------
+
 local function _httpGet(url)
     local ok_su, socketutil = pcall(require, "socketutil")
     local http   = require("socket/http")
@@ -151,9 +174,9 @@ local function _httpGet(url)
 
     local chunks = {}
     local code, headers, status = socket.skip(1, http.request({
-        url      = url,
-        method   = "GET",
-        headers  = {
+        url     = url,
+        method  = "GET",
+        headers = {
             ["User-Agent"] = "KOReader-SimpleUI-Updater/2.0",
             ["Accept"]     = "application/vnd.github.v3+json",
         },
@@ -175,13 +198,10 @@ local function _httpGet(url)
         return nil, "network error (" .. tostring(code or status) .. ")"
     end
 
-    if code == 200 then
-        return table.concat(chunks)
-    end
+    if code == 200 then return table.concat(chunks) end
     return nil, string.format("HTTP %s", tostring(code))
 end
 
--- GET para ficheiro — stream direto para disco sem carregar em RAM (melhoria 2).
 local function _httpGetToFile(url, dest_path)
     local ok_su, socketutil = pcall(require, "socketutil")
     local http   = require("socket/http")
@@ -189,11 +209,8 @@ local function _httpGetToFile(url, dest_path)
     local socket = require("socket")
 
     local fh, err_open = io.open(dest_path, "wb")
-    if not fh then
-        return nil, "Could not create file: " .. tostring(err_open)
-    end
+    if not fh then return nil, "cannot create file: " .. tostring(err_open) end
 
-    -- Timeouts generosos para downloads de ficheiros grandes.
     if ok_su then
         socketutil:set_timeout(
             socketutil.FILE_BLOCK_TIMEOUT,
@@ -202,15 +219,15 @@ local function _httpGetToFile(url, dest_path)
     end
 
     local code, headers, status = socket.skip(1, http.request({
-        url      = url,
-        method   = "GET",
-        headers  = { ["User-Agent"] = "KOReader-SimpleUI-Updater/2.0" },
-        sink     = ltn12.sink.file(fh),  -- stream direto para disco
+        url     = url,
+        method  = "GET",
+        headers = { ["User-Agent"] = "KOReader-SimpleUI-Updater/2.0" },
+        sink    = ltn12.sink.file(fh),   -- stream direto para disco
         redirect = true,
     }))
 
     if ok_su then socketutil:reset_timeout() end
-    -- ltn12.sink.file fecha o fh automaticamente após o request.
+    -- ltn12.sink.file closes fh automatically.
 
     if ok_su and (
         code == socketutil.TIMEOUT_CODE or
@@ -232,28 +249,27 @@ local function _httpGetToFile(url, dest_path)
 end
 
 -- ---------------------------------------------------------------------------
--- JSON parsing (melhoria 3)
--- Usa json.decode nativo do KOReader. Fallback para regex se indisponível.
+-- GitHub API response parsing
 -- ---------------------------------------------------------------------------
 
 local function _parseRelease(body)
     local ok_j, json = pcall(require, "json")
 
     if not ok_j then
-        -- Fallback para regex se o módulo json não estiver disponível.
-        logger.warn("simpleui updater: módulo json não disponível, usando regex fallback")
+        -- Regex fallback for KOReader builds that lack the json module.
+        logger.warn("simpleui updater: módulo json indisponível, usando regex fallback")
         local function jsonStr(key)
             return body:match('"' .. key .. '"%s*:%s*"([^"]*)"')
         end
         local tag = jsonStr("tag_name")
         if not tag then return nil, "could not parse tag_name" end
-        local download_url = body:match(
-            '"browser_download_url"%s*:%s*"([^"]*'
+        local asset_pat = '"browser_download_url"%s*:%s*"([^"]*'
             .. ASSET_NAME:gsub("%.", "%%.") .. '[^"]*)"'
-        )
-        local notes = body:match('"body"%s*:%s*"(.-)"[,}]')
+        local download_url = body:match(asset_pat)
+        local notes = body:match('"body"%s*:%s*"(.-)"%s*[,}]')
         if notes then
-            notes = notes:gsub("\\n", "\n"):gsub("\\r", ""):gsub('\\"', '"'):gsub("\\\\", "\\")
+            notes = notes:gsub("\\n", "\n"):gsub("\\r", "")
+                        :gsub('\\"', '"'):gsub("\\\\", "\\")
         end
         return {
             version      = tag:match("v?(.*)"),
@@ -270,21 +286,19 @@ local function _parseRelease(body)
     local tag = data.tag_name
     if not tag then return nil, "tag_name missing from API response" end
 
-    -- Procura o asset ZIP pelo nome exato configurado em ASSET_NAME.
-    local download_url = nil
+    local download_url
     for _, asset in ipairs(data.assets or {}) do
-        if type(asset.name) == "string" and asset.name == ASSET_NAME then
+        if asset.name == ASSET_NAME then
             download_url = asset.browser_download_url
             break
         end
     end
 
-    -- Sanitiza as release notes: remove markdown pesado e trunca para ecrã.
     local notes = data.body
     if notes and notes ~= "" then
-        notes = notes:gsub("#+%s*", "")           -- remover headings markdown
-        notes = notes:gsub("%*%*(.-)%*%*", "%1")  -- remover bold **
-        notes = notes:gsub("`(.-)`", "%1")         -- remover code inline
+        notes = notes:gsub("#+%s*", "")           -- headings markdown
+        notes = notes:gsub("%*%*(.-)%*%*", "%1")  -- bold **
+        notes = notes:gsub("`(.-)`", "%1")         -- code inline
         notes = notes:gsub("\r\n", "\n"):gsub("\r", "\n")
         if #notes > 600 then notes = notes:sub(1, 597) .. "..." end
         notes = notes:match("^%s*(.-)%s*$")        -- trim
@@ -303,8 +317,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local function _unzip(zip_path, dest_dir)
-    local cmd = string.format("unzip -o -q %q -d %q", zip_path, dest_dir)
-    local ret = os.execute(cmd)
+    local ret = os.execute(string.format("unzip -o -q %q -d %q", zip_path, dest_dir))
     if ret ~= 0 and ret ~= true then
         return nil, "unzip failed (exit " .. tostring(ret) .. ")"
     end
@@ -312,23 +325,47 @@ local function _unzip(zip_path, dest_dir)
 end
 
 -- ---------------------------------------------------------------------------
--- Fase 2: download e instalação com Trapper (melhoria 5)
+-- Temporary path for the update ZIP
 -- ---------------------------------------------------------------------------
 
--- Devolve um caminho gravável para o ZIP temporário.
--- Tenta DataStorage (sempre disponível no KOReader) e só depois /tmp.
 local function _tmpZipPath()
     local ok, DS = pcall(require, "datastorage")
-    if ok and DS then
-        return DS:getSettingsDir() .. "/simpleui_update.zip"
-    end
-    -- Fallback: verifica se /tmp é gravável.
+    if ok and DS then return DS:getSettingsDir() .. "/simpleui_update.zip" end
     local probe = "/tmp/.simpleui_probe"
     local fh = io.open(probe, "w")
     if fh then fh:close(); os.remove(probe); return "/tmp/simpleui_update.zip" end
-    -- Último recurso: diretório do próprio plugin.
     return _plugin_dir .. "/simpleui_update.zip"
 end
+
+-- ---------------------------------------------------------------------------
+-- UI helpers
+-- ---------------------------------------------------------------------------
+
+local function _toast(msg, timeout)
+    local w = InfoMessage:new{ text = msg, timeout = timeout or 4 }
+    UIManager:show(w)
+    return w
+end
+
+local function _closeWidget(w)
+    if w then UIManager:close(w) end
+end
+
+-- ---------------------------------------------------------------------------
+-- Pure fetch — intended to run inside a subprocess
+-- ---------------------------------------------------------------------------
+
+local function _doFetch()
+    local body, err = _httpGet(_API_URL)
+    if not body then return { error = err } end
+    local release, parse_err = _parseRelease(body)
+    if not release then return { error = "parse error: " .. tostring(parse_err) } end
+    return release
+end
+
+-- ---------------------------------------------------------------------------
+-- Download and installation
+-- ---------------------------------------------------------------------------
 
 local function _applyUpdate(download_url, new_version)
     local tmp_zip    = _tmpZipPath()
@@ -359,17 +396,17 @@ local function _applyUpdate(download_url, new_version)
             local stage = result and result.stage or "unknown"
             local err   = result and result.err   or "unknown error"
             logger.err("simpleui updater: falha em", stage, "-", err)
-            if stage == "download" then
-                _toast(_("Download error: ") .. tostring(err))
-            else
-                _toast(_("Extraction error: ") .. tostring(err))
-            end
+            _toast(
+                stage == "download"
+                    and (_("Download error: ") .. tostring(err))
+                    or  (_("Extraction error: ") .. tostring(err))
+            )
             return
         end
-        _clearCache()  -- invalida cache após instalação
+        _clear_update_state()
         UIManager:show(ConfirmBox:new{
-            text = string.format(
-                _("Simple UI %s successfully installed.\n\nRestart KOReader to apply the update?"),
+            text        = string.format(
+                _("Simple UI %s installed.\n\nRestart KOReader to apply the update?"),
                 new_version
             ),
             ok_text     = _("Restart"),
@@ -392,7 +429,7 @@ local function _applyUpdate(download_url, new_version)
             _toast(_("Update cancelled."))
         end
     else
-        -- Fallback sem Trapper: corre na main thread.
+        -- Synchronous fallback (no Trapper): avoids blocking the UI via scheduleIn.
         UIManager:scheduleIn(0.3, function()
             handleInstallResult(doDownloadAndInstall())
         end)
@@ -400,16 +437,15 @@ local function _applyUpdate(download_url, new_version)
 end
 
 -- ---------------------------------------------------------------------------
--- Fase 1: verificação de versão com Trapper (melhoria 5)
+-- Confirmation dialog with release notes
 -- ---------------------------------------------------------------------------
 
--- Mostra o diálogo de confirmação incluindo release notes (melhoria 4).
 local function _showUpdateDialog(release, current)
     local latest       = release.version
     local download_url = release.download_url
     local notes        = release.notes
 
-    if not _versionLessThan(current, latest) then
+    if not _versionGt(latest, current) then
         logger.info("simpleui updater: já atualizado (" .. current .. ")")
         _toast(string.format(_("Simple UI is up to date (%s)."), current))
         return
@@ -417,21 +453,13 @@ local function _showUpdateDialog(release, current)
 
     logger.info("simpleui updater: nova versão disponível:", latest)
 
-    -- Texto base com ou sem release notes (melhoria 4).
-    local header = string.format(
-        _("Simple UI %s is available!\nYou have %s."),
-        latest, current
-    )
-    local footer = _("\n\nDownload and install now?")
-    local notes_block = notes
-        and ("\n\n" .. _("What's new:") .. "\n" .. notes)
-        or  ""
+    local header     = string.format(_("Simple UI %s is available!\nYou have %s."), latest, current)
+    local notes_block = notes and ("\n\n" .. _("What's new:") .. "\n" .. notes) or ""
 
     if not download_url then
-        -- Sem asset ZIP — abrir GitHub.
         UIManager:show(ConfirmBox:new{
             text        = header .. notes_block
-                       .. "\n\n" .. _("No automatic update file was found.\n\nOpen the releases page on GitHub?"),
+                       .. "\n\n" .. _("No download file found.\n\nOpen the releases page?"),
             ok_text     = _("Open in browser"),
             cancel_text = _("Cancel"),
             ok_callback = function()
@@ -448,32 +476,116 @@ local function _showUpdateDialog(release, current)
     end
 
     UIManager:show(ConfirmBox:new{
-        text        = header .. notes_block .. footer,
+        text        = header .. notes_block .. "\n\n" .. _("Download and install now?"),
         ok_text     = _("Download and install"),
         cancel_text = _("Cancel"),
         ok_callback = function() _applyUpdate(download_url, latest) end,
     })
 end
 
--- Lógica de fetch pura — corre dentro do subprocess.
-local function _doFetch()
-    local cached = _loadCache()
-    if cached then
-        logger.info("simpleui updater: usando cache")
-        return cached
+-- ---------------------------------------------------------------------------
+-- Network check with result persistence
+-- ---------------------------------------------------------------------------
+
+local function _doNetworkCheck()
+    local release = _doFetch()
+    if release.error then
+        logger.warn("simpleui updater: erro na verificação:", release.error)
+        return false, release.error
     end
-    local body, err = _httpGet(_API_URL)
-    if not body then return { error = err } end
-    local release, parse_err = _parseRelease(body)
-    if not release then return { error = "parse error: " .. tostring(parse_err) } end
-    _saveCache(release)
-    return release
+
+    local current = _currentVersion()
+    _latest_ver   = release.version
+    _dl_url       = _isValidAssetUrl(release.download_url) and release.download_url or nil
+    _has_update   = _versionGt(_latest_ver, current)
+
+    logger.info(string.format(
+        "simpleui updater: current=%s latest=%s has_update=%s",
+        current, _latest_ver or "?", tostring(_has_update)
+    ))
+
+    _persist_state(os.time())
+    return true, release
 end
 
--- Ponto de entrada interno: mostra toast e corre verificação no subprocess.
-function M._doCheckForUpdates(current)
-    local checking_msg = _toast(_("Checking for updates…"), 15)
+-- ---------------------------------------------------------------------------
+-- Public API
+-- ---------------------------------------------------------------------------
+
+--- Returns true when a newer version has been detected.
+--- Uses the in-memory cache (no I/O after the first call).
+function M.hasUpdate()
+    _load_persisted_state()
+    return _has_update
+end
+
+--- Returns the latest detected version string (without "v" prefix), or nil.
+function M.latestVersion()
+    _load_persisted_state()
+    return _latest_ver
+end
+
+--- Silent automatic check — called once on plugin startup.
+---
+--- • Always loads persisted state so hasUpdate() is correct immediately.
+--- • Only hits the network if more than AUTO_CHECK_INTERVAL seconds have
+---   elapsed since the last successful check.
+--- • Never shows any UI — the result is written to G_reader_settings;
+---   the banner is built by build_update_banner_item() when the menu opens.
+function M.scheduleAutoCheck()
+    _load_persisted_state()
+
+    local gs   = _gs()
+    local now  = os.time()
+    local last = (gs and gs:readSetting(GS_LAST_CHECK)) or 0
+    if type(last) ~= "number" then last = 0 end
+
+    if (now - last) < AUTO_CHECK_INTERVAL then
+        logger.dbg("simpleui updater: auto-check dentro do throttle — skip")
+        return
+    end
+
+    -- Network call: runs 5 s after startup to avoid delaying the first paint.
+    -- IMPORTANT: for the silent auto-check we must NEVER prompt the user to
+    -- connect Wi-Fi. runWhenOnline calls beforeWifiAction when offline, which
+    -- shows a dialog or turns Wi-Fi on automatically — both are unacceptable
+    -- for a background check the user did not explicitly trigger.
+    -- Instead: only proceed if the network is already online. If it is not,
+    -- skip silently. The 24-hour throttle ensures we try again on the next
+    -- startup where the device happens to be connected already.
+    UIManager:scheduleIn(5, function()
+        local ok_nm, NetworkMgr = pcall(require, "ui/network/manager")
+        local already_online = ok_nm and NetworkMgr
+            and (NetworkMgr.isOnline and NetworkMgr:isOnline()
+                or (NetworkMgr.isConnected and NetworkMgr:isConnected()))
+        if not already_online then
+            logger.dbg("simpleui updater: auto-check skip — network not online")
+            return
+        end
+        _doNetworkCheck()
+    end)
+
+end
+
+--- Manual check — triggered by the "Check for Updates" menu item.
+--- Always hits the network (ignores throttle) and shows UI with the result.
+function M.checkForUpdates()
+    local current = _currentVersion()
+    local ok_nm, NetworkMgr = pcall(require, "ui/network/manager")
+    if ok_nm and NetworkMgr and NetworkMgr.runWhenOnline then
+        NetworkMgr:runWhenOnline(function()
+            M._doManualCheck(current)
+        end)
+        return
+    end
+    M._doManualCheck(current)
+end
+
+--- Internal logic for the manual check (kept separate to keep checkForUpdates
+--- clean and to allow direct calls in tests).
+function M._doManualCheck(current)
     local ok_tr, Trapper = pcall(require, "ui/trapper")
+    local checking_msg   = _toast(_("Checking for updates…"), 15)
 
     local function handleCheckResult(release)
         _closeWidget(checking_msg)
@@ -482,10 +594,17 @@ function M._doCheckForUpdates(current)
             return
         end
         if release.error then
-            logger.err("simpleui updater: erro na verificação:", release.error)
+            logger.err("simpleui updater:", release.error)
             _toast(_("Error checking for updates: ") .. tostring(release.error))
             return
         end
+        -- Persist the result so the next startup can show the banner
+        -- without needing a network request.
+        _latest_ver = release.version
+        _dl_url     = _isValidAssetUrl(release.download_url) and release.download_url or nil
+        _has_update = _versionGt(_latest_ver, current)
+        _persist_state(os.time())
+
         _showUpdateDialog(release, current)
     end
 
@@ -502,24 +621,25 @@ function M._doCheckForUpdates(current)
             _toast(_("Update check cancelled."))
         end
     else
-        -- Fallback sem Trapper.
         UIManager:scheduleIn(0.3, function()
             handleCheckResult(_doFetch())
         end)
     end
 end
 
--- Ponto de entrada público: garante rede ativa e inicia a verificação.
-function M.checkForUpdates()
-    local current = _currentVersion()
-    local ok_nm, NetworkMgr = pcall(require, "ui/network/manager")
-    if ok_nm and NetworkMgr and NetworkMgr.runWhenOnline then
-        NetworkMgr:runWhenOnline(function()
-            M._doCheckForUpdates(current)
-        end)
-        return
-    end
-    M._doCheckForUpdates(current)
+--- Returns a menu item when an update is available; nil otherwise.
+--- Called when building the About menu — uses in-memory cache (zero I/O).
+function M.build_update_banner_item()
+    _load_persisted_state()
+    if not _has_update then return nil end
+    local label = _latest_ver and ("v" .. _latest_ver) or _("latest")
+    return {
+        text           = string.format(_("⬆ Update available: %s"), label),
+        keep_menu_open = true,
+        callback       = function()
+            M.checkForUpdates()
+        end,
+    }
 end
 
 return M
