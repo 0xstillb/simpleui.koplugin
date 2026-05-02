@@ -385,10 +385,11 @@ end
 local function _showNerdIconPreview(sentinel, on_confirm, on_back)
     local Font            = require("ui/font")
     local BB              = require("ffi/blitbuffer")
+    local Device          = require("device")
     local TextWidget      = require("ui/widget/textwidget")
     local FrameContainer  = require("ui/widget/container/framecontainer")
     local CenterContainer = require("ui/widget/container/centercontainer")
-    local InputContainer  = require("ui/widget/container/inputcontainer")
+    local FocusManager    = require("ui/widget/focusmanager")
     local GestureRange    = require("ui/gesturerange")
     local VerticalGroup   = require("ui/widget/verticalgroup")
     local VerticalSpan    = require("ui/widget/verticalspan")
@@ -449,22 +450,39 @@ local function _showNerdIconPreview(sentinel, on_confirm, on_back)
         },
     }
 
-    -- Wrap in an InputContainer that intercepts all taps over the full screen.
-    -- This prevents taps on the preview buttons from leaking to the InputDialog
-    -- below (which has is_always_active=true and would close itself on outside taps).
+    -- Use FocusManager as the outer container so that hardware-key users
+    -- (DPad / few-keys devices) can navigate between Cancel and Confirm.
+    -- FocusManager extends InputContainer, so it still intercepts all taps
+    -- and prevents them from reaching the always-active InputDialog below.
     local full = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() }
     local inner = CenterContainer:new{ dimen = full, content }
-    preview_dlg = InputContainer:new{
+    preview_dlg = FocusManager:new{
         dimen             = full,
         covers_fullscreen = true,
         modal             = true,
+        -- Hand the ButtonTable's layout up so FocusManager can move focus
+        -- between Cancel (x=1) and Confirm (x=2) with Left/Right/DPad.
+        layout            = btn_table.layout,
         inner,
     }
-    -- Consume all tap/touch events so they never reach always_active widgets below.
-    preview_dlg.ges_events = {
-        TapAny = { GestureRange:new{ ges = "tap",   range = full } },
-        HoldAny= { GestureRange:new{ ges = "hold",  range = full } },
-    }
+    -- On few-keys devices "Left" is not mapped to FocusLeft by FocusManager,
+    -- so we add it explicitly as a Back/Cancel shortcut (matches ButtonDialog
+    -- behaviour on the same class of device).
+    if Device:hasKeys() then
+        local back_group = require("util").tableDeepCopy(Device.input.group.Back)
+        if Device:hasFewKeys() then
+            table.insert(back_group, "Left")
+        end
+        preview_dlg.key_events.Close = { { back_group } }
+        function preview_dlg:onClose()
+            _close()
+            if on_back then on_back() end
+        end
+    end
+    -- Consume all tap/hold events so they never reach always_active widgets below.
+    preview_dlg.ges_events = preview_dlg.ges_events or {}
+    preview_dlg.ges_events.TapAny  = { GestureRange:new{ ges = "tap",  range = full } }
+    preview_dlg.ges_events.HoldAny = { GestureRange:new{ ges = "hold", range = full } }
     function preview_dlg:onTapAny()  return true end
     function preview_dlg:onHoldAny() return true end
     UIManager:show(preview_dlg)
