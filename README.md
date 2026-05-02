@@ -107,22 +107,26 @@ SimpleUI has full translation support. The UI language is detected automatically
 | English | *(built-in)* | Complete |
 | Português (Brasil) | `locale/pt_BR.po` | Complete |
 | Português (Portugal) | `locale/pt_PT.po` | Complete |
-| Italiano (Italian) | `locale/it_IT.po` | Partial (92.8% — 31 missing) |
-| Polski (Polish) | `locale/pl.po` | Partial (92.8% — 31 missing) |
-| 简体中文 (Chinese Simplified) | `locale/zh_CN.po` | Partial (92.3% — 33 missing) |
-| Français (French) | `locale/fr.po` | Partial (91.6% — 36 missing) |
-| Svenska (Swedish) | `locale/sv.po` | Partial (91.2% — 38 missing) |
-| 繁體中文 (Chinese Traditional) | `locale/zh_TW.po` | Partial (87.7% — 53 missing) |
-| Deutsch (German) | `locale/de.po` | Partial (79.8% — 87 missing) |
-| Türkçe (Turkish) | `locale/tr.po` | Partial (79.8% — 87 missing) |
-| Română (Romanian) | `locale/ro.po` | Partial (79.3% — 89 missing) |
-| Español | `locale/es.po` | Partial (68.6% — 135 missing) |
-| Русский (Russian) | `locale/ru.po` | Partial (83.0% — 73 missing) |
-| Tiếng Việt (Vietnamese) | `locale/vi.po` | Partial (14.0% — 370 missing) |
+| Français (French) | `locale/fr.po` | Partial (99.3% — 3 missing) |
+| Bulgară (Bulgarian) | `locale/bg.po` | Partial (88.6% — 46 missing) |
+| Čeština (Czech) | `locale/cs.po` | Partial (88.3% — 47 missing) |
+| Türkçe (Turkish) | `locale/tr.po` | Partial (88.3% — 47 missing) |
+| Українська (Ukrainian) | `locale/uk.po` | Partial (88.3% — 47 missing) |
+| Tiếng Việt (Vietnamese) | `locale/vi.po` | Partial (88.3% — 47 missing) |
+| 简体中文 (Chinese Simplified) | `locale/zh_CN.po` | Partial (88.3% — 47 missing) |
+| Polski (Polish) | `locale/pl.po` | Partial (87.8% — 49 missing) |
+| Română (Romanian) | `locale/ro.po` | Partial (83.9% — 65 missing) |
+| Română (Moldova) | `locale/ro_MD.po` | Partial (83.9% — 65 missing) |
+| 繁體中文 (Chinese Traditional) | `locale/zh_TW.po` | Partial (83.9% — 65 missing) |
+| Русский (Russian) | `locale/ru.po` | Partial (80.4% — 79 missing) |
+| Español | `locale/es.po` | Partial (78.4% — 87 missing) |
+| Italiano (Italian) | `locale/it_IT.po` | Partial (78.2% — 88 missing) |
+| Svenska (Swedish) | `locale/sv.po` | Partial (77.2% — 92 missing) |
+| Deutsch (German) | `locale/de.po` | Partial (69.2% — 124 missing) |
 
 ### Adding a new language
 
-All 430 strings in the plugin are translatable. To add a new language:
+All 403 strings in the plugin are translatable. To add a new language:
 
 1. Copy `locale/simpleui.pot` to `locale/<lang>.po`, using the standard locale code for your language (examples: `de`, `fr`, `it`, `ja`)
 2. Open the file in any text editor or a dedicated PO editor such as [Poedit](https://poedit.net/)
