@@ -1842,6 +1842,44 @@ function M.install()
         -- ── Series index badge (top-left) ─────────────────────────────────────
         if self._fc_overlay_series then
             local series_bb = self._fc_series_bb
+            -- Fallback: if the blitbuffer was not pre-rendered (e.g. series_index
+            -- was not yet in the BookList cache when update() ran), query
+            -- BookInfoManager directly — same behaviour as the previous version.
+            if not series_bb and self.filepath then
+                local bi = BookInfoManager:getBookInfo(self.filepath, false)
+                if bi and bi.series and bi.series_index then
+                    local stw = TextWidget:new{
+                        text    = "#" .. bi.series_index,
+                        face    = Font:getFace("cfont", _BADGE_FONT_SZ),
+                        bold    = false,
+                        fgcolor = Blitbuffer.COLOR_BLACK,
+                    }
+                    local tsz    = stw:getSize()
+                    local rect_w = tsz.w + _BADGE_PAD_H * 2
+                    local rect_h = tsz.h + _BADGE_PAD_V * 2
+                    local bw = FrameContainer:new{
+                        dimen      = Geom:new{ w = rect_w, h = rect_h },
+                        bordersize = Size.border.thin,
+                        color      = Blitbuffer.COLOR_DARK_GRAY,
+                        background = Blitbuffer.COLOR_WHITE,
+                        radius     = _BADGE_CORNER,
+                        padding    = 0,
+                        CenterContainer:new{
+                            dimen = Geom:new{ w = rect_w, h = rect_h },
+                            stw,
+                        },
+                    }
+                    local ok_buf, buf = pcall(Blitbuffer.new, rect_w, rect_h, Blitbuffer.TYPE_BB8A)
+                    if ok_buf and buf then
+                        buf:fill(Blitbuffer.COLOR_WHITE)
+                        bw:paintTo(buf, 0, 0)
+                        -- Cache for future paintTo calls and free the widget.
+                        self._fc_series_bb = buf
+                        series_bb = buf
+                    end
+                    bw:free()
+                end
+            end
             if series_bb then
                 local rect_w = series_bb:getWidth()
                 local rect_h = series_bb:getHeight()
