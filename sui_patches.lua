@@ -366,7 +366,10 @@ function M.patchFileManagerClass(plugin)
         -- On the very first boot, schedule the homescreen auto-open for onShow.
         if not _hs_boot_done then
             _hs_boot_done = true
-            if isStartWithHS() and tabInTabs("homescreen", tabs) then
+            -- Note: we intentionally do NOT require the "homescreen" tab to be
+            -- present in the navbar. "Start with Home Screen" is a launch
+            -- behaviour, independent of whether the user has kept the tab.
+            if isStartWithHS() then
                 plugin.active_action      = "homescreen"
                 fm_self._hs_autoopen_pending = true
             end
@@ -2022,7 +2025,8 @@ end
 -- showHSAfterResume
 -- Opens the homescreen after the device wakes from suspend.
 -- Runs only when "Start with Homescreen" is active, the reader is closed,
--- the homescreen tab exists, and the homescreen is not already visible.
+-- and the homescreen is not already visible. The homescreen tab does NOT
+-- need to be present in the navbar for this to fire.
 -- Called from SimpleUIPlugin:onResume() in main.lua.
 -- ---------------------------------------------------------------------------
 
@@ -2033,7 +2037,9 @@ function M.showHSAfterResume(plugin)
     if RUI and RUI.instance then return end
 
     local tabs = Config.loadTabConfig()
-    if not tabInTabs("homescreen", tabs) then return end
+    -- Note: we intentionally do NOT require the "homescreen" tab to be in
+    -- the navbar. "Start with Home Screen" is a launch behaviour that should
+    -- work regardless of whether the user keeps the tab visible.
 
     local HS = liveHS()
     if HS and HS._instance then
