@@ -1006,7 +1006,14 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
             -- stable and will never be "lowres" for any module.
             local max_w, max_h = _getMaxExtractSize()
             local lowres = (src_w < max_w or src_h < max_h)
-            if lowres then scheduleExtract() end
+            if lowres then
+                scheduleExtract()
+                -- Same signal as the fresh-extraction path: tell the poll loop
+                -- that a re-extraction was scheduled so it can refresh when done.
+                if M._cover_extract_pending and M._cover_extract_pending[filepath] then
+                    M.cover_extraction_pending = true
+                end
+            end
             local bb = _scaleBBToSlot(bookinfo.cover_bb, w, h, align, stretch_limit)
             if _bim_cover_count >= BIM_MAX_COVERS then _evictOldestCover() end
             _bim_cover_cache[key] = { bb = bb, t = os.time(), lowres = lowres or nil, chk = os.time(), src_w = src_w, src_h = src_h }
@@ -1020,6 +1027,13 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
     end
 
     scheduleExtract()
+    -- Signal the homescreen poll loop that a background extraction was just
+    -- launched for this file.  The poll (sui_homescreen._scheduleCoverPoll)
+    -- checks this flag after _updatePage completes and refreshes the page
+    -- once the subprocess finishes.
+    if M._cover_extract_pending and M._cover_extract_pending[filepath] then
+        M.cover_extraction_pending = true
+    end
     return nil
 end
 

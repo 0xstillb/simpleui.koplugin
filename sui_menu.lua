@@ -1995,6 +1995,24 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     local on = G_reader_settings:nilOrTrue("navbar_homescreen_settings_on_hold")
                     G_reader_settings:saveSetting("navbar_homescreen_settings_on_hold", not on)
                 end,
+            },
+            {
+                text         = _("Warn When Modules Overflow"),
+                help_text    = _("When enabled, a notice is shown if the modules on a page are taller than the visible area.\nDisable this to silence the warning."),
+                checked_func = function()
+                    return G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn")
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    local on = G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn")
+                    G_reader_settings:saveSetting("navbar_homescreen_overflow_warn", not on)
+                    -- Reset the per-session dedup key so the warning fires
+                    -- immediately if overflow is still present and was re-enabled.
+                    local ok_hs, HS = pcall(require, "sui_homescreen")
+                    if ok_hs and HS and HS._instance then
+                        HS._instance._overflow_warn_key = nil
+                    end
+                end,
                 separator = true,
             },
             table.unpack(modules_items),

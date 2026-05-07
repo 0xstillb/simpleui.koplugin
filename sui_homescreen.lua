@@ -921,6 +921,7 @@ function HomescreenWidget:init()
     self._clock_is_wrapped   = nil
     self._clock_pfx          = nil
     self._clock_inner_w      = nil
+    self._overflow_warn_key  = nil
 
     -- Minimal placeholder so patches.lua can call wrapWithNavbar safely.
     -- Real content is built in onShow() once _navbar_content_h is set.
@@ -1929,23 +1930,60 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
     end
 
     -- Warn when module heights overflow the visible area (portrait only).
-    if not is_landscape then
+    -- Skipped when the user has disabled the warning in settings.
+    if not is_landscape
+       and G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn") then
         local total_body_h = 0
         for i = 1, #body do
             local ok, sz = pcall(function() return body[i]:getSize() end)
-            if ok and sz then total_body_h = total_body_h + sz.h end
+            if ok and sz and sz.h then total_body_h = total_body_h + sz.h end
         end
-        local avail_h = self._layout_content_h or Screen:getHeight()
+        -- Use the already-computed content height when available; recalculate
+        -- from sui_core when _layout_content_h has not been set yet (e.g. the
+        -- very first _updatePage call before _initLayout runs), instead of
+        -- falling back to Screen:getHeight() which includes the bars.
+        local avail_h = self._layout_content_h or UI.getContentHeight()
         if total_body_h > avail_h then
-            local self_ref = self
-            UIManager:scheduleIn(0.5, function()
-                if Homescreen._instance ~= self_ref then return end
-                UIManager:show(require("ui/widget/infomessage"):new{
-                    text    = _("Modules exceed the visible area.\nMove some to another page or adjust the scale."),
-                    timeout = 4,
-                })
-            end)
+            -- Guard against showing the warning multiple times for the same
+            -- overflow within one homescreen session (e.g. after a page turn
+            -- back to an already-checked page, or a stats-only refresh).
+            local warn_key = tostring(self._current_page) .. ":" .. tostring(total_body_h)
+            if self._overflow_warn_key ~= warn_key then
+                self._overflow_warn_key = warn_key
+                -- Capture current layout dimensions so the deferred callback
+                -- can detect a rotation that invalidated them before it fires.
+                local snap_sw      = self._layout_sw      or Screen:getWidth()
+                local snap_avail_h = avail_h
+                local self_ref     = self
+                UIManager:scheduleIn(0.5, function()
+                    -- Abort if the instance has been replaced or the screen
+                    -- has been rotated since the warning was scheduled.
+                    if Homescreen._instance ~= self_ref then return end
+                    if (self_ref._layout_sw or Screen:getWidth()) ~= snap_sw then return end
+                    if (self_ref._layout_content_h or UI.getContentHeight()) ~= snap_avail_h then return end
+                    UIManager:show(require("ui/widget/infomessage"):new{
+                        text    = _("Modules exceed the visible area.\nMove some to another page or adjust the scale."),
+                        timeout = 4,
+                    })
+                end)
+            end
+        else
+            -- Reset the dedup key when the page no longer overflows so that a
+            -- subsequent layout change that causes it to overflow again is reported.
+            self._overflow_warn_key = nil
         end
+    end
+
+    -- Start (or re-arm) the cover-extraction poll if any module's build()
+    -- call triggered a background extraction.  This check is intentionally
+    -- placed here — after all mod.build() calls — because getCoverBB sets
+    -- Config.cover_extraction_pending during build(), not during prefetchBooks.
+    -- The earlier check in _buildCtx (after prefetchBooks) handles the rare
+    -- case where the flag was already set from a previous render cycle that
+    -- did not yet finish polling; this check catches the common first-render
+    -- case where covers are encountered for the first time.
+    if Config.cover_extraction_pending and not self._cover_poll_timer then
+        self:_scheduleCoverPoll()
     end
 end
 
@@ -2170,6 +2208,7 @@ function HomescreenWidget:onCloseWidget()
     self._clock_is_wrapped = nil
     self._clock_pfx        = nil
     self._clock_inner_w    = nil
+    self._overflow_warn_key = nil
 
     -- Clear cover cache only when the FM file browser was visited since the
     -- last homescreen open (CoverBrowser replaces BIM covers with scaled

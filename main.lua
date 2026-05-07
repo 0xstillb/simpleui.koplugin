@@ -735,11 +735,22 @@ function SimpleUIPlugin:onCloseDocument()
 
         if notice_mode == "always"
                 or (notice_mode == "gesture_only" and via_gesture) then
+            -- UIManager:show() respects honor_silent_mode on InfoMessage, which
+            -- means the notice is silently dropped when the Dispatcher has put
+            -- the UIManager into silent mode to batch multiple gesture actions.
+            -- We bypass silent mode here by temporarily clearing it, showing the
+            -- notice and flushing it to the screen, then restoring the flag.
+            -- This is safe because forceRePaint() runs synchronously and the
+            -- InfoMessage is a non-blocking toast (timeout=0.0 auto-closes it);
+            -- no other widget draw or event dispatch occurs between the two lines.
+            local was_silent = UIManager:isInSilentMode()
+            if was_silent then UIManager:setSilentMode(false) end
             UIManager:show(InfoMessage:new{
                 text    = _("Closing book…"),
                 timeout = 0.0,
             })
             UIManager:forceRePaint()
+            if was_silent then UIManager:setSilentMode(true) end
         end
     end
 

@@ -1433,6 +1433,14 @@ msgstr "Definições"
 msgid "Settings on Long Tap"
 msgstr "Definições com Toque Longo"
 
+#: sui_menu.lua:1999
+msgid "Warn When Modules Overflow"
+msgstr "Avisar Quando os Módulos Excedem a Área"
+
+#: sui_menu.lua:2000
+msgid "When enabled, a notice is shown if the modules on a page are taller than the visible area.\nDisable this to silence the warning."
+msgstr "Quando ativado, é mostrado um aviso se os módulos de uma página forem mais altos do que a área visível.\nDesative esta opção para silenciar o aviso."
+
 #: sui_menu.lua:2035
 msgid "Settings Tab"
 msgstr "Separador de Definições"

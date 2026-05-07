@@ -1629,6 +1629,14 @@ msgstr ""
 msgid "Settings on Long Tap"
 msgstr ""
 
+#: sui_menu.lua:1999
+msgid "Warn When Modules Overflow"
+msgstr ""
+
+#: sui_menu.lua:2000
+msgid "When enabled, a notice is shown if the modules on a page are taller than the visible area.\nDisable this to silence the warning."
+msgstr ""
+
 #: desktop_modules/module_clock.lua:524
 msgid "Show Battery"
 msgstr ""
