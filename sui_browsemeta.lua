@@ -60,17 +60,19 @@ local VROOT_SEP = "/" .. VROOT   -- pre-built; avoids alloc on every _findVroot
 
 local SYM_AUTHOR = "\u{F2C0}"
 local SYM_SERIES = "\u{ECD7}"
+local SYM_TAGS   = "\u{F02B}"
 local NULL_MARKER = "\u{2205}"
 
 local DIMS = {
-    author = { symbol = SYM_AUTHOR, db_column = "authors", label = _("Authors") },
-    series = { symbol = SYM_SERIES, db_column = "series",  label = _("Series")  },
+    author = { symbol = SYM_AUTHOR, db_column = "authors",  label = _("Authors"), multi_value = true  },
+    series = { symbol = SYM_SERIES, db_column = "series",   label = _("Series"),  multi_value = false },
+    tags   = { symbol = SYM_TAGS,   db_column = "keywords", label = _("Tags"),    multi_value = true  },
 }
 
 local SYM_TO_DIM = {}
 for k, v in pairs(DIMS) do SYM_TO_DIM[v.symbol] = k end
 
-local DIMS_ORDER = { "author", "series" }
+local DIMS_ORDER = { "author", "series", "tags" }
 
 -- ---------------------------------------------------------------------------
 -- Module state
@@ -224,7 +226,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Constant SQL base — never allocated at runtime.
-local _SQL_BASE = "SELECT directory, filename, title, authors, series, series_index"
+local _SQL_BASE = "SELECT directory, filename, title, authors, series, series_index, keywords"
                .. " FROM bookinfo WHERE directory GLOB ?"
 
 -- Returns { {fullpath, filename, title=, authors=, series=, series_index=}, ... }
@@ -241,8 +243,9 @@ local function _getMatchingFiles(base_dir, filters)
         local col, val = f[1], f[2]
         if val == false then
             sql = sql .. " AND " .. col .. " IS NULL"
-        elseif col == "authors" then
-            sql = sql .. " AND '\n'||authors||'\n' GLOB ?"
+        elseif col == "authors" or col == "keywords" then
+            -- Multi-value fields: newline-delimited, match exact token.
+            sql = sql .. " AND '\n'||" .. col .. "||'\n' GLOB ?"
             vars[#vars + 1] = "*\n" .. val .. "\n*"
         else
             sql = sql .. " AND " .. col .. "=?"
@@ -267,6 +270,7 @@ local function _getMatchingFiles(base_dir, filters)
                 authors      = row[4],
                 series       = row[5],
                 series_index = tonumber(row[6]),
+                keywords     = row[7],
             }
         end
     end)
@@ -292,20 +296,21 @@ local function _getMetadataValues(base_dir, dim_key)
     local first   = {}
 
     for _, row in ipairs(files) do
-        if dim_key == "author" then
-            local authors = row.authors
-            if authors and authors:find("\n", 1, true) then
-                for author in util.gsplit(authors, "\n") do
-                    if author ~= "" then
-                        if not grouped[author] then
-                            grouped[author] = 0
-                            first[author]   = row
+        if dim_key == "author" or dim_key == "tags" then
+            -- Multi-value dimension: one book can appear under several entries.
+            local raw = (dim_key == "author") and row.authors or row.keywords
+            if raw and raw:find("\n", 1, true) then
+                for token in util.gsplit(raw, "\n") do
+                    if token ~= "" then
+                        if not grouped[token] then
+                            grouped[token] = 0
+                            first[token]   = row
                         end
-                        grouped[author] = grouped[author] + 1
+                        grouped[token] = grouped[token] + 1
                     end
                 end
             else
-                local key = authors or false
+                local key = raw or false
                 if not grouped[key] then
                     grouped[key] = 0
                     first[key]   = row
@@ -313,6 +318,7 @@ local function _getMetadataValues(base_dir, dim_key)
                 grouped[key] = grouped[key] + 1
             end
         else
+            -- Single-value dimension (series).
             local key = row.series or false
             if not grouped[key] then
                 grouped[key] = 0
@@ -355,6 +361,7 @@ local function _sortFiles(files, dim_key)
     local is_author = (dim_key == "author")
     table.sort(files, function(a, b)
         if is_author then
+            -- In author mode group books by series, then by index within series.
             local as, bs = a.series, b.series
             if as ~= bs then return _strcollSafe(as, bs) end
         end
@@ -475,6 +482,15 @@ local function _getVirtualList(fc, path, collate)
                     end
                 end
 
+                -- Skip virtual folders whose every book has been deleted from disk.
+                -- The bookinfo DB may still hold stale metadata for those files,
+                -- but showing an empty virtual folder would confuse the user.
+                if real_count == 0 then
+                    _repr_file_cache[vpath] = nil  -- evict any stale repr entry
+                    -- fall through to else branch: add a plain 'true' placeholder
+                    -- so the parent count (dirs) stays consistent for non-collate callers.
+                else
+
                 local item = fc:getListItem(nil, label, vpath, _fakeAttr(i), collate)
                 item.nb_sub_files = real_count
                 item.mandatory    = tostring(real_count) .. " \u{F016}"
@@ -508,6 +524,7 @@ local function _getVirtualList(fc, path, collate)
                     item.representative_filepath = repr
                 end
                 dirs[#dirs + 1] = item
+                end -- real_count > 0
             else
                 dirs[#dirs + 1] = true
             end
@@ -523,7 +540,7 @@ local function _getVirtualList(fc, path, collate)
             _sortFiles(cached, dim_key)
             _matching_files_cache[path] = cached
         end
-        local is_author_dim = (dim_key == "author")
+        local is_author_dim = (dim_key == "author")  -- tags + series share the "else" path
         for _, row in ipairs(cached) do
             local fullpath = row[1]
             local fname    = row[2]
@@ -543,8 +560,10 @@ local function _getVirtualList(fc, path, collate)
                         series_index  = row.series_index,
                     }
                 end
-                -- Contextual mandatory: in author-mode show series+index;
-                -- in series-mode show author. Falls back to abbreviated path.
+                -- Contextual mandatory text:
+                --   author mode  → series + index (gives reading-order context)
+                --   series mode  → first author name
+                --   tags mode    → first author name (same as series mode)
                 if collate then
                     if is_author_dim then
                         if row.series and row.series ~= "" then
@@ -555,8 +574,8 @@ local function _getVirtualList(fc, path, collate)
                             item.mandatory = m
                         end
                     else
+                        -- series and tags modes: show first author
                         if row.authors and row.authors ~= "" then
-                            -- Trim multi-author to first author + "et al."
                             item.mandatory = row.authors:gsub("\n.*", " et al.")
                         end
                     end
@@ -756,6 +775,92 @@ local function _invalidateVirtualItem(menu, vpath)
         end
     end
     menu:updateItems(1, true)
+end
+
+-- ---------------------------------------------------------------------------
+-- _createCollectionFromVirtualFolder(vpath, fc)
+--
+-- Called from the onMenuHold / showFileDialog interceptors when the user
+-- long-presses a virtual meta leaf and selects "Create collection".
+--
+-- Behaviour:
+--   • Pre-fills the InputDialog with the leaf's filter value (author name,
+--     series name, or tag).  The user can edit it before confirming.
+--   • Calls ReadCollection:addCollection + addItem for every matching book,
+--     then writes the collection file once.
+--   • Shows an InfoMessage with the final count.
+--   • filter_value == false means the "no metadata" bucket (∅) — the name
+--     field is left empty so the user must type one.
+-- ---------------------------------------------------------------------------
+local function _createCollectionFromVirtualFolder(vpath, fc)  -- luacheck: ignore fc
+    local UIManager   = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local InputDialog = require("ui/widget/inputdialog")
+    local T           = require("ffi/util").template
+
+    local base_dir, dim_key, filter_value = _parseVirtualPath(vpath)
+    if not base_dir or not dim_key or filter_value == nil then return end
+
+    local suggested = (filter_value ~= false) and filter_value or ""
+
+    local RC = require("readcollection")
+
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title   = _("New collection name"),
+        input   = suggested,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id   = "close",
+                callback = function()
+                    UIManager:close(input_dialog)
+                end,
+            },
+            {
+                text = _("Create"),
+                callback = function()
+                    local name = input_dialog:getInputText()
+                    if name == "" then return end
+                    UIManager:close(input_dialog)
+
+                    if RC.coll[name] then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Collection already exists: %1"), name),
+                        })
+                        return
+                    end
+
+                    -- Fetch all books matching this virtual folder's filter.
+                    local col     = DIMS[dim_key].db_column
+                    local filters = (filter_value ~= false)
+                        and { { col, filter_value } }
+                        or  { { col, false } }
+                    local books = _getMatchingFiles(base_dir, filters)
+
+                    RC:addCollection(name)
+                    local count = 0
+                    for _, row in ipairs(books) do
+                        local fp = row[1]
+                        -- coll[name] is a fresh empty table, but guard anyway.
+                        if not RC.coll[name][fp] then
+                            RC:addItem(fp, name)
+                            count = count + 1
+                        end
+                    end
+                    RC:write({ [name] = true })
+
+                    UIManager:show(InfoMessage:new{
+                        text    = T(_("Collection \"%1\" created with %2 books."),
+                                    name, count),
+                        timeout = 3,
+                    })
+                end,
+            },
+        }},
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
 end
 
 local function _openVirtualCoverPicker(vpath, fc)
@@ -960,6 +1065,16 @@ local function _installPatches()
         FileChooser.showFileDialog = function(fc, item)
             if item and item.path and _isVirtual(item.path) then
                 fc.book_props = nil
+                -- In mosaic/grid mode (display_mode_type == "mosaic") the
+                -- cover picker makes no sense, so leaf long-press only offers
+                -- "Create collection".  In list mode the full context menu
+                -- (_patched_menuhold) fires first and showFileDialog is never
+                -- reached for leaf items; this branch handles the mosaic path.
+                if item.is_virtual_meta_leaf then
+                    _createCollectionFromVirtualFolder(item.path, fc)
+                end
+                -- Non-leaf virtual items (dim-root folders such as "Authors")
+                -- still return true silently — no sensible action to offer.
                 return true
             end
             return orig(fc, item)
@@ -971,12 +1086,37 @@ local function _installPatches()
         _orig_onMenuHold = FileChooser.onMenuHold
         local orig = _orig_onMenuHold
         FileChooser.onMenuHold = function(fc, item)
-            -- Intercept long-press on any virtual meta leaf (dim_list author/
-            -- series entries) and open the cover picker directly.  file_list
-            -- items (individual books inside a leaf) are also intercepted so
-            -- the cover picker is reachable there too.
+            -- Intercept long-press on any virtual meta leaf in list/list-image
+            -- modes.  In mosaic/grid mode this handler is not reached for
+            -- folder items — the CoverBrowser routes those through
+            -- showFileDialog instead (handled in _patched_showdialog above).
             if item and item.path and item.is_virtual_meta_leaf then
-                _openVirtualCoverPicker(item.path, fc)
+                local UIManager    = require("ui/uimanager")
+                local ButtonDialog = require("ui/widget/buttondialog")
+                local dialog
+                dialog = ButtonDialog:new{
+                    buttons = {
+                        {{
+                            text     = _("Folder cover"),
+                            callback = function()
+                                UIManager:close(dialog)
+                                _openVirtualCoverPicker(item.path, fc)
+                            end,
+                        }},
+                        {{
+                            text     = _("Create collection"),
+                            callback = function()
+                                UIManager:close(dialog)
+                                _createCollectionFromVirtualFolder(item.path, fc)
+                            end,
+                        }},
+                        {{
+                            text     = _("Cancel"),
+                            callback = function() UIManager:close(dialog) end,
+                        }},
+                    },
+                }
+                UIManager:show(dialog)
                 return true
             end
             return orig(fc, item)

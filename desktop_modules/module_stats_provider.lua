@@ -309,17 +309,31 @@ local function countMarkedReadBoth(year_str)
     return books_year, books_total
 end
 
+-- Partial-invalidation flags — declared here so SP.get(), SP.invalidate(),
+-- and SP.invalidateTimeSeries() all close over the same locals.
+-- _books_cache_valid:  set by invalidateTimeSeries() when books_year/books_total
+--   are known-unchanged; consumed and cleared by SP.get().
+-- _streak_cache_valid: same pattern for the streak value.
+local _books_cache_valid  = false
+local _streak_cache_valid = false
+
 -- ---------------------------------------------------------------------------
--- SP.get(db_conn, year_str) — main entry point.
+-- SP.get(db_conn, year_str, needs_books) — main entry point.
 --
--- db_conn:   shared ljsqlite3 connection from ctx.db_conn (may be nil if DB
---            unavailable; returns zero-filled table in that case).
--- year_str:  current year as string e.g. "2025" — pass ctx.year_str.
+-- db_conn:      shared ljsqlite3 connection from ctx.db_conn (may be nil if DB
+--               unavailable; returns zero-filled table in that case).
+-- year_str:     current year as string e.g. "2025" — pass ctx.year_str.
+-- needs_books:  when true, runs the sidecar scan to populate books_year and
+--               books_total.  Pass false when no active module consumes these
+--               fields (e.g. reading_stats active but "total_books" not
+--               selected, and reading_goals inactive) to skip up to 200
+--               DS.open() calls.  Defaults to true for safety.
 --
 -- Returns a table; sets result.db_conn_fatal = true if the shared connection
 -- encountered a fatal error (caller should set ctx.db_conn_fatal accordingly).
 -- ---------------------------------------------------------------------------
-function SP.get(db_conn, year_str)
+function SP.get(db_conn, year_str, needs_books)
+    if needs_books == nil then needs_books = true end  -- safe default
     -- Single os.date("*t") call — derive today_str from the same table to
     -- avoid a second os.date("%Y-%m-%d") syscall. string.format is faster
     -- than os.date for simple date formatting in LuaJIT.
@@ -327,8 +341,36 @@ function SP.get(db_conn, year_str)
     local today_str   = string.format("%04d-%02d-%02d", t.year, t.month, t.day)
 
     -- Cache hit: same calendar day, data already fetched.
+    -- When needs_books=true, only use the cache if it was built with books data
+    -- (books_total > 0 is not a reliable sentinel — a user with zero finished
+    -- books would always miss). Instead we track completeness with a flag.
     if _cache and _cache_day == today_str then
-        return _cache
+        if not needs_books or _cache._has_books then
+            return _cache
+        end
+        -- Cache exists but was built without books data and now we need it:
+        -- fall through to re-run the sidecar scan.  DB fields are already
+        -- correct so we skip the DB queries below by pre-filling result from
+        -- the existing cache, then only run countMarkedReadBoth.
+        local result = {
+            today_secs    = _cache.today_secs,
+            today_pages   = _cache.today_pages,
+            avg_secs      = _cache.avg_secs,
+            avg_pages     = _cache.avg_pages,
+            year_secs     = _cache.year_secs,
+            total_secs    = _cache.total_secs,
+            streak        = _cache.streak,
+            books_year    = 0,
+            books_total   = 0,
+            db_conn_fatal = _cache.db_conn_fatal,
+            _has_books    = true,
+        }
+        local by, bt = countMarkedReadBoth(year_str or tostring(t.year))
+        result.books_year  = by
+        result.books_total = bt
+        _cache     = result
+        -- _cache_day stays the same (today_str)
+        return result
     end
 
     -- Compute timestamps once — shared by all sub-queries.
@@ -373,18 +415,52 @@ function SP.get(db_conn, year_str)
         end
 
         if not result.db_conn_fatal then
-            result.streak = fetchStreak(db_conn, start_today)
+            -- Skip fetchStreak when invalidateTimeSeries() preserved the value:
+            -- _streak_cache_valid is set only when the previous cache was built
+            -- on today_str, meaning the streak was already correct for today.
+            -- Any close after the first session of the day hits this fast path.
+            if _streak_cache_valid then
+                result.streak   = (_cache and _cache.streak) or 0
+                _streak_cache_valid = false
+            else
+                result.streak = fetchStreak(db_conn, start_today)
+            end
         end
     end
 
     -- ── Sidecar scan (one pass for both year + total) ─────────────────────
     -- year_str comes from the caller; fall back to t.year (already computed)
     -- to avoid a final os.date call.
-    local by, bt = countMarkedReadBoth(year_str or tostring(t.year))
-    result.books_year  = by
-    result.books_total = bt
+    --
+    -- Skipped entirely when needs_books=false: no active module needs
+    -- books_year or books_total, so up to 200 DS.open() calls are avoided.
+    --
+    -- Also skipped when _books_cache_valid is set: invalidateTimeSeries()
+    -- preserved the previous counts because the closed book's status did not
+    -- change.  The flag is single-use — cleared immediately after reading so
+    -- that the next render (e.g. after midnight rollover) runs the full scan.
+    if not needs_books then
+        -- No consumer needs books_year/books_total — skip the sidecar scan.
+        -- Do NOT cache this result under today_str: a future call with
+        -- needs_books=true on the same calendar day must still run the scan
+        -- rather than hitting the cache and getting zeros.
+        -- _books_cache_valid is left untouched: if invalidateTimeSeries() set
+        -- it, the flag remains valid for the next needs_books=true call.
+        return result
+    elseif _books_cache_valid then
+        -- Reuse counts from the partially-invalidated cache entry.
+        result.books_year  = (_cache and _cache.books_year)  or 0
+        result.books_total = (_cache and _cache.books_total) or 0
+        _books_cache_valid = false
+    else
+        local by, bt = countMarkedReadBoth(year_str or tostring(t.year))
+        result.books_year  = by
+        result.books_total = bt
+    end
 
     -- ── Cache and return ──────────────────────────────────────────────────
+    -- Mark the cache entry so the cache-hit path knows books data is present.
+    result._has_books = true
     _cache     = result
     _cache_day = today_str
     return result
@@ -393,13 +469,75 @@ end
 -- ---------------------------------------------------------------------------
 -- SP.invalidate() — discard the cached stats so the next SP.get() re-fetches.
 -- Call from:
---   • main.lua:onCloseDocument  (reading session ended)
+--   • main.lua:onCloseDocument  (reading session ended, book status changed)
 --   • sui_homescreen:onShow     (when _stats_need_refresh is set)
 --   • module_reading_goals dialogs (goal thresholds changed)
 -- ---------------------------------------------------------------------------
 function SP.invalidate()
-    _cache     = nil
-    _cache_day = nil
+    _cache              = nil
+    _cache_day          = nil
+    -- Clear partial-invalidation flags so a subsequent SP.get() does not
+    -- try to reuse values from a cache that no longer exists.
+    _books_cache_valid  = false
+    _streak_cache_valid = false
+end
+
+-- ---------------------------------------------------------------------------
+-- SP.invalidateTimeSeries() — partial invalidation for the common case where
+-- a reading session ended but the book's completion status did NOT change.
+--
+-- After a normal reading session, only the DB-derived fields are stale
+-- (today_secs, today_pages, avg_*, year_secs, total_secs, streak).
+-- books_year and books_total come from the sidecar scan in countMarkedReadBoth,
+-- which is expensive (up to _MAX_HIST sidecar opens). When the closed book's
+-- summary.status did not cross the "complete" boundary, those counts are
+-- unchanged and can be preserved in the cache.
+--
+-- Strategy: keep the cache entry alive but zero all DB-derived fields and
+-- clear _cache_day so the next SP.get() treats it as a cold-cache miss and
+-- re-runs both DB queries. books_year/books_total survive untouched.
+--
+-- This is safe because SP.get() unconditionally overwrites all fields in the
+-- result table from fresh queries — the surviving books_* values are used
+-- directly as-is only when countMarkedReadBoth is skipped (see below).
+-- SP.get() is updated to skip countMarkedReadBoth when _books_cache_valid is
+-- set, then clears the flag so subsequent calls behave normally.
+-- ---------------------------------------------------------------------------
+function SP.invalidateTimeSeries()
+    if not _cache then return end   -- nothing cached; no-op
+    -- Zero only the DB-derived fields. books_year/books_total are kept.
+    _cache.today_secs    = 0
+    _cache.today_pages   = 0
+    _cache.avg_secs      = 0
+    _cache.avg_pages     = 0
+    _cache.year_secs     = 0
+    _cache.total_secs    = 0
+    -- Streak: the recursive CTE result only changes on the *first* reading
+    -- session of a new day (when today's date first appears in page_stat_data).
+    -- For any subsequent close within the same calendar day the streak value
+    -- is identical — re-running fetchStreak would be pure waste.
+    -- _cache_day holds the date string when the cache was built.  If it equals
+    -- today we have already fetched the streak for today at least once, so we
+    -- can carry it forward.  If it differs (cache was built yesterday or the
+    -- day before) this is the first session of today and the streak may have
+    -- just been broken or extended — we must re-fetch.
+    -- We compute today_str here with the same string.format pattern used in
+    -- SP.get() to avoid an os.date call; os.time() is a single syscall.
+    local t = os.date("*t")
+    local today_str = string.format("%04d-%02d-%02d", t.year, t.month, t.day)
+    if _cache_day == today_str then
+        -- Same day: streak cannot have changed — preserve it.
+        _streak_cache_valid = true
+        _books_cache_valid  = true
+        _cache_day          = nil    -- force SP.get() to re-run DB time-series
+        -- streak is intentionally left untouched in _cache
+    else
+        -- Different day (first session today): streak must be re-fetched.
+        _cache.streak       = 0
+        _streak_cache_valid = false
+        _books_cache_valid  = true
+        _cache_day          = nil
+    end
 end
 
 -- Expose internal cache getters for countMarkedReadBoth (used via SH reference).

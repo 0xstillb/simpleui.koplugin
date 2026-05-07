@@ -693,34 +693,53 @@ function SimpleUIPlugin:onResume()
 end
 
 function SimpleUIPlugin:onCloseDocument()
+    -- Consume _closing_via_gesture unconditionally before any early return,
+    -- so the flag never leaks to a subsequent close if this handler bails out
+    -- (e.g. while the plugin is suspended).
+    local via_gesture = self._closing_via_gesture
+    self._closing_via_gesture = nil
+
     if self._simpleui_suspended then return end
     local HS = package.loaded["sui_homescreen"]
     if not HS then return end
 
-    -- Show a brief "closing book" notice when returning to the homescreen.
-    -- Mirrors the "Opening file" InfoMessage used by ReaderUI, but smaller
-    -- (no filename) and disappears on the next repaint — it does not block
-    -- the homescreen load in any way.
-    -- NOTE: patchReaderMenuExit (sui_patches) shows this notice earlier, while
-    -- the reader menu is still open, so the user sees it immediately on tap.
-    -- When that path fires it sets _closing_notice_shown; we skip the duplicate
-    -- show+forceRePaint here to avoid a redundant e-ink refresh on the hot path.
-    if G_reader_settings:nilOrTrue("simpleui_hs_closing_notice") then
-        local return_to_folder = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
-        local start_with_hs    = G_reader_settings:readSetting("start_with", "filemanager") == "homescreen_simpleui"
-        -- Only show when we are actually going back to the SimpleUI homescreen.
-        if start_with_hs and not return_to_folder then
-            if self._closing_notice_shown then
-                -- Already shown before the menu closed; just clear the flag.
-                self._closing_notice_shown = nil
-            else
-                -- Fallback: menu patch did not fire (e.g. gesture/direct close).
-                UIManager:show(InfoMessage:new{
-                    text    = _("Closing book…"),
-                    timeout = 0.0,
-                })
-                UIManager:forceRePaint()
-            end
+    -- Show a brief "closing book" notice whenever a book is closed.
+    -- onCloseDocument is the single, authoritative place for this: it fires on
+    -- every close path (menu, gesture, or any direct call to ReaderUI:onClose).
+    --
+    -- How the three modes work:
+    --   "always"       — show on every book close, regardless of how it was
+    --                    triggered or where the user ends up afterwards.
+    --   "gesture_only" — show only when the close was triggered by a SimpleUI
+    --                    gesture (GoHomescreen, GoLibrary, ToggleHomeLibrary).
+    --                    Those paths set plugin._closing_via_gesture = true
+    --                    immediately before readerui:onClose(). We read and
+    --                    clear that flag above. Menu-triggered closes never set
+    --                    the flag — no KOReader internals patched.
+    --   "never"        — never show.
+    --
+    -- The notice is shown while readerui.dialog is still on the widget stack
+    -- (i.e. the book page is still the background). forceRePaint pushes it to
+    -- the e-ink screen immediately; without it _repaint() only runs on the next
+    -- event-loop tick, after closeDocument() and UIManager:close(dialog) have
+    -- already run, so the notice would appear over the FM/HS far too late.
+    -- timeout=0.0 schedules the InfoMessage to close itself on the next tick.
+    --
+    -- Migration: if simpleui_hs_closing_notice_mode is absent, fall back to the
+    -- old boolean simpleui_hs_closing_notice (nil/true → "always", false → "never").
+    do
+        local notice_mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+        if not notice_mode then
+            notice_mode = G_reader_settings:nilOrTrue("simpleui_hs_closing_notice") and "always" or "never"
+        end
+
+        if notice_mode == "always"
+                or (notice_mode == "gesture_only" and via_gesture) then
+            UIManager:show(InfoMessage:new{
+                text    = _("Closing book…"),
+                timeout = 0.0,
+            })
+            UIManager:forceRePaint()
         end
     end
 
@@ -751,17 +770,6 @@ function SimpleUIPlugin:onCloseDocument()
     -- Only call pcall(require) for modules that are actually enabled.
     -- Registry.get + Registry.isEnabled are cheap table lookups; the module
     -- is guaranteed already loaded when enabled (required by the HS on open).
-    -- Invalidate the shared stats provider when either stats module is active.
-    -- One SP.invalidate() covers both reading_goals and reading_stats — they
-    -- both read ctx.stats which is populated from StatsProvider.get().
-    local mod_rg = Registry.get("reading_goals")
-    local mod_rs = Registry.get("reading_stats")
-    local stats_active = (mod_rg and Registry.isEnabled(mod_rg, PFX))
-        or (mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX))
-    if stats_active then
-        local SP = package.loaded["desktop_modules/module_stats_provider"]
-        if SP then SP.invalidate(); needs_refresh = true end
-    end
 
     -- Determine the filepath of the book that just closed.
     -- readhistory.hist[1] is still the closing book at this point (the reader
@@ -769,6 +777,73 @@ function SimpleUIPlugin:onCloseDocument()
     -- been updated).
     local rh         = package.loaded["readhistory"]
     local closed_fp  = rh and rh.hist and rh.hist[1] and rh.hist[1].file
+
+    -- Invalidate the shared stats provider when either stats module is active.
+    -- One SP.invalidate() covers both reading_goals and reading_stats — they
+    -- both read ctx.stats which is populated from StatsProvider.get().
+    --
+    -- Optimisation: SP contains two parts — DB time-series (always stale after
+    -- a reading session) and books_year/books_total (sidecar scan, expensive).
+    -- The sidecar-derived counts only change when the closed book's
+    -- summary.status transitions to or from "complete". We detect this by
+    -- comparing the cached pre-session status (from SH._cacheGet, still valid
+    -- at this point) with the on-disk status (one DS.open on the closed book).
+    -- If neither was "complete" and neither is now, the counts are unchanged
+    -- and we can spare the full SP.invalidate() — instead we call
+    -- SP.invalidateTimeSeries() which discards only the DB-derived fields,
+    -- leaving books_year/books_total intact in the cache.
+    local mod_rg = Registry.get("reading_goals")
+    local mod_rs = Registry.get("reading_stats")
+    local stats_active = (mod_rg and Registry.isEnabled(mod_rg, PFX))
+        or (mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX))
+    if stats_active then
+        local SP = package.loaded["desktop_modules/module_stats_provider"]
+        if SP then
+            local status_changed = true  -- default: full invalidation (safe)
+            if closed_fp and SP.invalidateTimeSeries then
+                local SH = package.loaded["desktop_modules/module_books_shared"]
+                -- Pre-session status: read from sidecar cache (no I/O).
+                -- The cache entry is still valid here — SH.invalidateSidecarCache
+                -- for closed_fp runs later in this function, after this block.
+                local pre_status
+                if SH and SH._cacheGet then
+                    local cached = SH._cacheGet(closed_fp)
+                    local s = cached and cached.summary
+                    pre_status = type(s) == "table" and s.status or nil
+                end
+                -- Post-session status: one DS.open on the closed book only.
+                local post_status
+                local ok_DS, DocSettings = pcall(require, "docsettings")
+                if ok_DS then
+                    local ok_ds, ds = pcall(function()
+                        return DocSettings:open(closed_fp)
+                    end)
+                    if ok_ds and ds then
+                        local s = ds:readSetting("summary")
+                        post_status = type(s) == "table" and s.status or nil
+                        pcall(function() ds:close() end)
+                    end
+                end
+                -- Status changed only when a "complete" boundary was crossed.
+                -- Both nil/non-complete pre and post → counts are unaffected.
+                local pre_complete  = pre_status  == "complete"
+                local post_complete = post_status == "complete"
+                status_changed = pre_complete ~= post_complete
+            end
+
+            if status_changed then
+                SP.invalidate()
+            elseif SP.invalidateTimeSeries then
+                -- Counts unchanged: only discard DB-derived fields (time, pages,
+                -- streak). books_year/books_total survive in the cache intact.
+                SP.invalidateTimeSeries()
+            else
+                -- SP.invalidateTimeSeries not available (older version): fall back.
+                SP.invalidate()
+            end
+            needs_refresh = true
+        end
+    end
 
     -- Currently Reading shows the current book's cover, title, author and
     -- progress (percent_finished). All of these come from _cached_books_state.

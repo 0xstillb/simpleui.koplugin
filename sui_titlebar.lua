@@ -1,53 +1,65 @@
--- titlebar.lua — Simple UI
--- Encapsulates all title-bar customisations for the FileManager and injected
--- fullscreen widgets (Collections, History, …).
+-- sui_titlebar.lua — Simple UI
+-- Title-bar customisations for the FileManager (FM) and injected fullscreen
+-- widgets (Collections, History, …).
 --
--- TWO CONTEXTS
---   FM (FileManager):
---     apply(fm_self)        — called from patches.lua
---     restore(fm_self)      — undo all FM titlebar changes
---     reapply(fm_self)      — restore + apply
---
---   Injected widgets (Collections, History, coll_list, homescreen…):
---     applyToInjected(w)    — called from patchUIManagerShow
---     restoreInjected(w)    — undo changes on a specific injected widget
---
---   Both:
---     reapplyAll(fm, stack) — re-apply (or restore) every live widget
---
--- BUTTON PADDING NOTES (from KOReader TitleBar source)
---   left_button:  padding_left=button_padding(8), padding_right=2*icon_size(72)
---   right_button: padding_left=2*icon_size(72),   padding_right=button_padding(8)
---   We zero ALL paddings before placing, so overlap_offset[1] = icon left edge.
+-- FM context:   apply(fm_self)  /  restore(fm_self)  /  reapply(fm_self)
+-- Injected:     applyToInjected(w)  /  restoreInjected(w)
+-- Both:         reapplyAll(fm, stack)
 
 local _ = require("sui_i18n").translate
 local Config = require("sui_config")
 
--- Lua 5.1 compatibility: unpack is a global; table.unpack was added in 5.2 / LuaJIT compat.
+-- Lua 5.1 / LuaJIT compat: table.unpack was added in 5.2.
 local _unpack = table.unpack or unpack
+
+-- Plugin directory resolved once at load time (used for browse-mode icon paths).
+local _PLUGIN_DIR = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
+
+-- Full paths for the four browse-mode icons.
+local _BROWSE_ICONS = {
+    normal = _PLUGIN_DIR .. "icons/default.svg",
+    author = _PLUGIN_DIR .. "icons/author.svg",
+    series = _PLUGIN_DIR .. "icons/series.svg",
+    tags   = _PLUGIN_DIR .. "icons/tags.svg",
+}
 
 local M = {}
 
 -- ---------------------------------------------------------------------------
--- Helper: returns true when the library "Lock Home Folder" setting is active
--- AND the given path is the configured home folder.  In that case the Back
--- button must be hidden even though no is_go_up item exists in the list.
+-- Settings keys and defaults
 -- ---------------------------------------------------------------------------
-local function _isLockedAtHome(path)
-    if not G_reader_settings:isTrue("lock_home_folder") then return false end
-    if not path then return false end
-    local home = G_reader_settings:readSetting("home_dir")
-    if not home then return false end
-    local ffiUtil = require("ffi/util")
-    local ok_p, p = pcall(ffiUtil.realpath, path)
-    local ok_h, h = pcall(ffiUtil.realpath, home)
-    p = (ok_p and p or path):gsub("/$", "")
-    h = (ok_h and h or home):gsub("/$", "")
-    return p == h
-end
+
+local SETTING_KEY = "simpleui_titlebar_custom"
+local FM_CFG_KEY  = "simpleui_tb_fm_cfg"
+local INJ_CFG_KEY = "simpleui_tb_inj_cfg"
+local SIZE_KEY    = "simpleui_tb_size"
+
+local _SIZE_SCALE = { compact = 0.75, default = 1.0, large = 1.3 }
+
+local _VIS_DEFAULTS = {
+    menu_button   = true,
+    up_button     = true,
+    title         = true,
+    search_button = true,
+    browse_button = false,
+    inj_back      = true,
+    inj_right     = false,
+}
+
+-- Default side/order configs for FM and injected widgets.
+local _FM_DEFAULTS = {
+    side        = { menu_button = "right", up_button = "left", search_button = "left", browse_button = "right" },
+    order_left  = { "up_button", "search_button" },
+    order_right = { "browse_button", "menu_button" },
+}
+local _INJ_DEFAULTS = {
+    side        = { inj_back = "left", inj_right = "right" },
+    order_left  = { "inj_back" },
+    order_right = { "inj_right" },
+}
 
 -- ---------------------------------------------------------------------------
--- Item catalogue
+-- Item catalogue (used by the Arrange Buttons menu)
 -- ---------------------------------------------------------------------------
 
 M.ITEMS = {
@@ -61,28 +73,13 @@ M.ITEMS = {
 }
 
 -- ---------------------------------------------------------------------------
--- Settings
+-- Public settings accessors
 -- ---------------------------------------------------------------------------
-
-local SETTING_KEY = "simpleui_titlebar_custom"
-local FM_CFG_KEY  = "simpleui_tb_fm_cfg"
-local INJ_CFG_KEY = "simpleui_tb_inj_cfg"
-local SIZE_KEY    = "simpleui_tb_size"
-
-local function _visKey(id) return "simpleui_tb_item_" .. id end
-
-local _VIS_DEFAULTS = {
-    menu_button   = true,
-    up_button     = true,
-    title         = true,
-    search_button = true,
-    browse_button = false,
-    inj_back      = true,
-    inj_right     = false,
-}
 
 function M.isEnabled()   return G_reader_settings:nilOrTrue(SETTING_KEY) end
 function M.setEnabled(v) G_reader_settings:saveSetting(SETTING_KEY, v)   end
+
+local function _visKey(id) return "simpleui_tb_item_" .. id end
 
 function M.isItemVisible(id)
     local v = G_reader_settings:readSetting(_visKey(id))
@@ -91,44 +88,27 @@ function M.isItemVisible(id)
 end
 function M.setItemVisible(id, v) G_reader_settings:saveSetting(_visKey(id), v) end
 
--- Size helpers ---------------------------------------------------------------
-
-local _SIZE_SCALE = { compact = 0.75, default = 1.0, large = 1.3 }
-
 function M.getSizeKey()   return G_reader_settings:readSetting(SIZE_KEY) or "default" end
 function M.setSizeKey(v)  G_reader_settings:saveSetting(SIZE_KEY, v) end
--- Reads settings once — callers should cache the result locally.
 function M.getSizeScale() return _SIZE_SCALE[M.getSizeKey()] or 1.0 end
 
 -- ---------------------------------------------------------------------------
--- Side config
+-- Config load/save (side assignments + button order)
 -- ---------------------------------------------------------------------------
 
-local _FM_DEFAULTS = {
-    side        = { menu_button = "right", up_button = "left", search_button = "left", browse_button = "right" },
-    order_left  = { "up_button", "search_button" },
-    order_right = { "browse_button", "menu_button" },
-}
-local _INJ_DEFAULTS = {
-    side        = { inj_back = "left", inj_right = "right" },
-    order_left  = { "inj_back" },
-    order_right = { "inj_right" },
-}
-
--- Shallow merge of saved config onto defaults — no recursion needed because
--- the structure is only one level deep (side / order_left / order_right).
--- When a saved config exists, any items present in the defaults but absent
--- from the saved order lists are appended so that newly-added buttons always
--- appear in the Arrange menu rather than being silently lost.
+-- Merges saved config onto defaults. Any default items absent from the saved
+-- order lists are appended, so newly-added buttons always appear in Arrange.
 local function _loadCfg(key, defaults)
     local raw = G_reader_settings:readSetting(key)
-    -- No saved config: return a fresh shallow copy of defaults.
     if type(raw) ~= "table" then
         local side = {}
         for k, v in pairs(defaults.side) do side[k] = v end
-        return { side = side, order_left = {_unpack(defaults.order_left)}, order_right = {_unpack(defaults.order_right)} }
+        return {
+            side        = side,
+            order_left  = { _unpack(defaults.order_left) },
+            order_right = { _unpack(defaults.order_right) },
+        }
     end
-    -- Merge: start from defaults, overlay saved values.
     local side = {}
     for k, v in pairs(defaults.side) do side[k] = v end
     if type(raw.side) == "table" then
@@ -136,16 +116,13 @@ local function _loadCfg(key, defaults)
     end
     local order_left  = (type(raw.order_left)  == "table") and raw.order_left  or defaults.order_left
     local order_right = (type(raw.order_right) == "table") and raw.order_right or defaults.order_right
-    -- Append any default items that are absent from both saved order lists.
-    -- This ensures new buttons (e.g. search_button) become visible in
-    -- Arrange Buttons even when an older saved config predates their addition.
+    -- Append default items absent from both saved order lists.
     local in_saved = {}
     for _, id in ipairs(order_left)  do in_saved[id] = true end
     for _, id in ipairs(order_right) do in_saved[id] = true end
     for _, id in ipairs(defaults.order_right) do
         if not in_saved[id] then
             order_right[#order_right + 1] = id
-            -- Inherit the default side assignment if not already set.
             if not side[id] then side[id] = defaults.side[id] or "right" end
         end
     end
@@ -155,11 +132,7 @@ local function _loadCfg(key, defaults)
             if not side[id] then side[id] = defaults.side[id] or "left" end
         end
     end
-    return {
-        side        = side,
-        order_left  = order_left,
-        order_right = order_right,
-    }
+    return { side = side, order_left = order_left, order_right = order_right }
 end
 
 function M.getFMConfig()      return _loadCfg(FM_CFG_KEY,  _FM_DEFAULTS)  end
@@ -168,10 +141,40 @@ function M.saveFMConfig(cfg)  G_reader_settings:saveSetting(FM_CFG_KEY,  cfg) en
 function M.saveInjConfig(cfg) G_reader_settings:saveSetting(INJ_CFG_KEY, cfg) end
 
 -- ---------------------------------------------------------------------------
--- Internal helpers
+-- Internal layout helpers
 -- ---------------------------------------------------------------------------
 
--- x position for a button at slot (0-based) on a side.
+-- Returns true if the item represents the "go up" row.
+local function _isGoUpItem(item)
+    return item.is_go_up or (item.text and item.text:find("\u{2B06}"))
+end
+
+-- Returns true when lock_home_folder is on and path equals the home directory.
+local function _isLockedAtHome(path)
+    if not G_reader_settings:isTrue("lock_home_folder") then return false end
+    if not path then return false end
+    local home = G_reader_settings:readSetting("home_dir")
+    if not home then return false end
+    local ffiUtil = require("ffi/util")
+    local ok_p, p = pcall(ffiUtil.realpath, path)
+    local ok_h, h = pcall(ffiUtil.realpath, home)
+    p = (ok_p and p or path):gsub("/$", "")
+    h = (ok_h and h or home):gsub("/$", "")
+    return p == h
+end
+
+-- Returns true when the file-chooser is at a root location (back button hidden).
+local function _isAtRoot(fc)
+    if not fc then return false end
+    if (fc.path or "") == "/" then return true end
+    if _isLockedAtHome(fc.path) then return true end
+    for _, item in ipairs(fc.item_table or {}) do
+        if _isGoUpItem(item) then return false end
+    end
+    return true
+end
+
+-- Pixel x-position for a button at slot (0-based) on a given side.
 local function _buttonX(side, slot, btn_w, pad, gap, sw)
     if side == "left" then
         return pad + slot * (btn_w + gap)
@@ -180,14 +183,15 @@ local function _buttonX(side, slot, btn_w, pad, gap, sw)
     end
 end
 
--- Slot map: order_right[1] → leftmost on screen (highest slot).
+-- Builds id -> { side, slot } map from ordered lists and a visible-ids set.
+-- order_right[1] maps to the rightmost screen position (highest slot index).
 local function _buildSlotMap(order_left, order_right, visible_ids)
-    local slots = {}
+    local slots   = {}
     local count_l = 0
     for _, id in ipairs(order_left) do
         if visible_ids[id] then
             slots[id] = { side = "left", slot = count_l }
-            count_l = count_l + 1
+            count_l   = count_l + 1
         end
     end
     local right_vis = {}
@@ -201,32 +205,30 @@ local function _buildSlotMap(order_left, order_right, visible_ids)
     return slots
 end
 
--- Resize an IconButton to new_w × new_w and zero all tap-zone paddings.
--- Mutates btn.width, btn.height, and the underlying ImageWidget size, then
--- calls btn:update() so dimen and GestureRange reflect the new geometry.
--- pcall uses method-call form (pcall(f, self)) to avoid allocating a
--- closure per call — relevant since _resizeAndStrip runs on every apply().
-local function _resizeAndStrip(btn, new_w)
+-- Reloads an ImageWidget after its .file field has been changed.
+local function _reloadImage(img)
+    pcall(img.free, img)
+    pcall(img.init, img)
+end
+
+-- Resizes btn to new_w x new_w and zeroes left/right/bottom paddings.
+-- Pass keep_top_pad=true to preserve padding_top (needed for injected buttons).
+local function _resizeAndStrip(btn, new_w, keep_top_pad)
     btn.width  = new_w
     btn.height = new_w
     if btn.image then
         btn.image.width  = new_w
         btn.image.height = new_w
-        pcall(btn.image.free, btn.image)
-        pcall(btn.image.init, btn.image)
+        _reloadImage(btn.image)
     end
     btn.padding_left   = 0
     btn.padding_right  = 0
     btn.padding_bottom = 0
+    if not keep_top_pad then btn.padding_top = 0 end
     btn:update()
 end
 
--- Snapshot a button's current state into a plain table.
--- All button state is stored in one table per button (two fields on the
--- host widget: _titlebar_rb / _titlebar_lb) instead of 10+ separate fields.
--- opts.save_icon     — also save image.file (FM right button only)
--- opts.save_callback — also save callback/hold_callback
--- opts.save_dimen    — also save dimen reference (injected right button)
+-- Snapshots a button's current geometry and optional state into a plain table.
 local function _snapBtn(btn, opts)
     local snap = {
         align   = btn.overlap_align,
@@ -239,20 +241,21 @@ local function _snapBtn(btn, opts)
     }
     if opts then
         if opts.save_icon     then snap.icon     = btn.image and btn.image.file end
-        if opts.save_callback then snap.callback = btn.callback
-                                    snap.hold_cb  = btn.hold_callback end
-        if opts.save_dimen    then snap.dimen    = btn.dimen end
+        if opts.save_callback then
+            snap.callback = btn.callback
+            snap.hold_cb  = btn.hold_callback
+        end
+        if opts.save_dimen then snap.dimen = btn.dimen end
     end
     return snap
 end
 
--- Restore a button from a snapshot produced by _snapBtn.
+-- Restores a button from a snapshot produced by _snapBtn.
 local function _restoreBtn(btn, snap)
     if not snap then return end
     if snap.icon and btn.image then
         btn.image.file = snap.icon
-        pcall(btn.image.free, btn.image)
-        pcall(btn.image.init, btn.image)
+        _reloadImage(btn.image)
     end
     btn.overlap_align  = snap.align
     btn.overlap_offset = snap.offset
@@ -265,8 +268,7 @@ local function _restoreBtn(btn, snap)
         if btn.image then
             btn.image.width  = snap.w
             btn.image.height = snap.h
-            pcall(btn.image.free, btn.image)
-            pcall(btn.image.init, btn.image)
+            _reloadImage(btn.image)
         end
     end
     pcall(btn.update, btn)
@@ -275,12 +277,11 @@ local function _restoreBtn(btn, snap)
     if snap.dimen    ~= nil then btn.dimen         = snap.dimen    end
 end
 
--- Compute shared layout params from a TitleBar instance.
--- Called once per apply() — result used as locals, never stored.
+-- Reads layout geometry from a TitleBar instance (called once per apply).
 local function _layoutParams(tb)
     local Screen  = require("device").screen
     local scale   = M.getSizeScale()
-    local base_iw = Screen:scaleBySize(36)  -- safe default
+    local base_iw = Screen:scaleBySize(36)
     pcall(function()
         local sz = (tb.right_button and tb.right_button.image and tb.right_button.image:getSize())
                or  (tb.left_button  and tb.left_button.image  and tb.left_button.image:getSize())
@@ -295,12 +296,11 @@ local function _layoutParams(tb)
 end
 
 -- ---------------------------------------------------------------------------
--- FM titlebar — apply / restore / reapply
+-- FM titlebar — apply
 -- ---------------------------------------------------------------------------
 
 function M.apply(fm_self)
     if not M.isEnabled() then return end
-
     local tb = fm_self.title_bar
     if not tb then return end
     if fm_self._titlebar_patched then return end
@@ -310,7 +310,7 @@ function M.apply(fm_self)
     local lp        = _layoutParams(tb)
     local iw, pad, gap, sw = lp.iw, lp.pad, lp.gap, lp.sw
 
-    -- Read all settings once up front — avoids repeated G_reader_settings hits.
+    -- Read all visibility settings once.
     local show_menu   = M.isItemVisible("menu_button")
     local show_up     = M.isItemVisible("up_button")
     local show_search = M.isItemVisible("search_button")
@@ -328,6 +328,7 @@ function M.apply(fm_self)
     if show_browse then visible["browse_button"] = true end
     local slot_map = _buildSlotMap(cfg.order_left, cfg.order_right, visible)
 
+    -- Resizes, strips paddings and positions a button according to its slot.
     local function placeBtn(id, btn)
         local s = slot_map[id]
         if not s then return end
@@ -336,15 +337,14 @@ function M.apply(fm_self)
         btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
     end
 
-    -- Right button ("menu_button") ------------------------------------------
+    -- Right button (menu) ----------------------------------------------------
+
     if tb.right_button then
         local rb = tb.right_button
-        -- All state in one table — one field on fm_self instead of ten.
         fm_self._titlebar_rb = _snapBtn(rb, { save_icon = true, save_callback = true })
 
-        -- Patch setRightIcon so our icon survives folder navigation.
-        -- Capture show_menu now to avoid re-reading settings on every folder tap.
-        local _icon_enabled = show_menu
+        -- Patch setRightIcon so our custom icon survives folder navigation.
+        local _icon_enabled     = show_menu
         local orig_setRightIcon = tb.setRightIcon
         fm_self._titlebar_orig_setRightIcon = orig_setRightIcon
         tb.setRightIcon = function(tb_self, icon, ...)
@@ -352,8 +352,7 @@ function M.apply(fm_self)
             if icon == "plus" and _icon_enabled then
                 if tb_self.right_button and tb_self.right_button.image then
                     tb_self.right_button.image.file = Config.ICON.ko_menu
-                    pcall(tb_self.right_button.image.free, tb_self.right_button.image)
-                    pcall(tb_self.right_button.image.init, tb_self.right_button.image)
+                    _reloadImage(tb_self.right_button.image)
                 end
                 UIManager:setDirty(tb_self.show_parent, "ui", tb_self.dimen)
             end
@@ -363,8 +362,7 @@ function M.apply(fm_self)
         if show_menu then
             if rb.image then
                 rb.image.file = Config.ICON.ko_menu
-                pcall(rb.image.free, rb.image)
-                pcall(rb.image.init, rb.image)
+                _reloadImage(rb.image)
             end
             placeBtn("menu_button", rb)
         else
@@ -375,9 +373,8 @@ function M.apply(fm_self)
         end
     end
 
+    -- Left button (back/up) --------------------------------------------------
 
-
-    -- Left button ("up_button") ---------------------------------------------
     if tb.left_button then
         local lb = tb.left_button
         fm_self._titlebar_lb = _snapBtn(lb, { save_callback = true })
@@ -385,40 +382,18 @@ function M.apply(fm_self)
         if show_up then
             placeBtn("up_button", lb)
 
-            -- Hide the back button immediately when we are at a location where
-            -- it should not be visible: either the real filesystem root (no
-            -- is_go_up item exists) or a locked home folder.  We do this before
-            -- the first genItemTable fires so the button is never briefly shown.
-            do
-                local fc0 = fm_self.file_chooser
-                local at_root = false
-                if fc0 then
-                    local p0 = fc0.path or ""
-                    if p0 == "/" then at_root = true end
-                    if fc0.item_table then
-                        local has_go_up = false
-                        for _, item in ipairs(fc0.item_table) do
-                            if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
-                                has_go_up = true
-                                at_root = false
-                                break
-                            end
-                        end
-                        if not has_go_up then at_root = true end
-                    end
-                    -- lock_home_folder: always treat home as root regardless.
-                    if _isLockedAtHome(fc0.path) then at_root = true end
-                end
-                if at_root then
-                    lb.overlap_offset = { sw + 100, 0 }
-                    lb.callback       = function() end
-                    lb.hold_callback  = function() end
-                end
+            -- Hide back button immediately if already at root before the first
+            -- genItemTable fires, to avoid a brief flash of the button.
+            if _isAtRoot(fm_self.file_chooser) then
+                lb.overlap_offset = { sw + 100, 0 }
+                lb.callback       = function() end
+                lb.hold_callback  = function() end
             end
 
             local fc = fm_self.file_chooser
             if fc then
-                local ICON_UP = "chevron.left"  -- safe default
+                -- Resolve bidi chevron direction once.
+                local ICON_UP = "chevron.left"
                 pcall(function()
                     local BD = require("ui/bidi")
                     ICON_UP = BD.mirroredUILayout() and "chevron.right" or "chevron.left"
@@ -426,14 +401,12 @@ function M.apply(fm_self)
 
                 fm_self._titlebar_orig_fc_genItemTable = fc.genItemTable
 
-                -- Build a list of all injected left-side buttons (excluding up_button
-                -- itself) keyed by their configured slot, so we can shift them when
-                -- the back button disappears.  Each entry: { btn, configured_slot }.
+                -- Returns injected left-side buttons (excluding up_button) with slots.
+                -- Rebuilt each call because search_btn/browse_btn are assigned later.
                 local function _leftSideBtns()
                     local list = {}
                     for _, id in ipairs(cfg.order_left) do
                         if id ~= "up_button" and slot_map[id] and slot_map[id].side == "left" then
-                            -- Find the widget for this id.
                             local widget
                             if id == "search_button" then
                                 widget = fm_self._titlebar_search_btn
@@ -448,57 +421,40 @@ function M.apply(fm_self)
                     return list
                 end
 
-                local up_slot = slot_map["up_button"].slot  -- configured slot of back button
+                local up_slot = slot_map["up_button"].slot
                 fm_self._simpleui_up_x = _buttonX("left", up_slot, iw, pad, gap, sw)
 
-                -- _applyBackButtonState: single authoritative function for chevron
-                -- visibility and action.
-                --
-                -- Decision table:
-                --   root,  page 1   → HIDE chevron
-                --   root,  page > 1 → SHOW chevron → paginate back one page
-                --   child, page 1   → SHOW chevron → onFolderUp
-                --   child, page > 1 → SHOW chevron → paginate back one page
-                --
-                -- `page` is always passed explicitly — never read from fc_self.cur_page
-                -- because that field may not yet reflect the new value when onGotoPage fires.
+                -- Single authoritative function for back-button visibility and action.
+                -- root+page1: hide; root+page>1: paginate; subfolder: folder-up.
+                -- `page` is always passed explicitly to avoid stale cur_page reads.
                 local function _applyBackButtonState(fc_self, is_sub, page)
                     local tb2 = fm_self.title_bar
                     if not (tb2 and tb2.left_button) then return end
-                    local btn = tb2.left_button
+                    local btn       = tb2.left_button
+                    local neighbors = _leftSideBtns()
 
-                    -- The ONLY time the button is hidden is if we are at Root AND on Page 1
                     if not is_sub and page <= 1 then
+                        -- Hide back button and compact neighbors left.
                         btn.overlap_offset = { sw + 100, 0 }
                         btn.callback       = function() end
                         btn.hold_callback  = function() end
-                        
-                        -- Shift neighbors to the left
-                        for _, entry in ipairs(_leftSideBtns()) do
-                            local display_slot = entry.slot > up_slot
-                                and entry.slot - 1 or entry.slot
-                            entry.btn.overlap_offset = {
-                                _buttonX("left", display_slot, iw, pad, gap, sw), 0
-                            }
+                        for _, entry in ipairs(neighbors) do
+                            local dslot = entry.slot > up_slot and entry.slot - 1 or entry.slot
+                            entry.btn.overlap_offset = { _buttonX("left", dslot, iw, pad, gap, sw), 0 }
                         end
                     else
-                        -- SHOW Chevron: Either Root Page > 1 OR any page in a Subfolder
+                        -- Show back button and restore neighbor positions.
                         btn:setIcon(ICON_UP)
                         btn.overlap_offset = { _buttonX("left", up_slot, iw, pad, gap, sw), 0 }
-                        
-                        -- Restore neighbor positions
-                        for _, entry in ipairs(_leftSideBtns()) do
-                            entry.btn.overlap_offset = {
-                                _buttonX("left", entry.slot, iw, pad, gap, sw), 0
-                            }
+                        for _, entry in ipairs(neighbors) do
+                            entry.btn.overlap_offset = { _buttonX("left", entry.slot, iw, pad, gap, sw), 0 }
                         end
-
                         if page > 1 then
-                            -- Case: Deep in pages (Tap: -1 page, Hold: Page 1)
-                            btn.callback = function() fc_self:onGotoPage(page - 1) end
+                            -- Paginated list: tap goes back one page, hold goes to page 1.
+                            btn.callback      = function() fc_self:onGotoPage(page - 1) end
                             btn.hold_callback = function() fc_self:onGotoPage(1) end
                         else
-                            -- Case: Subfolder Page 1 (Tap: Go to parent folder)
+                            -- Subfolder page 1: tap goes to parent, hold is no-op.
                             btn.callback      = function() fc_self:onFolderUp() end
                             btn.hold_callback = function() end
                         end
@@ -506,114 +462,108 @@ function M.apply(fm_self)
                     UIManager:setDirty(tb2.show_parent or fm_self, "ui", tb2.dimen)
                 end
 
-                -- genItemTable fires on folder navigation, never on page turns.
-                -- Records is_sub and applies state for page 1 (folder nav resets pagination).
+                -- genItemTable fires on folder navigation (not on page turns).
+                -- Strips the go-up row and updates back-button state for page 1.
                 local orig_genItemTable = fc.genItemTable
                 fc.genItemTable = function(fc_self, dirs, files, path)
                     local item_table = orig_genItemTable(fc_self, dirs, files, path)
                     if not item_table then return item_table end
-                    local is_sub  = false
+                    local is_sub   = false
                     local filtered = {}
                     for _, item in ipairs(item_table) do
-                        if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
+                        if _isGoUpItem(item) then
                             is_sub = true
                         else
                             filtered[#filtered + 1] = item
                         end
                     end
-                    -- Also hide Back when the home folder is locked and we are
-                    -- currently sitting at that folder (KOReader omits is_go_up
-                    -- in that case, so is_sub is already false — but being
-                    -- explicit here guards against future KOReader changes and
-                    -- makes the intent clear).
-                    if _isLockedAtHome(path or fc_self.path) then
+                    local p = (path or fc_self.path or ""):gsub("/$", "")
+                    if p == "/" or _isLockedAtHome(path or fc_self.path) then
                         is_sub = false
                     end
-                    local p = (path or fc_self.path or ""):gsub("/$", "")
-                    if p == "/" then is_sub = false end
-                    -- Persist is_sub so onGotoPage can read it without recomputing.
                     fc_self._simpleui_has_go_up = is_sub
-                    -- Folder nav always resets to page 1.
                     _applyBackButtonState(fc_self, is_sub, 1)
                     return filtered
                 end
 
-                -- onFolderUp: fires when the user taps the back button to go to
-                -- the parent folder. genItemTable is not always called when KOReader
-                -- uses a cached item table, so the back button would stay visible even
-                -- after arriving at the root. We re-evaluate the state here so it
-                -- is hidden immediately without needing a page turn.
-                -- NOTE: do NOT capture fc.onFolderUp as a fixed upvalue here.
-                -- sui_foldercovers.lua may install/uninstall its own onFolderUp
-                -- patch on the FileChooser *class* at runtime (when the folder-covers
-                -- feature is toggled).  If we captured the old function at setup time
-                -- the upvalue would become stale after uninstall, causing a crash when
-                -- the captured closure tries to call _sg_orig_onFolderUp (nil).
-                -- Instead we resolve the current class method at call time.
+                -- KOReader called genItemTable before our patch was installed on the
+                -- first FM open. Strip the go-up entry retroactively so the initial
+                -- render matches subsequent navigations.
+                local it = fc.item_table
+                if it then
+                    local cleaned     = {}
+                    local found_go_up = false
+                    for _, item in ipairs(it) do
+                        if _isGoUpItem(item) then
+                            found_go_up = true
+                        else
+                            cleaned[#cleaned + 1] = item
+                        end
+                    end
+                    if found_go_up then
+                        for i = #it, 1, -1 do it[i] = nil end
+                        for i, v in ipairs(cleaned) do it[i] = v end
+                        UIManager:nextTick(function()
+                            if fc and fc.updateItems then
+                                pcall(fc.updateItems, fc, 1, true)
+                            end
+                        end)
+                    end
+                end
+
+                -- onFolderUp re-evaluates back-button state after navigation.
+                -- FileChooser.onFolderUp is resolved at call time (not captured as an
+                -- upvalue) because sui_foldercovers may swap the class method at runtime.
                 local FileChooser_cls = require("ui/widget/filechooser")
-                fm_self._titlebar_orig_fc_onFolderUp = true  -- sentinel: wrapper is active
+                fm_self._titlebar_orig_fc_onFolderUp = true
                 fc.onFolderUp = function(fc_self, ...)
-                    -- If the back button is pressed at the dim_list level
-                    -- (the root of the virtual author/series tree), exit to
-                    -- normal FS mode.  In sub-folders (file_list) the back
-                    -- button climbs to dim_list as usual.
-                    do
-                        local ok_bm, BM = pcall(require, "sui_browsemeta")
-                        if ok_bm and BM and BM.exitToNormal then
-                            local path = fc_self.path or ""
-                            if path:find("/", 1, true) then
-                                -- Only intercept at the dim_list level.
-                                local ok_pl, level = pcall(BM.getPathLevel, path)
-                                if ok_pl and level == "dim_list" then
-                                    BM.exitToNormal(fc_self, fm_self)
-                                    -- Re-evaluate the real folder state instead of
-                                    -- assuming root. genItemTable may have already set
-                                    -- _simpleui_has_go_up correctly after changeToPath;
-                                    -- if not, compute it from the item_table.
-                                    local is_sub_after = fc_self._simpleui_has_go_up
-                                    if is_sub_after == nil then
-                                        is_sub_after = false
-                                        for _, item in ipairs(fc_self.item_table or {}) do
-                                            if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
-                                                is_sub_after = true; break
-                                            end
-                                        end
+                    -- At the dim_list level of a virtual browse tree, exit to normal FS.
+                    local ok_bm, BM = pcall(require, "sui_browsemeta")
+                    if ok_bm and BM and BM.exitToNormal then
+                        local path = fc_self.path or ""
+                        if path:find("/", 1, true) then
+                            local ok_pl, level = pcall(BM.getPathLevel, path)
+                            if ok_pl and level == "dim_list" then
+                                BM.exitToNormal(fc_self, fm_self)
+                                -- Re-evaluate state; genItemTable may have already set the flag.
+                                local is_sub_after = fc_self._simpleui_has_go_up
+                                if is_sub_after == nil then
+                                    is_sub_after = false
+                                    for _, item in ipairs(fc_self.item_table or {}) do
+                                        if _isGoUpItem(item) then is_sub_after = true; break end
                                     end
-                                    if _isLockedAtHome(fc_self.path) then is_sub_after = false end
-                                    if (fc_self.path or "") == "/" then is_sub_after = false end
-                                    _applyBackButtonState(fc_self, is_sub_after, 1)
-                                    return true
                                 end
+                                if (fc_self.path or "") == "/" or _isLockedAtHome(fc_self.path) then
+                                    is_sub_after = false
+                                end
+                                _applyBackButtonState(fc_self, is_sub_after, 1)
+                                return true
                             end
                         end
                     end
-                    local current = FileChooser_cls.onFolderUp
+                    -- Delegate to the current class method (resolved at call time).
+                    local current    = FileChooser_cls.onFolderUp
                     local ok, result = pcall(current, fc_self, ...)
-                    -- Re-evaluate after the navigation completes.
-                    -- If genItemTable already ran it will have set _simpleui_has_go_up
-                    -- correctly; if not (cached items), we compute it now from the
-                    -- item_table so the button state is always up to date.
+                    -- Re-evaluate state after navigation; use cached flag if genItemTable ran.
                     local is_sub = fc_self._simpleui_has_go_up
                     if is_sub == nil then
                         is_sub = false
                         for _, item in ipairs(fc_self.item_table or {}) do
-                            if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
-                                is_sub = true; break
-                            end
+                            if _isGoUpItem(item) then is_sub = true; break end
                         end
                     end
-                    if _isLockedAtHome(fc_self.path) then is_sub = false end
-                    if (fc_self.path or "") == "/" then is_sub = false end
+                    if (fc_self.path or "") == "/" or _isLockedAtHome(fc_self.path) then
+                        is_sub = false
+                    end
                     fc_self._simpleui_has_go_up = is_sub
                     _applyBackButtonState(fc_self, is_sub, 1)
                     if not ok then error(result) end
                     return result
                 end
 
-                -- onGotoPage fires on every CoverBrowser page turn.
-                -- Re-entrancy guard (_simpleui_in_goto) prevents KOReader's internal
-                -- recursive onGotoPage calls (e.g. for clamping or redraw) from
-                -- overwriting the button state we set for the outer call.
+                -- onGotoPage updates back-button state on every CoverBrowser page turn.
+                -- Re-entrancy guard prevents KOReader's internal recursive calls from
+                -- overwriting the state set for the outer call.
                 local orig_onGotoPage = fc.onGotoPage
                 if orig_onGotoPage then
                     fm_self._titlebar_orig_fc_onGotoPage = orig_onGotoPage
@@ -622,44 +572,19 @@ function M.apply(fm_self)
                             return orig_onGotoPage(fc_self, page, ...)
                         end
                         fc_self._simpleui_in_goto = true
-                        
                         local ok, result = pcall(orig_onGotoPage, fc_self, page, ...)
                         fc_self._simpleui_in_goto = nil
-                        
-                        -- Determine if we are at "Root" based on path.
-                        -- _simpleui_has_go_up is set to true by _sgOpenGroup when
-                        -- entering a virtual series folder (whose path equals the
-                        -- real parent, not a subfolder on disk). Honour that flag
-                        -- so the back button appears even when lock_home_folder is on.
-                        local current_path = fc_self.path or ""
-                        local is_at_home_or_root = (current_path == "/" or _isLockedAtHome(current_path))
-                        
-                        -- Virtual series folders keep the real parent's path, so
-                        -- _isLockedAtHome returns true even though we are one level
-                        -- "inside" a group. In that case the back button must still
-                        -- appear so the user can exit the virtual folder.
-                        local in_virtual_series = fc_self.item_table
-                            and fc_self.item_table._sg_is_series_view
 
-                        -- Root/home always wins: if the path says we are home, the back
-                        -- button must be hidden regardless of any stale _simpleui_has_go_up
-                        -- flag left over from a previous subfolder visit.
-                        -- Exception: virtual series folders whose parent IS the home folder.
-                        local is_sub
-                        if is_at_home_or_root and not in_virtual_series then
-                            is_sub = false
-                        else
-                            -- In a real subfolder, or a virtual series folder (whose path
-                            -- equals the real parent) — honour the has_go_up flag.
-                            is_sub = true
-                        end
-                        
-                        -- Synchronize the internal flag
+                        -- Virtual series folders share the real parent's path, so
+                        -- _isLockedAtHome fires even though we are inside a group.
+                        -- The back button must still appear to allow exiting the group.
+                        local current_path      = fc_self.path or ""
+                        local is_at_home_root   = (current_path == "/" or _isLockedAtHome(current_path))
+                        local in_virtual_series = fc_self.item_table and fc_self.item_table._sg_is_series_view
+                        local is_sub            = not (is_at_home_root and not in_virtual_series)
+
                         fc_self._simpleui_has_go_up = is_sub
-                        
-                        -- Apply the UI state
                         _applyBackButtonState(fc_self, is_sub, page)
-                        
                         if not ok then error(result) end
                         return result
                     end
@@ -673,96 +598,53 @@ function M.apply(fm_self)
         end
     end
 
-    -- Search button ---------------------------------------------------------
-    -- TitleBar IS an OverlapGroup (OverlapGroup:extend), so we inject the
-    -- new button directly with table.insert(tb, btn), exactly as TitleBar:init()
-    -- does for left_button and right_button.
-    -- Geometry must match _resizeAndStrip behaviour on the other buttons:
-    --   • padding = tb.button_padding (≈11px) so padding_top is preserved after strip
-    --   • _resizeAndStrip zeros padding_left/right/bottom and calls update()
-    --   • overlap_offset y=0 (same as other buttons after placeBtn)
+    -- Search button ----------------------------------------------------------
+    -- Injected directly into the TitleBar OverlapGroup.
+    -- All paddings (including top) are zeroed to align with the other buttons.
+
     if show_search then
         local ok_ib, IconButton = pcall(require, "ui/widget/iconbutton")
         if ok_ib and IconButton then
             local s = slot_map["search_button"]
             if s then
-                local btn_padding = (tb.button_padding) or require("device").screen:scaleBySize(11)
+                local btn_padding = tb.button_padding or require("device").screen:scaleBySize(11)
                 local search_btn = IconButton:new{
-                    icon           = "appbar.search",
-                    width          = iw,
-                    height         = iw,
-                    padding        = btn_padding,
-                    show_parent    = tb.show_parent or fm_self,
+                    icon        = "appbar.search",
+                    width       = iw,
+                    height      = iw,
+                    padding     = btn_padding,
+                    show_parent = tb.show_parent or fm_self,
                     callback = function()
                         local fs = fm_self.filesearcher
-                        if fs and fs.onShowFileSearch then
-                            fs:onShowFileSearch()
-                        end
+                        if fs and fs.onShowFileSearch then fs:onShowFileSearch() end
                     end,
                 }
-                -- Strip paddings and resize exactly like the other buttons.
-                -- _resizeAndStrip expects btn.image.file (ImageWidget) but our
-                -- button uses IconWidget — resize it directly instead.
-                search_btn.width         = iw
-                search_btn.height        = iw
-                if search_btn.image then
-                    search_btn.image.width  = iw
-                    search_btn.image.height = iw
-                    pcall(search_btn.image.free, search_btn.image)
-                    pcall(search_btn.image.init, search_btn.image)
-                end
-                search_btn.padding_left   = 0
-                search_btn.padding_right  = 0
-                search_btn.padding_bottom = 0
-                -- padding_top is intentionally left as btn_padding (same as other buttons).
-                search_btn:update()
+                _resizeAndStrip(search_btn, iw)
                 search_btn.overlap_align  = nil
                 search_btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
-                -- TitleBar is itself an OverlapGroup: inject directly.
                 table.insert(tb, search_btn)
                 fm_self._titlebar_search_btn = search_btn
-                fm_self._simpleui_search_x = _buttonX(s.side, s.slot, iw, pad, gap, sw)
+                fm_self._simpleui_search_x   = _buttonX(s.side, s.slot, iw, pad, gap, sw)
+                -- Pre-compute the compact x-position for when back button is hidden.
                 if s.side == "left" then
                     local up_slot2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                    local display_slot = s.slot > up_slot2 and s.slot - 1 or s.slot
-                    fm_self._simpleui_search_x_compact = _buttonX("left", display_slot, iw, pad, gap, sw)
+                    local dslot    = s.slot > up_slot2 and s.slot - 1 or s.slot
+                    fm_self._simpleui_search_x_compact = _buttonX("left", dslot, iw, pad, gap, sw)
                 end
-
-                -- If show_up is also active, detect the initial folder state:
-                -- if already at root (back button hidden), compact left slots now.
-                if show_up and fm_self.file_chooser then
-                    local fc2 = fm_self.file_chooser
-                    local cur = fc2.item_table or {}
-                    local at_root = false
-                    local p2 = fc2.path or ""
-                    if p2 == "/" then at_root = true end
-                    if #cur > 0 then
-                        local has_go_up = false
-                        for _, item in ipairs(cur) do
-                            if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
-                                has_go_up = true; break
-                            end
-                        end
-                        if not has_go_up then at_root = true end
-                    end
-                    -- Also treat locked-at-home as root (back hidden).
-                    if _isLockedAtHome(fc2.path) then at_root = true end
-                    if at_root and slot_map["search_button"] and slot_map["search_button"].side == "left" then
-                        local up_slot2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                        local ss = slot_map["search_button"]
-                        local display_slot = ss.slot > up_slot2 and ss.slot - 1 or ss.slot
-                        search_btn.overlap_offset = { _buttonX("left", display_slot, iw, pad, gap, sw), 0 }
-                    end
+                -- If already at root on first apply, shift to compact position now.
+                if show_up and _isAtRoot(fm_self.file_chooser) and s.side == "left" then
+                    local up_slot2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
+                    local dslot    = s.slot > up_slot2 and s.slot - 1 or s.slot
+                    search_btn.overlap_offset = { _buttonX("left", dslot, iw, pad, gap, sw), 0 }
                 end
             end
         end
     end
 
     -- Browse button ----------------------------------------------------------
-    -- Injected exactly like search_button.  Calls sui_browsemeta.navigateTo()
-    -- via a ButtonDialogTitle with three options: Normal / By Author / By Series.
-    -- The icon reflects the current browse mode and is updated every time
-    -- genItemTable fires (i.e. on every folder navigation).
+    -- Injected like search_button. Icon reflects the current browse mode and
+    -- is refreshed on every genItemTable call.
+
     if show_browse then
         local ok_ib, IconButton = pcall(require, "ui/widget/iconbutton")
         if ok_ib and IconButton then
@@ -770,26 +652,13 @@ function M.apply(fm_self)
             if s then
                 local btn_padding = tb.button_padding or require("device").screen:scaleBySize(11)
 
-                -- Full icon paths required for direct ImageWidget.file assignment.
-                -- Use plugin-relative paths (same pattern as sui_foldercovers, sui_config)
-                -- for cross-platform compatibility including Android.
-                local _ico_plugin_dir = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
-                local _BROWSE_ICONS = {
-                    normal = _ico_plugin_dir .. "icons/default.svg",
-                    author = _ico_plugin_dir .. "icons/author.svg",
-                    series = _ico_plugin_dir .. "icons/series.svg",
-                }
-
-
-                -- Determine the initial icon from the current fc path.
+                -- Resolve initial icon from the current browse mode.
                 local _initial_icon = _BROWSE_ICONS.normal
-                do
-                    local ok_bm, BM = pcall(require, "sui_browsemeta")
-                    if ok_bm and BM then
-                        local fc0 = fm_self.file_chooser
-                        local mode = fc0 and BM.getCurrentMode(fc0) or "normal"
-                        _initial_icon = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
-                    end
+                local ok_bm0, BM0   = pcall(require, "sui_browsemeta")
+                if ok_bm0 and BM0 then
+                    local fc0  = fm_self.file_chooser
+                    local mode = fc0 and BM0.getCurrentMode(fc0) or "normal"
+                    _initial_icon = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
                 end
 
                 local browse_btn
@@ -802,154 +671,79 @@ function M.apply(fm_self)
                     callback = function()
                         local ok_bm, BM = pcall(require, "sui_browsemeta")
                         if not ok_bm or not BM then return end
-
-                        local UIManager2    = require("ui/uimanager")
-                        local ButtonDialog  = require("ui/widget/buttondialog")
-                        local fc_ref        = fm_self.file_chooser
-                        local cur_mode      = fc_ref and BM.getCurrentMode(fc_ref) or "normal"
-
+                        local ButtonDialog = require("ui/widget/buttondialog")
+                        local fc_ref       = fm_self.file_chooser
+                        local cur_mode     = fc_ref and BM.getCurrentMode(fc_ref) or "normal"
                         local function _check(mode)
                             return cur_mode == mode and "\u{2713} " or "  "
                         end
-
+                        -- Closes dialog, navigates to mode, and refreshes the icon.
+                        local function _navigate(dlg, mode)
+                            UIManager:close(dlg)
+                            BM.navigateTo(fm_self, mode)
+                            if browse_btn.image then
+                                browse_btn.image.file = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
+                                _reloadImage(browse_btn.image)
+                                UIManager:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
+                            end
+                        end
                         local dlg
                         dlg = ButtonDialog:new{
                             title       = _("Browse library"),
                             title_align = "center",
                             buttons = {
-                                {{
-                                    text     = _check("normal") .. _("Default"),
-                                    callback = function()
-                                        UIManager2:close(dlg)
-                                        BM.navigateTo(fm_self, "normal")
-                                        -- Update icon immediately.
-                                        if browse_btn.image then
-                                            browse_btn.image.file = _BROWSE_ICONS.normal
-                                            pcall(browse_btn.image.free, browse_btn.image)
-                                            pcall(browse_btn.image.init, browse_btn.image)
-                                            UIManager2:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
-                                        end
-                                    end,
-                                }},
-                                {{
-                                    text     = _check("author") .. _("By author"),
-                                    callback = function()
-                                        UIManager2:close(dlg)
-                                        BM.navigateTo(fm_self, "author")
-                                        if browse_btn.image then
-                                            browse_btn.image.file = _BROWSE_ICONS.author
-                                            pcall(browse_btn.image.free, browse_btn.image)
-                                            pcall(browse_btn.image.init, browse_btn.image)
-                                            UIManager2:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
-                                        end
-                                    end,
-                                }},
-                                {{
-                                    text     = _check("series") .. _("By series"),
-                                    callback = function()
-                                        UIManager2:close(dlg)
-                                        BM.navigateTo(fm_self, "series")
-                                        if browse_btn.image then
-                                            browse_btn.image.file = _BROWSE_ICONS.series
-                                            pcall(browse_btn.image.free, browse_btn.image)
-                                            pcall(browse_btn.image.init, browse_btn.image)
-                                            UIManager2:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
-                                        end
-                                    end,
-                                }},
-                                {{
-                                    text     = _("Cancel"),
-                                    callback = function() UIManager2:close(dlg) end,
-                                }},
+                                {{ text = _check("normal") .. _("Default"),   callback = function() _navigate(dlg, "normal") end }},
+                                {{ text = _check("author") .. _("By author"), callback = function() _navigate(dlg, "author") end }},
+                                {{ text = _check("series") .. _("By series"), callback = function() _navigate(dlg, "series") end }},
+                                {{ text = _check("tags")   .. _("By tags"),   callback = function() _navigate(dlg, "tags")   end }},
+                                {{ text = _("Cancel"),                         callback = function() UIManager:close(dlg)     end }},
                             },
                         }
                         UIManager:show(dlg)
                     end,
                 }
 
-                -- Strip paddings — same pattern as search_button.
-                browse_btn.width         = iw
-                browse_btn.height        = iw
-                if browse_btn.image then
-                    browse_btn.image.width  = iw
-                    browse_btn.image.height = iw
-                    pcall(browse_btn.image.free, browse_btn.image)
-                    pcall(browse_btn.image.init, browse_btn.image)
-                end
-                browse_btn.padding_left   = 0
-                browse_btn.padding_right  = 0
-                browse_btn.padding_bottom = 0
-                browse_btn:update()
-                -- Explicitly set the icon file after update() so the correct
-                -- mode icon is shown immediately when the titlebar is rebuilt
-                -- (e.g. after toggling Browse by Author/Series in the menu and
-                -- returning to the Library).  Without this, IconButton:new{}
-                -- may render a stale or fallback icon during :init(), and the
-                -- update() call above does not re-apply _initial_icon.
+                _resizeAndStrip(browse_btn, iw)
+                -- Re-apply the initial icon after update() in case IconButton:new
+                -- rendered a stale fallback during :init().
                 if browse_btn.image then
                     browse_btn.image.file = _initial_icon
-                    pcall(browse_btn.image.free, browse_btn.image)
-                    pcall(browse_btn.image.init, browse_btn.image)
+                    _reloadImage(browse_btn.image)
                 end
                 browse_btn.overlap_align  = nil
                 browse_btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
-
                 table.insert(tb, browse_btn)
                 fm_self._titlebar_browse_btn = browse_btn
 
-                -- Compact position for when the back button is hidden.
+                -- Pre-compute compact position for when the back button is hidden.
                 if s.side == "left" then
                     local up_slot_b = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                    local display_slot_b = s.slot > up_slot_b and s.slot - 1 or s.slot
-                    fm_self._simpleui_browse_x_compact = _buttonX("left", display_slot_b, iw, pad, gap, sw)
+                    local dslot_b   = s.slot > up_slot_b and s.slot - 1 or s.slot
+                    fm_self._simpleui_browse_x_compact = _buttonX("left", dslot_b, iw, pad, gap, sw)
                 end
 
-                -- Initial compact check (mirrors search_button logic).
-                if show_up and fm_self.file_chooser then
-                    local fc3   = fm_self.file_chooser
-                    local cur3  = fc3.item_table or {}
-                    local at_root3 = (fc3.path or "") == "/"
-                    if #cur3 > 0 then
-                        local has_up = false
-                        for _, item in ipairs(cur3) do
-                            if item.is_go_up or (item.text and item.text:find("\u{2B06}")) then
-                                has_up = true; break
-                            end
-                        end
-                        if not has_up then at_root3 = true end
-                    end
-                    if _isLockedAtHome(fc3.path) then at_root3 = true end
-                    if at_root3 and s.side == "left" then
-                        local up_slot_b2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                        local disp = s.slot > up_slot_b2 and s.slot - 1 or s.slot
-                        browse_btn.overlap_offset = { _buttonX("left", disp, iw, pad, gap, sw), 0 }
-                    end
+                -- If already at root on first apply, shift to compact position now.
+                if show_up and _isAtRoot(fm_self.file_chooser) and s.side == "left" then
+                    local up_slot_b2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
+                    local dslot_b2   = s.slot > up_slot_b2 and s.slot - 1 or s.slot
+                    browse_btn.overlap_offset = { _buttonX("left", dslot_b2, iw, pad, gap, sw), 0 }
                 end
 
-                -- Update icon on folder navigation so it always reflects the
-                -- current browse mode.  Hook into the existing genItemTable
-                -- wrapper that _applyBackButtonState already installed on fc.
-                -- We append a thin wrapper that runs after the back-button logic.
+                -- Wrap genItemTable to refresh the browse-mode icon after folder navigation.
                 local fc_b = fm_self.file_chooser
                 if fc_b then
                     local prev_gen = fc_b.genItemTable
                     if prev_gen then
-                        local _btn_ref  = browse_btn
-                        local _fm_ref   = fm_self
-                        local _tb_ref   = tb
-                        local _icons    = _BROWSE_ICONS
                         fc_b.genItemTable = function(fc_self, ...)
                             local result = prev_gen(fc_self, ...)
-                            -- Refresh icon for current mode.
                             local ok_bm2, BM2 = pcall(require, "sui_browsemeta")
-                            if ok_bm2 and BM2 and _btn_ref.image then
+                            if ok_bm2 and BM2 and browse_btn.image then
                                 local mode2 = BM2.getCurrentMode(fc_self)
-                                local icon2 = _icons[mode2] or _icons.normal
-                                if _btn_ref.image.file ~= icon2 then
-                                    _btn_ref.image.file = icon2
-                                    pcall(_btn_ref.image.free, _btn_ref.image)
-                                    pcall(_btn_ref.image.init, _btn_ref.image)
-                                    UIManager:setDirty(_tb_ref.show_parent or _fm_ref, "ui", _tb_ref.dimen)
+                                local icon2 = _BROWSE_ICONS[mode2] or _BROWSE_ICONS.normal
+                                if browse_btn.image.file ~= icon2 then
+                                    browse_btn.image.file = icon2
+                                    _reloadImage(browse_btn.image)
+                                    UIManager:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
                                 end
                             end
                             return result
@@ -961,64 +755,64 @@ function M.apply(fm_self)
         end
     end
 
-    -- Title -----------------------------------------------------------------
+    -- Title ------------------------------------------------------------------
+
     if tb.setTitle then
         fm_self._titlebar_orig_title_set = true
         tb:setTitle(show_title and _("Library") or "")
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- FM titlebar — restore / reapply
+-- ---------------------------------------------------------------------------
+
 function M.restore(fm_self)
     local tb = fm_self.title_bar
     if not tb then return end
     if not fm_self._titlebar_patched then return end
 
+    -- Restore the setRightIcon patch.
     if fm_self._titlebar_orig_setRightIcon then
         tb.setRightIcon = fm_self._titlebar_orig_setRightIcon
         fm_self._titlebar_orig_setRightIcon = nil
     end
 
+    -- Restore left and right buttons.
     if tb.right_button then _restoreBtn(tb.right_button, fm_self._titlebar_rb) end
     fm_self._titlebar_rb = nil
-
-    if tb.left_button then _restoreBtn(tb.left_button, fm_self._titlebar_lb) end
+    if tb.left_button  then _restoreBtn(tb.left_button,  fm_self._titlebar_lb) end
     fm_self._titlebar_lb = nil
 
-    -- Remove the injected search button directly from the TitleBar OverlapGroup.
-    if fm_self._titlebar_search_btn then
-        local btn = fm_self._titlebar_search_btn
-        for i = #tb, 1, -1 do
-            if tb[i] == btn then table.remove(tb, i); break end
+    -- Remove injected search and browse buttons from the TitleBar OverlapGroup.
+    for _, key in ipairs({ "_titlebar_search_btn", "_titlebar_browse_btn" }) do
+        local btn = fm_self[key]
+        if btn then
+            for i = #tb, 1, -1 do
+                if tb[i] == btn then table.remove(tb, i); break end
+            end
+            fm_self[key] = nil
         end
-        fm_self._titlebar_search_btn = nil
     end
-
-    -- Remove the injected browse button.
-    if fm_self._titlebar_browse_btn then
-        local btn = fm_self._titlebar_browse_btn
-        for i = #tb, 1, -1 do
-            if tb[i] == btn then table.remove(tb, i); break end
-        end
-        fm_self._titlebar_browse_btn = nil
-    end
-    fm_self._simpleui_browse_x_compact = nil
+    fm_self._simpleui_browse_x_compact  = nil
     fm_self._titlebar_browse_gen_hooked = nil
 
+    -- Restore file-chooser patches.
     local fc = fm_self.file_chooser
-    if fc and fm_self._titlebar_orig_fc_genItemTable then
-        fc.genItemTable = fm_self._titlebar_orig_fc_genItemTable
+    if fc then
+        if fm_self._titlebar_orig_fc_genItemTable then
+            fc.genItemTable = fm_self._titlebar_orig_fc_genItemTable
+        end
+        if fm_self._titlebar_orig_fc_onFolderUp then
+            fc.onFolderUp = nil
+        end
+        if fm_self._titlebar_orig_fc_onGotoPage then
+            fc.onGotoPage = fm_self._titlebar_orig_fc_onGotoPage
+        end
     end
     fm_self._titlebar_orig_fc_genItemTable = nil
-    if fc and fm_self._titlebar_orig_fc_onFolderUp then
-        -- The wrapper was installed on the fc *instance*; removing it lets the
-        -- class method (whichever is current) handle the call directly again.
-        fc.onFolderUp = nil
-    end
-    fm_self._titlebar_orig_fc_onFolderUp = nil
-    if fc and fm_self._titlebar_orig_fc_onGotoPage then
-        fc.onGotoPage = fm_self._titlebar_orig_fc_onGotoPage
-    end
-    fm_self._titlebar_orig_fc_onGotoPage = nil
+    fm_self._titlebar_orig_fc_onFolderUp   = nil
+    fm_self._titlebar_orig_fc_onGotoPage   = nil
 
     if fm_self._titlebar_orig_title_set and tb.setTitle then
         tb:setTitle("")
@@ -1039,15 +833,13 @@ end
 
 function M.applyToInjected(widget)
     if not M.isEnabled() then return end
-
     local tb = widget.title_bar
     if not tb then return end
     if widget._titlebar_inj_patched then return end
     widget._titlebar_inj_patched = true
 
-    local lp        = _layoutParams(tb)
-    local iw, pad, gap, sw = lp.iw, lp.pad, lp.gap, lp.sw
-
+    local lp                = _layoutParams(tb)
+    local iw, pad, gap, sw  = lp.iw, lp.pad, lp.gap, lp.sw
     local show_back  = M.isItemVisible("inj_back")
     local show_right = M.isItemVisible("inj_right")
 
@@ -1065,7 +857,7 @@ function M.applyToInjected(widget)
         btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
     end
 
-    -- Left button ("inj_back") ----------------------------------------------
+    -- Left button (back).
     if tb.left_button then
         local lb = tb.left_button
         widget._titlebar_inj_lb = _snapBtn(lb)
@@ -1077,15 +869,13 @@ function M.applyToInjected(widget)
         end
     end
 
-    -- Right button ("inj_right") --------------------------------------------
+    -- Right button (close). Hidden by zeroing its dimen so it receives no taps.
     if tb.right_button then
         local rb = tb.right_button
         widget._titlebar_inj_rb = _snapBtn(rb, { save_callback = true, save_dimen = true })
         if show_right then
             placeBtn("inj_right", rb)
         else
-            -- Zero the dimen so the button occupies no space and receives no taps.
-            -- Each widget gets its own Geom instance to avoid shared-mutation bugs.
             rb.dimen         = require("ui/geometry"):new{ w = 0, h = 0 }
             rb.callback      = function() end
             rb.hold_callback = function() end
@@ -1097,24 +887,22 @@ function M.restoreInjected(widget)
     local tb = widget.title_bar
     if not tb then return end
     if not widget._titlebar_inj_patched then return end
-
     if tb.left_button  then _restoreBtn(tb.left_button,  widget._titlebar_inj_lb) end
     if tb.right_button then _restoreBtn(tb.right_button, widget._titlebar_inj_rb) end
-
     widget._titlebar_inj_lb      = nil
     widget._titlebar_inj_rb      = nil
     widget._titlebar_inj_patched = nil
 end
 
 -- ---------------------------------------------------------------------------
--- reapplyAll
+-- reapplyAll — re-applies to the FM and every live injected widget
 -- ---------------------------------------------------------------------------
 
 function M.reapplyAll(fm_self, window_stack)
+    local logger = require("logger")
     if fm_self then
         local ok, err = pcall(M.reapply, fm_self)
         if not ok then
-            local logger = require("logger")
             logger.warn("simpleui: titlebar.reapplyAll FM failed:", tostring(err))
         end
     end
@@ -1127,7 +915,6 @@ function M.reapplyAll(fm_self, window_stack)
                     M.applyToInjected(w)
                 end)
                 if not ok then
-                    local logger = require("logger")
                     logger.warn("simpleui: titlebar.reapplyAll widget failed:", tostring(err))
                 end
             end

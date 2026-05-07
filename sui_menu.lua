@@ -163,7 +163,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
     -- Currently only "frontlight" is hardware-gated; all other ids are always shown.
     local function actionAvailable(id)
         if id == "frontlight" then return hasFrontlight() end
-        if id == "browse_authors" or id == "browse_series" then
+        if id == "browse_authors" or id == "browse_series" or id == "browse_tags" then
             local ok_bm, BM = pcall(require, "sui_browsemeta")
             return ok_bm and BM and BM.isEnabled()
         end
@@ -1940,16 +1940,49 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 end,
             },
             {
-                text         = _("Show Closing Notice"),
-                help_text    = _("When enabled, a brief notice appears on screen when closing a book and returning to the Home Screen.\nIt disappears automatically and does not slow down the Home Screen loading."),
-                checked_func = function()
-                    return G_reader_settings:nilOrTrue("simpleui_hs_closing_notice")
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    local on = G_reader_settings:nilOrTrue("simpleui_hs_closing_notice")
-                    G_reader_settings:saveSetting("simpleui_hs_closing_notice", not on)
-                end,
+                text      = _("Closing Notice"),
+                help_text = _("Controls when the brief \"Closing book…\" notice is shown when leaving a book.\n\n• Always: shown whenever a book is closed, whether via the menu or a gesture.\n• Gesture Only: shown only when closing via a gesture (e.g. swipe); not shown when using the reader menu.\n• Never: the notice is never shown."),
+                sub_item_table = {
+                    {
+                        text         = _("Always"),
+                        radio        = true,
+                        checked_func = function()
+                            local mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+                            if mode then return mode == "always" end
+                            -- Migrate from old boolean: nil/true → "always"
+                            return G_reader_settings:nilOrTrue("simpleui_hs_closing_notice")
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "always")
+                        end,
+                    },
+                    {
+                        text         = _("Gesture Only"),
+                        radio        = true,
+                        checked_func = function()
+                            return G_reader_settings:readSetting("simpleui_hs_closing_notice_mode") == "gesture_only"
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "gesture_only")
+                        end,
+                    },
+                    {
+                        text         = _("Never"),
+                        radio        = true,
+                        checked_func = function()
+                            local mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+                            if mode then return mode == "never" end
+                            -- Migrate from old boolean: explicit false → "never"
+                            return G_reader_settings:isFalse("simpleui_hs_closing_notice")
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "never")
+                        end,
+                    },
+                },
             },
             {
                 text         = _("Settings on Long Tap"),
@@ -2097,7 +2130,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     end
                     return {
                         {
-                            text         = _("Browse by Author / Series"),
+                            text         = _("Browse by Author / Series / Tags"),
                             checked_func = function()
                                 local ok_bm, BM = pcall(require, "sui_browsemeta")
                                 return ok_bm and BM and BM.isEnabled()
@@ -2147,21 +2180,65 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                             text         = _("Folder Covers"),
                             checked_func = function() return FC.isEnabled() end,
                             separator    = true,
-                            callback     = function()
-                                local enabling = not FC.isEnabled()
-                                FC.setEnabled(enabling)
-                                -- Install or uninstall the MosaicMenuItem patch
-                                -- at toggle time so that third-party user-patches
-                                -- (e.g. 2-browser-folder-cover.lua) that rely on
-                                -- userpatch.getUpValue(MosaicMenuItem.update, …)
-                                -- find the original function when FC is off.
-                                if enabling then
-                                    pcall(FC.install)
-                                else
-                                    pcall(FC.uninstall)
-                                end
-                                _refreshFC()
-                            end,
+                            sub_item_table = {
+                                {
+                                    text           = _("Enable Folder Covers"),
+                                    checked_func   = function() return FC.isEnabled() end,
+                                    keep_menu_open = true,
+                                    separator      = true,
+                                    callback       = function()
+                                        local enabling = not FC.isEnabled()
+                                        FC.setEnabled(enabling)
+                                        -- Install or uninstall the MosaicMenuItem patch
+                                        -- at toggle time so that third-party user-patches
+                                        -- (e.g. 2-browser-folder-cover.lua) that rely on
+                                        -- userpatch.getUpValue(MosaicMenuItem.update, …)
+                                        -- find the original function when FC is off.
+                                        if enabling then
+                                            pcall(FC.install)
+                                        else
+                                            pcall(FC.uninstall)
+                                        end
+                                        _refreshFC()
+                                    end,
+                                },
+                                {
+                                    text           = _("Single Cover"),
+                                    radio          = true,
+                                    checked_func   = function() return FC.getFolderStyle() == "single" end,
+                                    enabled_func   = function() return FC.isEnabled() end,
+                                    keep_menu_open = true,
+                                    callback       = function()
+                                        FC.setFolderStyle("single")
+                                        FC.invalidateCache()
+                                        _refreshFC()
+                                    end,
+                                },
+                                {
+                                    text           = _("4-Cover Grid (Mosaic View Only)"),
+                                    radio          = true,
+                                    checked_func   = function() return FC.getFolderStyle() == "quad" end,
+                                    enabled_func   = function() return FC.isEnabled() end,
+                                    keep_menu_open = true,
+                                    callback       = function()
+                                        FC.setFolderStyle("quad")
+                                        FC.invalidateCache()
+                                        _refreshFC()
+                                    end,
+                                },
+                                {
+                                    text           = _("Auto (Single ↔ 4-Cover Grid)"),
+                                    radio          = true,
+                                    checked_func   = function() return FC.getFolderStyle() == "auto" end,
+                                    enabled_func   = function() return FC.isEnabled() end,
+                                    keep_menu_open = true,
+                                    callback       = function()
+                                        FC.setFolderStyle("auto")
+                                        FC.invalidateCache()
+                                        _refreshFC()
+                                    end,
+                                },
+                            },
                         },
                         {
                             text           = _("Group Books by Series"),
@@ -2302,6 +2379,17 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                             enabled_func   = function() return FC.isEnabled() end,
                             keep_menu_open = true,
                             callback       = function() FC.setHideUnderline(not FC.getHideUnderline()); _refreshFC() end,
+                        },
+                        {
+                            text           = _("Hide book spine"),
+                            checked_func   = function() return FC.getHideSpine() end,
+                            enabled_func   = function() return FC.isEnabled() end,
+                            keep_menu_open = true,
+                            callback       = function()
+                                FC.setHideSpine(not FC.getHideSpine())
+                                FC.invalidateCache()
+                                _refreshFC()
+                            end,
                         },
                         {
                             text           = _("Placeholder cover for bookless folders"),

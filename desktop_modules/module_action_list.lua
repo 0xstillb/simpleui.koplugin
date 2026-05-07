@@ -207,28 +207,13 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
         -- Cap content_w to inner_w
         content_w = math.min(content_w, inner_w)
 
-        local row_content
-        if align == "left" then
-            row_content = LeftContainer:new{
-                dimen = Geom:new{ w = inner_w, h = d.row_h },
-                hg,
-            }
-        elseif align == "right" then
-            row_content = RightContainer:new{
-                dimen = Geom:new{ w = inner_w, h = d.row_h },
-                hg,
-            }
-        else  -- center
-            row_content = CenterContainer:new{
-                dimen = Geom:new{ w = inner_w, h = d.row_h },
-                hg,
-            }
-        end
-
         -- ── Tappable wrapper ───────────────────────────────────────────────
+        -- The tap zone matches the actual content width (icon + gap + text),
+        -- not the full module width. Empty space beside the content is inert.
+        -- An alignment container wraps the tappable for visual positioning.
         local tappable = InputContainer:new{
-            dimen      = Geom:new{ w = inner_w, h = d.row_h },
-            [1]        = row_content,
+            dimen      = Geom:new{ w = content_w, h = d.row_h },
+            [1]        = hg,
             _on_tap_fn = on_tap_fn,
             _action_id = aid,
         }
@@ -245,10 +230,28 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
             return true
         end
 
+        local row_content
+        if align == "left" then
+            row_content = LeftContainer:new{
+                dimen = Geom:new{ w = inner_w, h = d.row_h },
+                tappable,
+            }
+        elseif align == "right" then
+            row_content = RightContainer:new{
+                dimen = Geom:new{ w = inner_w, h = d.row_h },
+                tappable,
+            }
+        else  -- center
+            row_content = CenterContainer:new{
+                dimen = Geom:new{ w = inner_w, h = d.row_h },
+                tappable,
+            }
+        end
+
         if i > 1 and d.row_gap > 0 then
             vg[#vg + 1] = VerticalSpan:new{ width = d.row_gap }
         end
-        vg[#vg + 1] = tappable
+        vg[#vg + 1] = row_content
     end
 
     return FrameContainer:new{

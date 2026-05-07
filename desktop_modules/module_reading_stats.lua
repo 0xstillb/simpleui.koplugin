@@ -39,10 +39,23 @@ local _BASE_RS_PH_FS    = Screen:scaleBySize(11)  -- placeholder "No stats" text
 
 local RS_N_COLS    = 7  -- max columns — not a dimension, no scaling needed
 
-local SETTING_TYPE = "reading_stats_type"   -- suffix: pfx .. "reading_stats_type"
+local SETTING_TYPE  = "reading_stats_type"   -- suffix: pfx .. "reading_stats_type"
+local SETTING_ALIGN = "reading_stats_align"  -- suffix: pfx .. "reading_stats_align"
 
 local function getType(pfx)
     return G_reader_settings:readSetting(pfx .. SETTING_TYPE) or "cards"
+end
+
+local function getAlign(pfx)
+    local v = G_reader_settings:readSetting(pfx .. SETTING_ALIGN)
+    if v == "left" or v == "right" or v == "center" then return v end
+    return "center"
+end
+
+local function alignLabel(align)
+    if align == "left"  then return _("Left")  end
+    if align == "right" then return _("Right") end
+    return _("Center")
 end
 
 -- ---------------------------------------------------------------------------
@@ -82,7 +95,7 @@ table.sort(_sorted_pool, function(a, b) return a.label:lower() < b.label:lower()
 -- Stat widget builders
 -- ---------------------------------------------------------------------------
 
--- Cards mode: rounded border, content centred inside the card.
+-- Cards mode: rounded border, content aligned inside the card.
 -- `d` is the scaled-dims table produced once per M.build() call.
 -- Streak value widget: icon (dark grey) + space + number (black), side by side.
 -- To change icon colour: edit _STREAK_ICON_CLR.
@@ -108,7 +121,7 @@ local function makeStreakValWidget(val_str, d)
     }
 end
 
-local function buildStatCardWidget(card_w, stat_id, stats, d)
+local function buildStatCardWidget(card_w, stat_id, stats, d, align)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
@@ -122,7 +135,7 @@ local function buildStatCardWidget(card_w, stat_id, stats, d)
         padding    = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = card_w, h = d.card_h },
-            VerticalGroup:new{ align = "center",
+            VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
                     and makeStreakValWidget(val_str, d)
                     or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
@@ -136,9 +149,9 @@ local function buildStatCardWidget(card_w, stat_id, stats, d)
     }
 end
 
--- Flat mode: no border, tinted background, content centred.
+-- Flat mode: no border, tinted background, content aligned.
 local _CLR_FLAT_BG = Blitbuffer.gray(0.08)
-local function buildStatFlatWidget(card_w, stat_id, stats, d)
+local function buildStatFlatWidget(card_w, stat_id, stats, d, align)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
@@ -151,7 +164,7 @@ local function buildStatFlatWidget(card_w, stat_id, stats, d)
         padding    = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = card_w, h = d.card_h },
-            VerticalGroup:new{ align = "center",
+            VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
                     and makeStreakValWidget(val_str, d)
                     or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
@@ -164,7 +177,7 @@ local function buildStatFlatWidget(card_w, stat_id, stats, d)
         },
     }
 end
-local function buildStatListCell(cell_w, stat_id, stats, show_sep, d)
+local function buildStatListCell(cell_w, stat_id, stats, show_sep, d, align)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
@@ -177,7 +190,7 @@ local function buildStatListCell(cell_w, stat_id, stats, show_sep, d)
         padding    = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = cell_w, h = d.card_h },
-            VerticalGroup:new{ align = "left",
+            VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
                     and makeStreakValWidget(val_str, d)
                     or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
@@ -306,12 +319,13 @@ function M.build(w, ctx)
     }
     if sp.db_conn_fatal and ctx then ctx.db_conn_fatal = true end
     local mode  = getType(ctx.pfx)
+    local align = getAlign(ctx.pfx)
     local row    = HorizontalGroup:new{ align = "center" }
 
     if mode == "list" then
         local cell_w = math.floor(w / n)
         for i = 1, n do
-            local cell = buildStatListCell(cell_w, stat_ids[i], stats, i < n, d)
+            local cell = buildStatListCell(cell_w, stat_ids[i], stats, i < n, d, align)
                       or OverlapGroup:new{
                              dimen = Geom:new{ w = cell_w, h = d.card_h },
                          }
@@ -342,9 +356,9 @@ function M.build(w, ctx)
         for i = 1, n do
             local card
             if mode == "flat" then
-                card = buildStatFlatWidget(card_w, stat_ids[i], stats, d)
+                card = buildStatFlatWidget(card_w, stat_ids[i], stats, d, align)
             else
-                card = buildStatCardWidget(card_w, stat_ids[i], stats, d)
+                card = buildStatCardWidget(card_w, stat_ids[i], stats, d, align)
             end
             card = card or FrameContainer:new{
                 dimen = Geom:new{ w = card_w, h = d.card_h },
@@ -479,6 +493,43 @@ function M.getMenuItems(ctx_menu)
             value_step    = Config.RS_TEXT_SCALE_STEP,
             default_value = Config.RS_TEXT_SCALE_DEF,
         }),
+        {
+            text_func      = function()
+                return _lc("Alignment") .. " — " .. alignLabel(getAlign(pfx))
+            end,
+            sub_item_table = {
+                {
+                    text           = _lc("Left"),
+                    radio          = true,
+                    keep_menu_open = true,
+                    checked_func   = function() return getAlign(pfx) == "left"   end,
+                    callback       = function()
+                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "left")
+                        refresh()
+                    end,
+                },
+                {
+                    text           = _lc("Center"),
+                    radio          = true,
+                    keep_menu_open = true,
+                    checked_func   = function() return getAlign(pfx) == "center" end,
+                    callback       = function()
+                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "center")
+                        refresh()
+                    end,
+                },
+                {
+                    text           = _lc("Right"),
+                    radio          = true,
+                    keep_menu_open = true,
+                    checked_func   = function() return getAlign(pfx) == "right"  end,
+                    callback       = function()
+                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "right")
+                        refresh()
+                    end,
+                },
+            },
+        },
         { text = _lc("Arrange"), keep_menu_open = true, separator = true, callback = function()
             local rs_ids = getItems()
             if #rs_ids < 2 then

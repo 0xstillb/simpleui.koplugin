@@ -52,6 +52,33 @@ local _ACTION_ONLY = {
     power            = true,
 }
 
+-- _BROWSE_ACTIONS: action IDs that open a virtual browse view in the FM.
+-- When one of these is triggered, the active tab indicator should follow
+-- this priority: (1) the action's own tab if it is in the tab bar,
+-- (2) the "home" (Library) tab if it is in the tab bar, (3) action_id as-is.
+local _BROWSE_ACTIONS = {
+    browse_authors = true,
+    browse_series  = true,
+    browse_tags    = true,
+}
+
+-- Returns the tab ID that should receive the active indicator when
+-- action_id is a browse action. For non-browse actions returns action_id
+-- unchanged so all existing call sites are unaffected.
+local function _resolveActiveTab(action_id, tabs)
+    if not _BROWSE_ACTIONS[action_id] then return action_id end
+    -- Prefer the action's own tab if the user has placed it on the bar.
+    for _, tid in ipairs(tabs) do
+        if tid == action_id then return action_id end
+    end
+    -- Fall back to the Library tab.
+    for _, tid in ipairs(tabs) do
+        if tid == "home" then return "home" end
+    end
+    -- No suitable tab found — return as-is (bar will show no indicator).
+    return action_id
+end
+
 local M = {}
 
 -- Bar colors.
@@ -888,7 +915,10 @@ function M.onTabTap(plugin, action_id, fm_self)
     -- Track whether this tab was already active before the tap.
     local already_active = (plugin.active_action == action_id)
 
-    plugin.active_action = action_id
+    -- For browse actions (authors/series/tags), the indicator tab may differ
+    -- from the action_id itself (own tab if present, else Library).
+    local indicator_tab = _resolveActiveTab(action_id, tabs)
+    plugin.active_action = indicator_tab
     -- Skip the eager replaceBar when the homescreen is open: navigate() will
     -- close the HS and call replaceBar+setDirty itself, so doing it here too
     -- produces a redundant buildBarWidget call and extra repaint flushes.
@@ -906,7 +936,7 @@ function M.onTabTap(plugin, action_id, fm_self)
     local injected_open = fm_self ~= plugin.ui and fm_self._navbar_injected
     if fm_self._navbar_container and action_id ~= "homescreen" and not hs_open
             and not already_active and not injected_open then
-        M.replaceBar(fm_self, M.buildBarWidget(action_id, tabs), tabs)
+        M.replaceBar(fm_self, M.buildBarWidget(indicator_tab, tabs), tabs)
         -- setDirty(fm_self) covers the full screen and recurses into navbar_container.
         -- The previous double-dirty (navbar_container + fm_self) queued two e-ink cycles.
         UIManager:setDirty(fm_self, "ui")
@@ -1163,6 +1193,20 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
     -- "force" doubles as the already_active flag passed from onTabTap.
     local already_active = force
 
+    -- tabs may not be loaded yet when navigate() is called directly (e.g.
+    -- from on_qa_tap in the homescreen). Load them now if needed so that
+    -- _resolveActiveTab has the real tab config to work with.
+    tabs = tabs or Config.loadTabConfig()
+
+    -- Resolve the indicator tab for browse actions (authors/series/tags):
+    -- use the action's own tab if it is on the bar, otherwise Library.
+    -- This must happen before the FM-fallback block so that the synced
+    -- live_plugin.active_action already carries the correct value.
+    local indicator_tab = _resolveActiveTab(action_id, tabs)
+    if not _ACTION_ONLY[action_id] then
+        plugin.active_action = indicator_tab
+    end
+
     -- When the FM has been torn down and recreated (e.g. after returning from
     -- the reader), plugin.ui on the *old* plugin instance no longer has
     -- _navbar_container. Fall back to the live FileManager instance so that
@@ -1270,9 +1314,10 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         hs_inst._navbar_closing_intentionally = true
         pcall(function() UIManager:close(hs_inst) end)
         hs_inst._navbar_closing_intentionally = nil
-        -- Update the FM bar.
+        -- Update the FM bar. indicator_tab was resolved at the top of navigate()
+        -- and already stored in plugin.active_action.
         if fm._navbar_container then
-            M.replaceBar(fm, M.buildBarWidget(action_id, tabs), tabs)
+            M.replaceBar(fm, M.buildBarWidget(indicator_tab, tabs), tabs)
             UIManager:setDirty(fm, "ui")
         end
         -- For "home": navigate the FM to home_dir now that the HS is gone.
@@ -1318,7 +1363,7 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
     end
 
     if fm_self ~= fm and fm._navbar_container then
-        M.replaceBar(fm, M.buildBarWidget(action_id, tabs), tabs)
+        M.replaceBar(fm, M.buildBarWidget(_resolveActiveTab(action_id, tabs), tabs), tabs)
         UIManager:setDirty(fm, "ui")
     end
 
@@ -1424,15 +1469,18 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
     elseif action_id == "wifi_toggle" then
         M.doWifiToggle(plugin); return
 
-    elseif action_id == "browse_authors" or action_id == "browse_series" then
-        local bm_mode = (action_id == "browse_authors") and "author" or "series"
+    elseif action_id == "browse_authors" or action_id == "browse_series"
+            or action_id == "browse_tags" then
+        local bm_mode = (action_id == "browse_authors") and "author"
+                     or (action_id == "browse_series")  and "series"
+                     or "tags"
         local ok_bm, BM = pcall(_BM)
         if not (ok_bm and BM) then
-            showUnavailable(_("Browse by Authors/Series not available."))
+            showUnavailable(_("Browse by Authors/Series/Tags not available."))
             return
         end
         if not BM.isEnabled() then
-            showUnavailable(_("Enable 'Browse by Author / Series' in the library menu first."))
+            showUnavailable(_("Enable 'Browse by Author / Series / Tags' in the library menu first."))
             return
         end
         local live_fm = plugin.ui or fm

@@ -2247,6 +2247,12 @@ function M.closeReaderToHomescreen(plugin)
     -- Stash the current tab so the HS Back button returns to the right place.
     local prev_action = plugin.active_action
 
+    -- Mark this close as gesture-triggered so onCloseDocument can distinguish
+    -- it from a menu-triggered close.  The flag is set here, immediately before
+    -- onClose(), and consumed (read + cleared) in onCloseDocument.
+    -- No KOReader internals are patched — this is entirely within our own code.
+    plugin._closing_via_gesture = true
+
     if isStartWithHS() then
         -- "Start with Homescreen" is active: mark tearing_down so the patched
         -- UIManager.close does NOT set _hs_pending_after_reader (that path relies
@@ -2319,6 +2325,7 @@ function M.closeReaderToLibrary(plugin)
     readerui._navbar_closing_intentionally = true
 
     local file = readerui.document and readerui.document.file
+    plugin._closing_via_gesture = true
     readerui:onClose()
     -- onClose() calls UIManager:close(self.dialog) which runs synchronously,
     -- so the flag has already been consumed. No need to clear it.
@@ -2350,82 +2357,6 @@ function M.closeReaderToLibrary(plugin)
     end)
 end
 
--- Patch ReaderMenu.exitOrRestart so the "Closing book…" InfoMessage is shown
--- immediately — before onTapCloseMenu() closes the menu — rather than only
--- after the menu has already been dismissed and repainted.
---
--- The patch fires only when the closing-notice setting is active and we are
--- actually returning to the SimpleUI homescreen (same guards as onCloseDocument).
--- A flag (_closing_notice_shown) is set on the plugin so onCloseDocument skips
--- the duplicate UIManager:show + forceRePaint that would otherwise fire later.
-function M.patchReaderMenuExit(plugin)
-    local ReaderMenu = package.loaded["apps/reader/modules/readermenu"]
-    if not ReaderMenu then
-        -- ReaderMenu is not loaded yet; it will be required when a book is
-        -- opened.  Wrap require so we patch it the moment it is first loaded.
-        local orig_req = _G.require
-        plugin._orig_require_for_readermenu = orig_req
-        _G.require = function(modname, ...)
-            local result = orig_req(modname, ...)
-            if modname == "apps/reader/modules/readermenu"
-                    and not result._simpleui_exit_patched then
-                M._wrapReaderMenuExitOrRestart(plugin, result)
-            end
-            return result
-        end
-        return
-    end
-    if not ReaderMenu._simpleui_exit_patched then
-        M._wrapReaderMenuExitOrRestart(plugin, ReaderMenu)
-    end
-end
-
-function M._wrapReaderMenuExitOrRestart(plugin, ReaderMenu)
-    local orig_exit = ReaderMenu.exitOrRestart
-    plugin._orig_readermenu_exit = orig_exit
-
-    ReaderMenu.exitOrRestart = function(rm_self, callback, force)
-        -- Show the "Closing book…" notice now, while the menu is still visible.
-        -- The original exitOrRestart calls onTapCloseMenu() first (which closes
-        -- the menu and triggers a repaint), then defers onClose() to nextTick —
-        -- so the notice only appeared after the menu was already gone.
-        --
-        -- We skip onTapCloseMenu() entirely: it is redundant because onClose()
-        -- already fires CloseReaderMenu + CloseConfigMenu internally (readerui.lua).
-        -- Removing it means one fewer UIManager:close + repaint on the hot path.
-        --
-        -- The notice appears on top of the open menu; the menu is then torn down
-        -- as part of the normal onClose() sequence.
-        if G_reader_settings:nilOrTrue("simpleui_hs_closing_notice") then
-            local return_to_folder = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
-            local start_with_hs    = G_reader_settings:readSetting("start_with", "filemanager") == "homescreen_simpleui"
-            if start_with_hs and not return_to_folder then
-                local ok_im, InfoMessage = pcall(require, "ui/widget/infomessage")
-                if ok_im and InfoMessage then
-                    UIManager:show(InfoMessage:new{
-                        text    = _("Closing book…"),
-                        timeout = 0.0,
-                    })
-                    -- forceRePaint paints the notice onto the screen synchronously,
-                    -- while the menu is still in the widget stack behind it.
-                    -- Without this the InfoMessage is queued but never rendered
-                    -- before onClose() tears down the entire ReaderUI.
-                    UIManager:forceRePaint()
-                    -- Mark as shown so onCloseDocument skips the duplicate paint.
-                    plugin._closing_notice_shown = true
-                end
-            end
-        end
-        -- Skip onTapCloseMenu(); go straight to onClose() via nextTick.
-        UIManager:nextTick(function()
-            rm_self.ui:onClose()
-            if callback then callback() end
-        end)
-    end
-
-    ReaderMenu._simpleui_exit_patched = true
-end
-
 function M.installAll(plugin)
     M.patchFileManagerClass(plugin)
     M.patchStartWithMenu()
@@ -2437,7 +2368,6 @@ function M.installAll(plugin)
     M.patchMenuInitForPagination(plugin)
     M.patchMenuForNavpager(plugin)
     M.patchBookInfoNavigation(plugin)
-    M.patchReaderMenuExit(plugin)
     -- Install button-bounds overlay when the debug setting is on at startup.
     if G_reader_settings:isTrue("simpleui_debug_button_bounds") then
         M.installButtonBoundsDebug(plugin)
@@ -2600,21 +2530,8 @@ function M.teardownAll(plugin)
 
     M.uninstallButtonBoundsDebug(plugin)
 
-    -- Restore ReaderMenu.exitOrRestart patch.
-    local ReaderMenu = package.loaded["apps/reader/modules/readermenu"]
-    if ReaderMenu and ReaderMenu._simpleui_exit_patched then
-        if plugin._orig_readermenu_exit then
-            ReaderMenu.exitOrRestart         = plugin._orig_readermenu_exit
-            plugin._orig_readermenu_exit     = nil
-        end
-        ReaderMenu._simpleui_exit_patched = nil
-    end
-    -- Restore deferred require hook if ReaderMenu was never loaded.
-    if plugin._orig_require_for_readermenu then
-        _G.require                             = plugin._orig_require_for_readermenu
-        plugin._orig_require_for_readermenu    = nil
-    end
-    plugin._closing_notice_shown = nil
+    -- Clear transient close-path flag.
+    plugin._closing_via_gesture = nil
 
     -- Reset module-level state so a re-enable cycle starts clean.
     -- Transient flags are cleared unconditionally.

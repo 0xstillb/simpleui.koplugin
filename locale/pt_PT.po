@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: simpleui\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-04-14 21:00\n"
-"PO-Revision-Date: 2026-05-04 21:47+0100\n"
+"PO-Revision-Date: 2026-05-07 11:34+0100\n"
 "Last-Translator: \n"
 "Language-Team: Portuguese (Portugal)\n"
 "Language: pt_PT\n"
@@ -254,9 +254,9 @@ msgstr "Navegar"
 msgid "Browse by"
 msgstr "Navegar por"
 
-#: sui_menu.lua:1983
-msgid "Browse by Author / Series"
-msgstr "Navegar por Autor / Série"
+#: sui_menu.lua:2100
+msgid "Browse by Author / Series / Tags"
+msgstr "Navegar por Autor / Série / Etiquetas"
 
 #: sui_bottombar.lua:1412
 msgid "Browse by Authors/Series not available."
@@ -509,8 +509,8 @@ msgid "Edit Quick Action"
 msgstr "Editar Ação Rápida"
 
 #: sui_bottombar.lua:1416
-msgid "Enable 'Browse by Author / Series' in the library menu first."
-msgstr "Ative primeiro «Navegar por Autor / Série» no menu da biblioteca."
+msgid "Enable 'Browse by Author / Series / Tags' in the library menu first."
+msgstr "Ative primeiro «Navegar por Autor / Série / Etiquetas» no menu da biblioteca."
 
 #: sui_quickactions.lua:422
 msgid ""
@@ -564,13 +564,33 @@ msgstr "Pesquisa de Ficheiros"
 msgid "Flat"
 msgstr "Plano"
 
+#: desktop_modules/module_quick_actions.lua:459
+msgid "Bare"
+msgstr "Simples"
+
 #: sui_quickactions.lua:941
 msgid "Folder"
 msgstr "Pasta"
 
-#: sui_menu.lua:2023
+#: sui_menu.lua:2148
 msgid "Folder Covers"
 msgstr "Capas de Pastas"
+
+#: sui_menu.lua:2153
+msgid "Enable Folder Covers"
+msgstr "Ativar Capas de Pastas"
+
+#: sui_menu.lua:2172
+msgid "Single Cover"
+msgstr "Capa Única"
+
+#: sui_menu.lua:2185
+msgid "4-Cover Grid (Mosaic View Only)"
+msgstr "Grelha de 4 Capas (Apenas Vista em Mosaico)"
+
+#: sui_menu.lua:2230
+msgid "Auto (Single ↔ 4-Cover Grid)"
+msgstr "Automático (Única ↔ Grelha de 4 Capas)"
 
 #: sui_menu.lua:2102
 msgid "Folder Name"
@@ -645,6 +665,10 @@ msgstr "Ocultar ícone Wi-Fi quando desligado"
 #: sui_menu.lua:2176
 msgid "Hide selection underline"
 msgstr "Ocultar sublinhado de seleção"
+
+#: sui_menu.lua:2339
+msgid "Hide book spine"
+msgstr "Ocultar lombada do livro"
 
 #: sui_menu.lua:444
 msgid ""
@@ -2076,18 +2100,362 @@ msgstr "Simple UI: Ir para a Biblioteca"
 msgid "Simple UI: Toggle Homescreen / Library"
 msgstr "Simple UI: Alternar Ecrã Inicial / Biblioteca"
 
-#: main.lua:712
+#: main.lua
 msgid "Closing book…"
 msgstr "A fechar o livro…"
 
-#: sui_menu.lua:1943
-msgid "Show Closing Notice"
-msgstr "Mostrar Aviso de Encerramento"
+#: sui_menu.lua
+msgid "Closing Notice"
+msgstr "Aviso de Encerramento"
+
+#: sui_menu.lua
+msgid ""
+"Controls when the brief \"Closing book…\" notice is shown when leaving a "
+"book.\n"
+"\n"
+"• Always: shown whenever a book is closed, whether via the menu or a "
+"gesture.\n"
+"• Gesture Only: shown only when closing via a gesture (e.g. swipe); not "
+"shown when using the reader menu.\n"
+"• Never: the notice is never shown."
+msgstr ""
+"Controla quando o breve aviso «A fechar o livro…» é mostrado ao sair de um "
+"livro.\n"
+"\n"
+"• Sempre: mostrado sempre que um livro é fechado, seja pelo menu ou por um "
+"gesto.\n"
+"• Só por Gesto: mostrado apenas ao fechar com um gesto (p. ex. deslizar); "
+"não aparece ao usar o menu do leitor.\n"
+"• Nunca: o aviso nunca é mostrado."
+
+#: sui_menu.lua
+msgid "Always"
+msgstr "Sempre"
+
+#: sui_menu.lua
+msgid "Gesture Only"
+msgstr "Só por Gesto"
+
+#: sui_menu.lua
+msgid "Never"
+msgstr "Nunca"
+
+#: sui_config.lua sui_browsemeta.lua
+msgid "Tags"
+msgstr "Etiquetas"
+
+#: sui_titlebar.lua
+msgid "By tags"
+msgstr "Por etiqueta"
+
+#: sui_bottombar.lua
+msgid "Browse by Authors/Series/Tags not available."
+msgstr "Navegar por Autores/Séries/Etiquetas não disponível."
+
+#: sui_bottombar.lua sui_menu.lua
+msgid "Enable 'Browse by Author / Series / Tags' in the library menu first."
+msgstr "Ative primeiro «Navegar por Autor / Série / Etiquetas» no menu da biblioteca."
+
+#: sui_menu.lua:934
+msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
+msgstr "É necessário reiniciar para aplicar o novo tamanho de barra em todos os esquemas.\n\nReiniciar agora?"
+
+#: sui_menu.lua:899
+msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
+msgstr "A barra inferior ficará %s após reiniciar.\n\nReiniciar agora?"
+
+#: sui_menu.lua:1740
+msgid "Cannot place modules after Page 1 separator.\nPage 1 must always have at least 1 module."
+msgstr "Não é possível colocar módulos após o separador da Página 1.\nA Página 1 deve ter sempre pelo menos 1 módulo."
+
+#: sui_menu.lua:1583
+msgid "Choose how many pages the homescreen has.\nEmpty pages stay empty. Modules keep their position."
+msgstr "Escolha o número de páginas do ecrã inicial.\nPáginas vazias ficam vazias. Os módulos mantêm a sua posição."
+
+#: sui_foldercovers.lua:559
+#: sui_browsemeta.lua:854
+msgid "Collection \"%1\" created with %2 books."
+msgstr "Coleção «%1» criada com %2 livros."
+
+#: sui_foldercovers.lua:542
+#: sui_browsemeta.lua:829
+msgid "Collection already exists: %1"
+msgstr "A coleção já existe: %1"
 
 #: sui_menu.lua:1944
-msgid ""
-"When enabled, a brief notice appears on screen when closing a book and returning to the Home Screen.\n"
-"It disappears automatically and does not slow down the Home Screen loading."
-msgstr ""
-"Quando ativo, aparece um breve aviso no ecrã ao fechar um livro e regressar ao Ecrã Inicial.\n"
-"Desaparece automaticamente e não atrasa o carregamento do Ecrã Inicial."
+msgid "Controls when the brief \"Closing book…\" notice is shown when leaving a book.\n\n• Always: shown whenever a book is closed, whether via the menu or a gesture.\n• Gesture Only: shown only when closing via a gesture (e.g. swipe); not shown when using the reader menu.\n• Never: the notice is never shown."
+msgstr "Controla quando a mensagem breve «A fechar livro…» é mostrada ao sair de um livro.\n\n• Sempre: mostrada sempre que um livro é fechado, seja pelo menu ou por gesto.\n• Apenas gesto: mostrada apenas ao fechar por gesto (ex.: deslizar); não mostrada ao usar o menu do leitor.\n• Nunca: a mensagem nunca é mostrada."
+
+#: sui_foldercovers.lua:534
+#: sui_browsemeta.lua:821
+msgid "Create"
+msgstr "Criar"
+
+#: sui_foldercovers.lua:776
+#: sui_foldercovers.lua:1197
+#: sui_browsemeta.lua:1107
+msgid "Create collection"
+msgstr "Criar coleção"
+
+#: sui_menu.lua:1238
+msgid "Custom Title Bar will be %s after restart.\n\nRestart now?"
+msgstr "A barra de título personalizada ficará %s após reiniciar.\n\nReiniciar agora?"
+
+#: sui_updater.lua:497
+msgid "Download and install now?"
+msgstr "Transferir e instalar agora?"
+
+#: sui_menu.lua:1687
+#: sui_menu.lua:1747
+msgid "Enable at least 2 modules to arrange."
+msgstr "Ative pelo menos 2 módulos para organizar."
+
+#: sui_quickactions.lua:422
+msgid "Enter the Unicode codepoint (hex) of a Nerd Fonts symbol.\nYou can look up codes with wakamaifondue.com using the file:\n  /koreader/fonts/nerdfonts/symbols.ttf\nLeave blank and press OK to remove a Nerd Font icon."
+msgstr "Introduza o ponto de código Unicode (hex) de um símbolo Nerd Fonts.\nPode procurar códigos em wakamaifondue.com usando o ficheiro:\n  /koreader/fonts/nerdfonts/symbols.ttf\nDeixe em branco e prima OK para remover um ícone Nerd Font."
+
+#: sui_bottombar.lua:1023
+msgid "Fetching bookmarks\xe2\x80\xa6"
+msgstr "A obter marcadores…"
+
+#: sui_menu.lua:1820
+msgid "Global scale for all modules.\nIndividual overrides in Module Settings take precedence.\n100% is the default size."
+msgstr "Escala global para todos os módulos.\nAs substituições individuais em Definições do Módulo têm prioridade.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:918
+msgid "Height of the bottom navigation bar.\n100% is the default size."
+msgstr "Altura da barra de navegação inferior.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:848
+msgid "Height of the top status bar.\n100% is the default size."
+msgstr "Altura da barra de estado superior.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:529
+msgid "Hides the pagination bar on the homescreen.\nNot available when Navpager is active."
+msgstr "Oculta a barra de paginação no ecrã inicial.\nNão disponível quando o Navpager está ativo."
+
+#: sui_menu.lua:1147
+msgid "Invalid arrangement.\nKeep items between the Left and Right separators."
+msgstr "Disposição inválida.\nMantenha os itens entre os separadores Esquerdo e Direito."
+
+#: sui_menu.lua:732
+msgid "Invalid arrangement.\nKeep the Left, Center and Right separators in order."
+msgstr "Disposição inválida.\nMantenha os separadores Esquerdo, Centro e Direito em ordem."
+
+#: sui_homescreen.lua:1944
+msgid "Modules exceed the visible area.\nMove some to another page or adjust the scale."
+msgstr "Os módulos excedem a área visível.\nMova alguns para outra página ou ajuste a escala."
+
+#: sui_menu.lua:458
+msgid "Navpager enabled.\n\nRestart now?"
+msgstr "Navpager ativado.\n\nReiniciar agora?"
+
+#: sui_foldercovers.lua:523
+#: sui_browsemeta.lua:810
+msgid "New collection name"
+msgstr "Nome da nova coleção"
+
+#: desktop_modules/module_quote.lua:831
+msgid "No custom quotes found. Add a .lua file to the plugin\'s desktop_modules/custom_quotes/ folder and select it in Settings."
+msgstr "Nenhuma citação personalizada encontrada. Adicione um ficheiro .lua à pasta desktop_modules/custom_quotes/ do plugin e selecione-o nas Definições."
+
+#: sui_updater.lua:480
+msgid "No download file found.\n\nOpen the releases page?"
+msgstr "Nenhum ficheiro de transferência encontrado.\n\nAbrir a página de lançamentos?"
+
+#: sui_quickactions.lua:1233
+msgid "No folder, collection or plugin configured.\nGo to Simple UI \xe2\x86\x92 Settings \xe2\x86\x92 Quick Actions to set one."
+msgstr "Nenhuma pasta, coleção ou plugin configurado.\nVá a Simple UI → Definições → Ações Rápidas para configurar."
+
+#: sui_menu.lua:1709
+#: sui_menu.lua:1729
+msgid "Page %d"
+msgstr "Página %d"
+
+#: sui_menu.lua:468
+msgid "Pagination bar hidden.\n\nRestart now?"
+msgstr "Barra de paginação ocultada.\n\nReiniciar agora?"
+
+#: sui_menu.lua:447
+msgid "Pagination bar set to Default.\n\nRestart now?"
+msgstr "Barra de paginação definida como padrão.\n\nReiniciar agora?"
+
+#: sui_menu.lua:554
+#: sui_menu.lua:566
+#: sui_menu.lua:578
+msgid "Pagination bar size will change after restart.\n\nRestart now?"
+msgstr "O tamanho da barra de paginação mudará após reiniciar.\n\nReiniciar agora?"
+
+#: sui_menu.lua:454
+msgid "Replaces the pagination bar with Prev/Next arrows at the edges of the bottom bar.\nThe arrows dim when there is no previous or next page.\nWith navpager active, as few as 1 tab and at most 4 tabs can be configured."
+msgstr "Substitui a barra de paginação por setas Anterior/Seguinte nas extremidades da barra inferior.\nAs setas ficam esbatidas quando não há página anterior ou seguinte.\nCom o navpager ativo, é possível configurar entre 1 e 4 separadores."
+
+#: desktop_modules/module_currently.lua:847
+msgid "Scale for all text elements (title, author, progress, time).\n100% is the default size."
+msgstr "Escala para todos os elementos de texto (título, autor, progresso, hora).\n100% é o tamanho padrão."
+
+#: desktop_modules/module_quick_actions.lua:424
+msgid "Scale for the button label text.\n100% is the default size."
+msgstr "Escala para o texto da etiqueta do botão.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_collections.lua:516
+msgid "Scale for the collection name text.\n100% is the default size."
+msgstr "Escala para o texto do nome da coleção.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_collections.lua:654
+msgid "Scale for the collection thumbnails only.\nThe label text follows the module scale.\n100% is the default size."
+msgstr "Escala apenas para as miniaturas da coleção.\nO texto da etiqueta segue a escala do módulo.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_currently.lua:834
+msgid "Scale for the cover thumbnail only.\n100% is the default size."
+msgstr "Escala apenas para a miniatura da capa.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_coverdeck.lua:714
+msgid "Scale for the cover thumbnails only.\n100% is the default size."
+msgstr "Escala apenas para as miniaturas de capas.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_recent.lua:263
+#: desktop_modules/module_tbr.lua:524
+#: desktop_modules/module_new_books.lua:263
+msgid "Scale for the cover thumbnails only.\nText and progress bar follow the module scale.\n100% is the default size."
+msgstr "Escala apenas para as miniaturas de capas.\nO texto e a barra de progresso seguem a escala do módulo.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:2356
+msgid "Scale for the folder name overlay text.\n100% is the default size."
+msgstr "Escala para o texto sobreposto do nome da pasta.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_action_list.lua:365
+#: desktop_modules/module_new_books.lua:275
+msgid "Scale for the label text.\n100% is the default size."
+msgstr "Escala para o texto da etiqueta.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_recent.lua:277
+#: desktop_modules/module_tbr.lua:514
+msgid "Scale for the percentage read text.\n100% is the default size."
+msgstr "Escala para o texto de percentagem lida.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_quote.lua:1172
+#: desktop_modules/module_collections.lua:503
+#: desktop_modules/module_action_list.lua:354
+#: desktop_modules/module_recent.lua:249
+#: desktop_modules/module_tbr.lua:477
+#: desktop_modules/module_reading_stats.lua:406
+#: desktop_modules/module_reading_goals.lua:578
+#: desktop_modules/module_clock.lua:494
+#: desktop_modules/module_new_books.lua:249
+#: desktop_modules/module_currently.lua:820
+#: desktop_modules/module_quick_actions.lua:413
+msgid "Scale for this module.\n100% is the default size."
+msgstr "Escala para este módulo.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_coverdeck.lua:722
+msgid "Scale for title and statistics text.\n100% is the default size."
+msgstr "Escala para o texto do título e estatísticas.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:1819
+msgid "Scales all modules and labels together.\n100% is the default size."
+msgstr "Dimensiona todos os módulos e etiquetas em conjunto.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:1855
+msgid "Scales the section label text above each module.\n100% is the default size."
+msgstr "Dimensiona o texto da etiqueta de secção acima de cada módulo.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:2070
+msgid "Show or hide the dedicated Simple UI tab in the menu bar.\nWhen hidden, Simple UI settings remain accessible via the main menu.\nTakes effect after a restart."
+msgstr "Mostrar ou ocultar o separador dedicado do Simple UI na barra de menus.\nQuando oculto, as definições do Simple UI continuam acessíveis pelo menu principal.\nTem efeito após reiniciar."
+
+#: sui_menu.lua:589
+msgid "Shows \"Page X of Y\" in the title bar subtitle when browsing the library, history or collections.\nNavpager enables this automatically.\nNot available when Navpager is active."
+msgstr "Mostra «Página X de Y» no subtítulo da barra de título ao navegar na biblioteca, histórico ou coleções.\nO Navpager ativa isto automaticamente.\nNão disponível quando o Navpager está ativo."
+
+#: sui_menu.lua:486
+msgid "Shows a row of dots at the bottom of the homescreen.\nThe active page dot is filled; the others are dimmed.\nAlways active when Navpager is selected."
+msgstr "Mostra uma fila de pontos no fundo do ecrã inicial.\nO ponto da página ativa está preenchido; os restantes estão esbatidos.\nSempre ativo quando o Navpager está selecionado."
+
+#: sui_updater.lua:427
+msgid "Simple UI %s installed.\n\nRestart KOReader to apply the update?"
+msgstr "Simple UI %s instalado.\n\nReiniciar o KOReader para aplicar a atualização?"
+
+#: sui_updater.lua:474
+msgid "Simple UI %s is available!\nYou have %s."
+msgstr "Simple UI %s está disponível!\nTem a versão %s."
+
+#: sui_menu.lua:2054
+msgid "Simple UI will be %s after restart.\n\nRestart now?"
+msgstr "O Simple UI ficará %s após reiniciar.\n\nReiniciar agora?"
+
+#: sui_menu.lua:976
+msgid "Size of the tab icons.\n100% is the default size."
+msgstr "Tamanho dos ícones dos separadores.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:996
+msgid "Size of the tab label text.\n100% is the default size."
+msgstr "Tamanho do texto das etiquetas dos separadores.\n100% é o tamanho padrão."
+
+#: desktop_modules/module_reading_stats.lua:487
+msgid "Size of the text inside the stat cards.\nDoes not affect card size or padding.\n100% is the default size."
+msgstr "Tamanho do texto dentro dos cartões de estatísticas.\nNão afeta o tamanho nem o espaçamento dos cartões.\n100% é o tamanho padrão."
+
+#: sui_menu.lua:954
+msgid "Space below the bottom navigation bar.\n100% is the default spacing."
+msgstr "Espaço abaixo da barra de navegação inferior.\n100% é o espaçamento padrão."
+
+#: sui_menu.lua:645
+msgid "Text shown in the top bar.\nMaximum %d character."
+msgstr "Texto exibido na barra superior.\nMáximo %d carácter."
+
+#: sui_menu.lua:2080
+msgid "The Simple UI settings tab will be %s after restart.\n\nRestart now?"
+msgstr "O separador de definições do Simple UI ficará %s após reiniciar.\n\nReiniciar agora?"
+
+#: sui_menu.lua:830
+msgid "Top Bar will be %s after restart.\n\nRestart now?"
+msgstr "A barra superior ficará %s após reiniciar.\n\nReiniciar agora?"
+
+#: sui_menu.lua:508
+msgid "Uses the standard KOReader pagination bar on the homescreen.\nNot available when Navpager is active."
+msgstr "Usa a barra de paginação padrão do KOReader no ecrã inicial.\nNão disponível quando o Navpager está ativo."
+
+#: sui_homescreen.lua:1483
+msgid "Vertical space above this module.\n100% is the default spacing."
+msgstr "Espaço vertical acima deste módulo.\n100% é o espaçamento padrão."
+
+#: desktop_modules/module_clock.lua:544
+msgid "Vertical space between the clock and the date.\n100% is the default spacing."
+msgstr "Espaço vertical entre o relógio e a data.\n100% é o espaçamento padrão."
+
+#: desktop_modules/module_clock.lua:574
+msgid "Vertical space between the date (or clock) and the battery.\n100% is the default spacing."
+msgstr "Espaço vertical entre a data (ou relógio) e a bateria.\n100% é o espaçamento padrão."
+
+#: sui_menu.lua:1989
+msgid "When enabled, long-pressing a section opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr "Quando ativado, manter premido uma secção abre o seu menu de definições.\nDesative para evitar que o menu de definições apareça ao manter premido."
+
+#: sui_menu.lua:1040
+msgid "When enabled, long-pressing the bottom bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr "Quando ativado, manter premido a barra inferior abre o seu menu de definições.\nDesative para evitar que o menu de definições apareça ao manter premido."
+
+#: sui_menu.lua:870
+msgid "When enabled, long-pressing the top bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr "Quando ativado, manter premido a barra superior abre o seu menu de definições.\nDesative para evitar que o menu de definições apareça ao manter premido."
+
+#: sui_menu.lua:1932
+msgid "When enabled, opening the file browser after finishing or closing a book navigates to the folder the book is in, matching native KOReader behaviour.\nWhen disabled (default), SimpleUI always returns to the library root.\nThis option works independently of \"Start with Home Screen\"."
+msgstr "Quando ativado, ao abrir o navegador de ficheiros após terminar ou fechar um livro, navega para a pasta onde o livro se encontra, comportando-se como o KOReader nativo.\nQuando desativado (padrão), o SimpleUI regressa sempre à raiz da biblioteca.\nEsta opção funciona independentemente de «Iniciar com Ecrã Inicial»."
+
+#: sui_menu.lua:2081
+msgid "hidden"
+msgstr "oculto"
+
+#: sui_updater.lua:653
+msgid "latest"
+msgstr "mais recente"
+
+#: sui_menu.lua:2081
+msgid "shown"
+msgstr "visível"
+
+#: sui_updater.lua:655
+msgid "⬆ Update available: %s"
+msgstr "⬆ Atualização disponível: %s"
