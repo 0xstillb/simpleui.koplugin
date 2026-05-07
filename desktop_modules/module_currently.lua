@@ -359,10 +359,13 @@ local function _computeContentH(params)
         elems[#elems+1] = { pct_gap, pct_line_h }
     end
 
-    -- Stats: when bstats is nil (getHeight conservative path) assume all
-    -- active stats have data.  When bstats is real (build path) check actuals.
+    -- Stats: when conservative=true (getHeight path) assume all active stats
+    -- have data so that height is never under-allocated.
+    -- When conservative=false (build path, bstats is real) check actual values.
+    local conservative = params.conservative
     local function statsHasData(key)
-        if bstats == nil then return show[key] end
+        if conservative then return show[key] end
+        if not bstats then return false end
         if key == "days"   then return show.days   and bstats.days and bstats.days > 0 end
         if key == "time"   then return show.time   and bstats.total_secs and bstats.total_secs > 0 end
         if key == "remain" then
@@ -477,6 +480,12 @@ function M.build(w, ctx)
     local bstats
     if show.days or show.time or show.remain then
         local book_md5 = prefetched_entry and prefetched_entry.partial_md5_checksum
+        -- Fix 2: log when md5 is absent so the cause is visible in crash.log.
+        if not book_md5 then
+            logger.dbg("simpleui: module_currently: no md5 for "
+                       .. tostring(ctx.current_fp)
+                       .. " — stats will not be fetched this render")
+        end
         -- Fast path: use stats pre-computed by _buildCtx() (zero extra DB query).
         -- Falls back to a live query when _buildCtx didn't pre-compute them
         -- (e.g. direct call outside the homescreen, or ctx.currently_book_stats absent).
@@ -487,6 +496,9 @@ function M.build(w, ctx)
             bstats = fetchBookStats(book_md5, ctx.db_conn, ctx)
         end
     end
+
+    -- Colour used for placeholder stats text (dimmer than the normal sub-text).
+    local CLR_PLACEHOLDER = Blitbuffer.gray(0.55)
 
     -- Pre-resolve the inline-pct font face once for buildProgressBarWithPct.
     local face_inlinepct = Font:getFace("smallinfofont",
@@ -554,37 +566,64 @@ function M.build(w, ctx)
             }
             meta_has_content = true
 
-        elseif elem == "book_days" and show.days and bstats and bstats.days > 0
-               and stats_style == "default" then
+        elseif elem == "book_days" and show.days and stats_style == "default" then
+            -- Fix 1: show a placeholder when stats are not yet available (no DB,
+            -- no md5, or zero days recorded) so the item is always visible once
+            -- activated, giving the user clear feedback that it exists.
+            local has_data = bstats and bstats.days and bstats.days > 0
             gap_before(pct_gap)
-            local days_label = string.format(N_("%d day of reading", "%d days of reading", bstats.days), bstats.days)
+            local days_label = has_data
+                and string.format(N_("%d day of reading", "%d days of reading", bstats.days), bstats.days)
+                or  string.format(N_("%d day of reading", "%d days of reading", 0), 0)
             meta[#meta+1] = TextWidget:new{
                 text    = days_label,
                 face    = face_s,
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = has_data and CLR_TEXT_SUB or CLR_PLACEHOLDER,
                 width   = tw,
             }
             meta_has_content = true
 
-        elseif elem == "book_time" and show.time and bstats and bstats.total_secs > 0
-               and stats_style == "default" then
+        elseif elem == "book_time" and show.time and stats_style == "default" then
+            -- Fix 1: placeholder when total time is not yet recorded.
+            local has_data = bstats and bstats.total_secs and bstats.total_secs > 0
             gap_before(pct_gap)
             meta[#meta+1] = TextWidget:new{
-                text    = string.format(_("%s read"), fmtTime(bstats.total_secs)),
+                text    = has_data
+                          and string.format(_("%s read"), fmtTime(bstats.total_secs))
+                          or  string.format(_("%s read"), "—"),
                 face    = face_s,
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = has_data and CLR_TEXT_SUB or CLR_PLACEHOLDER,
                 width   = tw,
             }
             meta_has_content = true
 
-        elseif elem == "book_remaining" and show.remain
-               and stats_style == "default" then
+        elseif elem == "book_remaining" and show.remain and stats_style == "default" then
+            -- Fix 4: explicit, symmetric guard mirroring book_days / book_time.
             -- Prefer the capped avg_time from fetchBookStats to avoid over-estimating
             -- remaining time when pages had long idle pauses.
-            local avg_t = (bstats and bstats.avg_time and bstats.avg_time > 0)
-                          and bstats.avg_time or bd.avg_time
-            if avg_t and avg_t > 0 and bd.pages and bd.pages > 0 then
-                local pages_left = bd.pages * (1 - (bd.percent or 0))
+            local avg_t
+            if bstats and bstats.avg_time and bstats.avg_time > 0 then
+                avg_t = bstats.avg_time
+            elseif bd.avg_time and bd.avg_time > 0 then
+                avg_t = bd.avg_time
+            end
+            -- Fix 1: placeholder when there is no timing data yet.
+            -- Exception: do not show placeholder when book is 100% read
+            -- (secs_left would be 0 — "— remaining" would be confusing).
+            local pct_done = bd.percent or 0
+            if not avg_t or not bd.pages or bd.pages <= 0 then
+                if pct_done < 1.0 then
+                    gap_before(pct_gap)
+                    meta[#meta+1] = TextWidget:new{
+                        text    = string.format(_("%s remaining"), "—"),
+                        face    = face_s,
+                        fgcolor = CLR_PLACEHOLDER,
+                        width   = tw,
+                    }
+                    meta_has_content = true
+                end
+            else
+                local pages_left = bd.pages * (1 - pct_done)
                 local secs_left  = math.floor(avg_t * pages_left)
                 if secs_left > 0 then
                     gap_before(pct_gap)
@@ -620,11 +659,20 @@ function M.build(w, ctx)
                 local parts = {}
                 for _i, e in ipairs(elem_order) do
                     if e == "book_time" and show.time and bstats and bstats.total_secs > 0 then
-                        parts[#parts+1] = string.format(_("%s read"), fmtTime(bstats.total_secs))
+                        parts[#parts+1] = { text = string.format(_("%s read"), fmtTime(bstats.total_secs)), placeholder = false }
                     elseif e == "book_remaining" and show.remain and secs_left then
-                        parts[#parts+1] = string.format(_("%s left"), fmtTime(secs_left))
+                        parts[#parts+1] = { text = string.format(_("%s left"), fmtTime(secs_left)), placeholder = false }
                     elseif e == "book_days" and show.days and bstats and bstats.days > 0 then
-                        parts[#parts+1] = string.format(N_("%d day of reading", "%d days of reading", bstats.days), bstats.days)
+                        parts[#parts+1] = { text = string.format(N_("%d day of reading", "%d days of reading", bstats.days), bstats.days), placeholder = false }
+                    end
+                end
+
+                -- Fix 1: when all visible stats items are active but have no data yet,
+                -- show at least one placeholder so the row is always visible.
+                if #parts == 0 then
+                    local any_active = (show.days or show.time or show.remain)
+                    if any_active then
+                        parts[#parts+1] = { text = string.format(_("%s read"), "—"), placeholder = true }
                     end
                 end
 
@@ -640,9 +688,9 @@ function M.build(w, ctx)
                             }
                         end
                         stats_row[#stats_row+1] = TextWidget:new{
-                            text    = part,
+                            text    = part.text,
                             face    = face_s,
-                            fgcolor = CLR_TEXT_SUB,
+                            fgcolor = part.placeholder and CLR_PLACEHOLDER or CLR_TEXT_SUB,
                         }
                     end
                     meta[#meta+1] = stats_row
@@ -790,7 +838,11 @@ function M.getHeight(_ctx)
     if show.percent and bar_style ~= "with_pct" then
         elems[#elems+1] = { pct_gap, pct_lh }
     end
-    -- Stats: conservative — assume all active stats have data.
+    -- Stats: conservative — always reserve height for every active stats item
+    -- (Fix 3: placeholder rows are rendered when data is absent, so height is
+    -- always consumed; under-allocating here would cause overlap below the module).
+    -- Exception: book_remaining is suppressed only when the book is 100% done,
+    -- but getHeight has no percent data, so we keep the conservative assumption.
     local n_stats = (show.days and 1 or 0) + (show.time and 1 or 0) + (show.remain and 1 or 0)
     if n_stats > 0 then
         local lines = stats_style == "compact" and 1 or n_stats

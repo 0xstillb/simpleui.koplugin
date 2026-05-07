@@ -652,6 +652,17 @@ function M.applyFirstRunDefaults()
         G_reader_settings:saveSetting(PFX .. "quick_actions_2_enabled",        false)
         G_reader_settings:saveSetting(PFX .. "quick_actions_3_enabled",        false)
 
+        -- Fix 6: write currently_show_* defaults explicitly so behaviour does not
+        -- silently depend on nilOrTrue returning true for absent keys.
+        -- Title, author and progress bar on by default; stats off except percent.
+        G_reader_settings:saveSetting(PFX .. "currently_show_title",          true)
+        G_reader_settings:saveSetting(PFX .. "currently_show_author",         true)
+        G_reader_settings:saveSetting(PFX .. "currently_show_progress",       true)
+        G_reader_settings:saveSetting(PFX .. "currently_show_percent",        true)
+        G_reader_settings:saveSetting(PFX .. "currently_show_book_days",      false)
+        G_reader_settings:saveSetting(PFX .. "currently_show_book_time",      false)
+        G_reader_settings:saveSetting(PFX .. "currently_show_book_remaining", false)
+
         -- General
         G_reader_settings:saveSetting("start_with", "filemanager")
 
@@ -702,7 +713,7 @@ function M.reset()
     _navbar_mode_cache           = nil
     M.wifi_optimistic            = nil
     M.cover_extraction_pending   = false
-    M._cover_extract_next_ok     = 0
+    M._cover_extract_queue       = {}
     M._cover_extract_pending     = {}
     _Device                      = nil
     _NetworkMgr                  = nil
@@ -733,8 +744,16 @@ end
 -- Previously each module kept its own flag, causing up to 2 parallel poll
 -- timers (60 × 0.5 s each). One centralised flag prevents duplicates.
 M.cover_extraction_pending = false
-M._cover_extract_next_ok   = 0
-M._cover_extract_pending   = {}
+-- Queue of filepaths that need BG extraction this render cycle.
+-- Flushed once by flushCoverQueue() at the end of _updatePage so that all
+-- books are submitted to extractInBackground in a single call (the BIM
+-- accepts a list). This avoids the old bug where each getCoverBB call
+-- triggered its own extractInBackground, which killed the previous subprocess.
+M._cover_extract_queue   = {}
+-- Per-filepath dedup: set when a filepath enters the queue or already has a
+-- pending extraction, cleared when the cover arrives in the SQLite DB.
+-- Prevents the same book from being enqueued repeatedly across render cycles.
+M._cover_extract_pending = {}
 
 local _BookInfoManager = nil
 
@@ -952,6 +971,15 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
         end
         if M._cover_extract_pending then
             M._cover_extract_pending[filepath] = nil
+            -- Also remove from queue if it hasn't been flushed yet.
+            if M._cover_extract_queue then
+                for i = #M._cover_extract_queue, 1, -1 do
+                    if M._cover_extract_queue[i] == filepath then
+                        table.remove(M._cover_extract_queue, i)
+                        break
+                    end
+                end
+            end
         end
         local src_w = bookinfo.cover_bb:getWidth()
         local src_h = bookinfo.cover_bb:getHeight()
@@ -972,25 +1000,22 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
     local ok, bookinfo = pcall(function() return bim:getBookInfo(filepath, true) end)
     if not ok then return nil end
 
-    local function scheduleExtract()
-        if not M._cover_extract_pending then M._cover_extract_pending = {} end
+    -- Enqueue this filepath for background extraction.
+    -- getCoverBB never calls extractInBackground directly — all filepaths
+    -- collected during a render are submitted as a single batch by
+    -- flushCoverQueue(), called once at the end of _updatePage. This avoids
+    -- two previous bugs:
+    --   Bug 1: the old 1-second os.time() throttle silenced every book after
+    --           the first one when multiple covers render in the same tick.
+    --   Bug 2: each direct extractInBackground call killed the previous
+    --           subprocess, so only the last book ever got extracted.
+    -- _cover_extract_pending[fp] deduplicates across render cycles so the
+    -- same book is not enqueued again while its extraction is still running.
+    local function enqueueExtract()
         if M._cover_extract_pending[filepath] then return end
-        local now = os.time()
-        if (M._cover_extract_next_ok or 0) > now then return end
-        M._cover_extract_next_ok = now + 1
-        M._cover_extract_pending[filepath] = now
-        -- Extract at the maximum size any homescreen module could ever need,
-        -- rather than the current caller's (w, h). This prevents the ping-pong
-        -- recache cycle where CoverBrowser and the homescreen repeatedly
-        -- re-extract the same cover at different sizes. getCoverBB still scales
-        -- the returned bitmap down to exactly (w, h) before handing it back.
-        local ext_w, ext_h = _getMaxExtractSize()
-        pcall(function()
-            bim:extractInBackground({{
-                filepath    = filepath,
-                cover_specs = { max_cover_w = ext_w, max_cover_h = ext_h },
-            }})
-        end)
+        M._cover_extract_pending[filepath] = true
+        if not M._cover_extract_queue then M._cover_extract_queue = {} end
+        M._cover_extract_queue[#M._cover_extract_queue + 1] = filepath
     end
 
     -- If extraction was already attempted, use the cached result.
@@ -1007,10 +1032,11 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
             local max_w, max_h = _getMaxExtractSize()
             local lowres = (src_w < max_w or src_h < max_h)
             if lowres then
-                scheduleExtract()
-                -- Same signal as the fresh-extraction path: tell the poll loop
-                -- that a re-extraction was scheduled so it can refresh when done.
-                if M._cover_extract_pending and M._cover_extract_pending[filepath] then
+                enqueueExtract()
+                -- Signal the poll loop even before flushCoverQueue runs, so
+                -- that if _updatePage doesn't call flush (e.g. early return),
+                -- the poll still fires and picks up the queue on next refresh.
+                if M._cover_extract_pending[filepath] then
                     M.cover_extraction_pending = true
                 end
             end
@@ -1026,12 +1052,11 @@ function M.getCoverBB(filepath, w, h, align, stretch_limit)
         end
     end
 
-    scheduleExtract()
-    -- Signal the homescreen poll loop that a background extraction was just
-    -- launched for this file.  The poll (sui_homescreen._scheduleCoverPoll)
-    -- checks this flag after _updatePage completes and refreshes the page
-    -- once the subprocess finishes.
-    if M._cover_extract_pending and M._cover_extract_pending[filepath] then
+    enqueueExtract()
+    -- Signal the homescreen poll loop that extraction will be needed.
+    -- flushCoverQueue() (called at the end of _updatePage) does the actual
+    -- extractInBackground call; this flag just ensures the poll timer starts.
+    if M._cover_extract_pending[filepath] then
         M.cover_extraction_pending = true
     end
     return nil
@@ -1058,6 +1083,62 @@ function M.clearCoverCache()
         end
     end
     UIManager:scheduleIn(0.1, freeNext)
+end
+
+-- ---------------------------------------------------------------------------
+-- flushCoverQueue — submit all filepaths enqueued during this render cycle
+-- to BookInfoManager as a single extractInBackground call.
+--
+-- Call once, at the end of _updatePage (after all mod.build() calls).
+-- This is the fix for two compounding bugs in the old per-cover approach:
+--
+--   Bug 1 (throttle): the old 1-second os.time() throttle in scheduleExtract()
+--     silenced every book after the first one when multiple covers rendered in
+--     the same tick (all os.time() values identical at 1-second resolution).
+--     getCoverBB now only enqueues; no throttle is needed here because
+--     extractInBackground is called exactly once per render.
+--
+--   Bug 2 (subprocess kill): extractInBackground() begins with
+--     terminateBackgroundJobs(), so each direct call in the old code cancelled
+--     the previous subprocess. Only the last book ever got extracted.
+--     Submitting the full list in one call means all books are processed by a
+--     single subprocess in sequence.
+--
+--   Bug 3 (stuck pending): if the BIM was unavailable when getCoverBB ran,
+--     the old code could leave _cover_extract_pending[fp] set with no actual
+--     extraction scheduled. Here we clear the pending flag for any filepath
+--     that fails to flush, so it can be retried on the next render.
+-- ---------------------------------------------------------------------------
+function M.flushCoverQueue()
+    local queue = M._cover_extract_queue
+    if not queue or #queue == 0 then return end
+    M._cover_extract_queue = {}  -- reset before BIM call (re-entrant safe)
+
+    local bim = M.getBookInfoManager()
+    if not bim then
+        -- BIM unavailable — clear pending flags so these books can be retried.
+        for _, fp in ipairs(queue) do
+            M._cover_extract_pending[fp] = nil
+        end
+        return
+    end
+
+    local ext_w, ext_h = _getMaxExtractSize()
+    local files = {}
+    for _, fp in ipairs(queue) do
+        files[#files + 1] = {
+            filepath    = fp,
+            cover_specs = { max_cover_w = ext_w, max_cover_h = ext_h },
+        }
+    end
+
+    local ok = pcall(function() bim:extractInBackground(files) end)
+    if not ok then
+        -- Extraction failed to launch — clear pending so books can be retried.
+        for _, fp in ipairs(queue) do
+            M._cover_extract_pending[fp] = nil
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------

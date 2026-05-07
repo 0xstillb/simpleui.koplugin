@@ -1337,8 +1337,12 @@ function HomescreenWidget:_buildCtx()
             local pe_c  = bs.prefetched_data and bs.prefetched_data[bs.current_fp]
             local c_md5 = type(pe_c) == "table" and pe_c.partial_md5_checksum
             if c_md5 then
-                local mc_mod = package.loaded["desktop_modules/module_currently"]
-                if mc_mod and mc_mod.fetchBookStatsForCtx then
+                -- Fix 5: use pcall(require) instead of package.loaded so that the
+                -- module is always resolved even on the very first render, before
+                -- build() has had a chance to load it. require() is idempotent —
+                -- subsequent calls return the cached module at zero extra cost.
+                local mc_ok, mc_mod = pcall(require, "desktop_modules/module_currently")
+                if mc_ok and mc_mod and mc_mod.fetchBookStatsForCtx then
                     currently_book_stats = {
                         fp    = bs.current_fp,
                         stats = mc_mod.fetchBookStatsForCtx(c_md5, self._db_conn),
@@ -1973,6 +1977,11 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
             self._overflow_warn_key = nil
         end
     end
+
+    -- Flush all covers enqueued during this render into a single
+    -- extractInBackground call. Must run before the poll-timer check so that
+    -- the subprocess is already launched when _scheduleCoverPoll fires.
+    Config.flushCoverQueue()
 
     -- Start (or re-arm) the cover-extraction poll if any module's build()
     -- call triggered a background extraction.  This check is intentionally
