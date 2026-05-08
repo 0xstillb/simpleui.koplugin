@@ -2495,14 +2495,14 @@ msgstr[1] "Maximale Anzahl an %d Tabs erreicht. Entferne zuerst eine."
 #~ msgid "%d days"
 #~ msgstr "%d Tage"
 
-#~ msgid "%dh %dm"
-#~ msgstr "%d Std %d Min"
+msgid "%dh %dm"
+msgstr "%d Std %d Min"
 
-#~ msgid "%dh"
-#~ msgstr "%d Std"
+msgid "%dh"
+msgstr "%d Std"
 
-#~ msgid "%dm"
-#~ msgstr "%d Min"
+msgid "%dm"
+msgstr "%d Min"
 
-#~ msgid "0m"
-#~ msgstr "0 Min"
+msgid "0m"
+msgstr "0 Min"
