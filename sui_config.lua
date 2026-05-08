@@ -715,6 +715,7 @@ function M.reset()
     M.cover_extraction_pending   = false
     M._cover_extract_queue       = {}
     M._cover_extract_pending     = {}
+    M._cover_extract_specs       = {}
     _Device                      = nil
     _NetworkMgr                  = nil
     _has_wifi_toggle             = nil
@@ -724,10 +725,6 @@ function M.reset()
     _BookInfoManager             = nil
     _topbar_cfg_menu_cache       = nil
     _ReadCollection              = nil
-    -- Invalidate the max-extraction-size cache so it is recomputed on the
-    -- next session (in case screen DPI changes, e.g. after a KOReader update).
-    _max_extract_w               = nil
-    _max_extract_h               = nil
     -- QA key cache is now managed in sui_quickactions.lua
     _QA_lazy().clearQAKeyCache()
     -- Release all cached cover bitmaps (OPT-D)
@@ -754,6 +751,10 @@ M._cover_extract_queue   = {}
 -- pending extraction, cleared when the cover arrives in the SQLite DB.
 -- Prevents the same book from being enqueued repeatedly across render cycles.
 M._cover_extract_pending = {}
+-- Per-filepath cover_specs: stores {max_cover_w, max_cover_h} for each queued
+-- filepath so flushCoverQueue can pass real dimensions to extractInBackground.
+-- Without cover_specs the BIM skips cover extraction entirely (metadata only).
+M._cover_extract_specs   = {}
 
 local _BookInfoManager = nil
 
@@ -789,64 +790,32 @@ end
 -- order-list approach, with zero extra allocation per cache hit.
 -- ---------------------------------------------------------------------------
 
-local BIM_MAX_COVERS   = 12
+-- Cover cache capacity.
+-- Worst-case slot count with all cover modules active simultaneously:
+--   coverdeck : 5 (centre + 2 side + 2 far, each a distinct w×h×align key)
+--   recent    : 5
+--   currently : 1
+--   tbr       : 5
+--   new_books : 5
+--   collections: 5
+-- Total: 26. Use 30 to give a comfortable margin for scale variants and
+-- the coverdeck warm-ahead prefetch of the next carousel cover.
+local BIM_MAX_COVERS   = 30
 -- _bim_cover_cache[key] = { bb = <blitbuffer>, t = <os.time()> }
 local _bim_cover_cache = {}
 local _bim_cover_count = 0
+
 
 -- Cached require — resolved once, reused for every cover scale operation.
 local _RenderImage = nil
 
 -- ---------------------------------------------------------------------------
--- _getMaxExtractSize — returns the largest cover dimensions that any
--- homescreen module could ever request, across all user-configurable scales.
---
--- Problem: getCoverBB calls extractInBackground with cover_specs={w,h} equal
--- to the dimensions needed by the *current* module at the *current* scale.
--- If the user later increases the scale, or if a different module (e.g.
--- coverdeck) needs a larger bitmap than what CoverBrowser stored for the
--- file-browser grid, BookInfoManager considers the stored cover "lowres" and
--- re-extracts it. This creates a ping-pong: SimpleUI re-extracts at its size,
--- CoverBrowser re-extracts at its size, on every view switch.
---
--- Fix: always pass the theoretical maximum size to extractInBackground so the
--- stored bitmap is never "lowres" from any module's point of view.
--- getCoverBB still scales DOWN to the exact requested (w, h) before returning
--- to the caller — that logic is unchanged.
---
--- The largest module is coverdeck, whose centre cover uses scaleBySize(140).
--- Module scale and thumb scale are each clamped to 200% (SCALE_MAX), but in
--- practice users rarely run both at maximum simultaneously. We cap the
--- combined multiplier at 2.0× (one slider at 200%, the other at 100%) to
--- keep the stored bitmap reasonable; getCoverBB will re-extract on demand
--- if the user genuinely exceeds this — a rare edge case vs. the common one.
---
--- Computed once per session (lazy) and invalidated by M.reset().
--- ---------------------------------------------------------------------------
-local _max_extract_w = nil
-local _max_extract_h = nil
-
-local function _getMaxExtractSize()
-    if _max_extract_w then return _max_extract_w, _max_extract_h end
-    local ok, dev = pcall(require, "device")
-    if not (ok and dev and dev.screen) then
-        -- Device not yet available — return a safe large default.
-        -- 600×900 covers any 6" e-reader at 300 dpi with 2× scale applied.
-        return 600, 900
-    end
-    -- coverdeck centre cover base = scaleBySize(140).
-    -- Capped combined scale = module_max(200%) × 1 = 2.0.
-    local max_combined = 2.0
-    _max_extract_w = math.floor(dev.screen:scaleBySize(140) * max_combined)
-    _max_extract_h = math.floor(_max_extract_w * 3 / 2)
-    return _max_extract_w, _max_extract_h
-end
 
 local function _evictOldestCover()
     local oldest_key = nil
     local oldest_t   = math.huge
     for k, entry in pairs(_bim_cover_cache) do
-        if entry.t < oldest_t then
+        if entry.t and entry.t < oldest_t then
             oldest_t   = entry.t
             oldest_key = k
         end
@@ -948,119 +917,99 @@ local function _scaleBBToSlot(bb, target_w, target_h, align, stretch_limit)
     return slot_bb
 end
 
+-- Sentinel stored in _bim_cover_cache when the BIM confirmed no cover exists
+-- for a filepath.  Distinguishes "definitively no cover" from "not yet tried".
+-- bb = nil on these entries; callers check M.isCoverMissing() if needed.
+local _NO_COVER = {}  -- unique table identity used as a type tag
+
+-- Returns true when the cache knows for certain that filepath has no cover
+-- (BIM extracted it and found nothing).  Returns false when the cover is
+-- either available or not yet extracted.
+function M.isCoverMissing(filepath)
+    -- Check any key for this filepath — all keys share the same no-cover state.
+    local probe = filepath .. "|__nc"
+    return _bim_cover_cache[probe] == _NO_COVER
+end
+
+local function _markNoCover(filepath)
+    local probe = filepath .. "|__nc"
+    if _bim_cover_cache[probe] then return end  -- already marked
+    if _bim_cover_count >= BIM_MAX_COVERS then _evictOldestCover() end
+    _bim_cover_cache[probe] = _NO_COVER
+    _bim_cover_count = _bim_cover_count + 1
+end
+
 function M.getCoverBB(filepath, w, h, align, stretch_limit)
+    -- Fast no-cover check: if we already know this file has no cover, skip
+    -- the BIM query and return nil immediately without touching the queue.
+    if M.isCoverMissing(filepath) then return nil end
+
     local key    = filepath .. "|" .. w .. "x" .. h .. (align and ("|" .. align) or "")
     local cached = _bim_cover_cache[key]
     if cached then
-        -- Update LRU access time in-place — no allocation, no list shift.
-        local now = os.time()
-        cached.t = now
-        if not cached.lowres then
-            return cached.bb
-        end
-        if cached.chk and (now - cached.chk) < 2 then
-            return cached.bb
-        end
-        cached.chk = now
-        local bim = M.getBookInfoManager()
-        if not bim then return cached.bb end
-        local ok, bookinfo = pcall(function() return bim:getBookInfo(filepath, true) end)
-        if not ok or not bookinfo then return cached.bb end
-        if not (bookinfo.cover_fetched and bookinfo.has_cover and bookinfo.cover_bb) then
-            return cached.bb
-        end
-        if M._cover_extract_pending then
-            M._cover_extract_pending[filepath] = nil
-            -- Also remove from queue if it hasn't been flushed yet.
-            if M._cover_extract_queue then
-                for i = #M._cover_extract_queue, 1, -1 do
-                    if M._cover_extract_queue[i] == filepath then
-                        table.remove(M._cover_extract_queue, i)
-                        break
-                    end
-                end
-            end
-        end
-        local src_w = bookinfo.cover_bb:getWidth()
-        local src_h = bookinfo.cover_bb:getHeight()
-        if src_w >= w and src_h >= h then
-            local bb = _scaleBBToSlot(bookinfo.cover_bb, w, h, align, stretch_limit)
-            pcall(function() cached.bb:free() end)
-            cached.bb     = bb
-            cached.lowres = nil
-            cached.src_w  = src_w
-            cached.src_h  = src_h
-            return bb
-        end
+        -- Cache hit: update LRU timestamp and return immediately.
+        cached.t = os.time()
         return cached.bb
     end
 
     local bim = M.getBookInfoManager()
     if not bim then return nil end
     local ok, bookinfo = pcall(function() return bim:getBookInfo(filepath, true) end)
-    if not ok then return nil end
 
-    -- Enqueue this filepath for background extraction.
-    -- getCoverBB never calls extractInBackground directly — all filepaths
-    -- collected during a render are submitted as a single batch by
-    -- flushCoverQueue(), called once at the end of _updatePage. This avoids
-    -- two previous bugs:
-    --   Bug 1: the old 1-second os.time() throttle silenced every book after
-    --           the first one when multiple covers render in the same tick.
-    --   Bug 2: each direct extractInBackground call killed the previous
-    --           subprocess, so only the last book ever got extracted.
-    -- _cover_extract_pending[fp] deduplicates across render cycles so the
-    -- same book is not enqueued again while its extraction is still running.
+    -- Enqueue for background extraction if not already pending.
+    -- All filepaths collected during a render cycle are submitted as a single
+    -- batch by flushCoverQueue() at the end of _updatePage.
     local function enqueueExtract()
-        if M._cover_extract_pending[filepath] then return end
+        if M._cover_extract_pending[filepath] then
+            -- Already queued: widen the stored spec if this slot is larger,
+            -- so the BIM extracts at the biggest size any slot needs.
+            local ex = M._cover_extract_specs[filepath]
+            if ex then
+                if w > ex.max_cover_w then ex.max_cover_w = w end
+                if h > ex.max_cover_h then ex.max_cover_h = h end
+            end
+            return
+        end
         M._cover_extract_pending[filepath] = true
+        M._cover_extract_specs[filepath]   = { max_cover_w = w, max_cover_h = h }
         if not M._cover_extract_queue then M._cover_extract_queue = {} end
         M._cover_extract_queue[#M._cover_extract_queue + 1] = filepath
     end
 
-    -- If extraction was already attempted, use the cached result.
+    if not ok then
+        -- BIM raised an error (e.g. DB locked) — enqueue for retry on next
+        -- render rather than silently abandoning this cover forever.
+        enqueueExtract()
+        M.cover_extraction_pending = true
+        return nil
+    end
+
     if bookinfo and bookinfo.cover_fetched then
         if bookinfo.has_cover and bookinfo.cover_bb then
-            local src_w = bookinfo.cover_bb:getWidth()
-            local src_h = bookinfo.cover_bb:getHeight()
-            -- Compare against the max extraction size, not just the current
-            -- caller's (w, h). If the stored bitmap already satisfies the
-            -- current request but is smaller than the max, re-extract once so
-            -- future callers (e.g. coverdeck at a larger scale) won't trigger
-            -- another extraction cycle. If it already meets the max, it is
-            -- stable and will never be "lowres" for any module.
-            local max_w, max_h = _getMaxExtractSize()
-            local lowres = (src_w < max_w or src_h < max_h)
-            if lowres then
-                enqueueExtract()
-                -- Signal the poll loop even before flushCoverQueue runs, so
-                -- that if _updatePage doesn't call flush (e.g. early return),
-                -- the poll still fires and picks up the queue on next refresh.
-                if M._cover_extract_pending[filepath] then
-                    M.cover_extraction_pending = true
-                end
-            end
+            -- Cover is available: scale, cache, and return.
+            M._cover_extract_pending[filepath] = nil  -- clear dedup lock
             local bb = _scaleBBToSlot(bookinfo.cover_bb, w, h, align, stretch_limit)
             if _bim_cover_count >= BIM_MAX_COVERS then _evictOldestCover() end
-            _bim_cover_cache[key] = { bb = bb, t = os.time(), lowres = lowres or nil, chk = os.time(), src_w = src_w, src_h = src_h }
+            _bim_cover_cache[key] = { bb = bb, t = os.time() }
             _bim_cover_count = _bim_cover_count + 1
             return bb
         else
-            -- Extraction was attempted before and found no cover (or failed).
-            -- Return nil immediately to avoid triggering a poll loop.
+            -- BIM confirmed: no cover exists in this file.  Mark permanently
+            -- so future calls skip the BIM query entirely.
+            M._cover_extract_pending[filepath] = nil
+            _markNoCover(filepath)
             return nil
         end
     end
 
+    -- Cover not yet extracted: enqueue and signal the poll loop.
     enqueueExtract()
-    -- Signal the homescreen poll loop that extraction will be needed.
-    -- flushCoverQueue() (called at the end of _updatePage) does the actual
-    -- extractInBackground call; this flag just ensures the poll timer starts.
     if M._cover_extract_pending[filepath] then
         M.cover_extraction_pending = true
     end
     return nil
 end
+
 
 -- Releases all cover bitmaps (owned by us — scaled copies).
 -- Defer the actual freeing of the bitmaps to a background timer to avoid
@@ -1090,24 +1039,10 @@ end
 -- to BookInfoManager as a single extractInBackground call.
 --
 -- Call once, at the end of _updatePage (after all mod.build() calls).
--- This is the fix for two compounding bugs in the old per-cover approach:
---
---   Bug 1 (throttle): the old 1-second os.time() throttle in scheduleExtract()
---     silenced every book after the first one when multiple covers rendered in
---     the same tick (all os.time() values identical at 1-second resolution).
---     getCoverBB now only enqueues; no throttle is needed here because
---     extractInBackground is called exactly once per render.
---
---   Bug 2 (subprocess kill): extractInBackground() begins with
---     terminateBackgroundJobs(), so each direct call in the old code cancelled
---     the previous subprocess. Only the last book ever got extracted.
---     Submitting the full list in one call means all books are processed by a
---     single subprocess in sequence.
---
---   Bug 3 (stuck pending): if the BIM was unavailable when getCoverBB ran,
---     the old code could leave _cover_extract_pending[fp] set with no actual
---     extraction scheduled. Here we clear the pending flag for any filepath
---     that fails to flush, so it can be retried on the next render.
+-- Submitting the full list in one call means all books are processed by a
+-- single subprocess in sequence (avoids the old per-cover subprocess-kill bug).
+-- The BIM handles extraction size via getBookInfo(fp, true) — we pass a
+-- generous fallback spec so it does not under-extract.
 -- ---------------------------------------------------------------------------
 function M.flushCoverQueue()
     local queue = M._cover_extract_queue
@@ -1119,17 +1054,18 @@ function M.flushCoverQueue()
         -- BIM unavailable — clear pending flags so these books can be retried.
         for _, fp in ipairs(queue) do
             M._cover_extract_pending[fp] = nil
+            M._cover_extract_specs[fp]   = nil
         end
         return
     end
 
-    local ext_w, ext_h = _getMaxExtractSize()
     local files = {}
     for _, fp in ipairs(queue) do
         files[#files + 1] = {
             filepath    = fp,
-            cover_specs = { max_cover_w = ext_w, max_cover_h = ext_h },
+            cover_specs = M._cover_extract_specs[fp],
         }
+        M._cover_extract_specs[fp] = nil
     end
 
     local ok = pcall(function() bim:extractInBackground(files) end)

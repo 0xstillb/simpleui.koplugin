@@ -60,7 +60,7 @@ local _CLR_TEXT_MID      = Blitbuffer.gray(0.45)
 local _DOT_COLOR_INACTIVE = Blitbuffer.gray(0.55)
 
 -- Modules that render cover thumbnails — used to set the dithering hint.
-local _COVER_MOD_IDS = { collections=true, recent=true, currently=true, new_books=true, coverdeck=true }
+local _COVER_MOD_IDS = { collections=true, recent=true, currently=true, new_books=true, coverdeck=true, tbr=true }
 
 -- ---------------------------------------------------------------------------
 -- DotWidget — defined once at file level; buildDotFooter() creates instances.
@@ -911,6 +911,7 @@ function HomescreenWidget:init()
     self._kb_book_items_fp   = nil
     self._db_conn            = nil
     self._cover_poll_timer   = nil
+    self._cover_mod_slots    = nil
     self._enabled_mods_cache = nil
     self._ctx_cache          = nil
     self._current_page       = self._current_page or 1
@@ -1682,7 +1683,17 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
     self._header_is_wrapped = false
     self._clock_body_idx    = nil
     self._clock_body_ref    = body
+    self._cover_mod_slots   = {}
     self._clock_is_wrapped  = false
+
+    -- Reset the per-filepath extraction dedup guard at the start of every
+    -- render.  The guard is an intra-render dedup (prevents the same filepath
+    -- being enqueued twice within one build pass); it must not persist across
+    -- renders, or getCoverBB() silently skips re-enqueuing books whose covers
+    -- are still missing after a previous poll cycle completed.
+    if not self._cover_poll_timer then
+        Config._cover_extract_pending = {}
+    end
 
     -- Rebuild keyboard navigation book index.
     local _kb_books = {}
@@ -1799,6 +1810,13 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                     and self:_makeModWrapper(mod, widget, col_w)
                     or  widget
                 col_body[#col_body+1] = entry_widget
+                -- Record slot for per-module cover poll (only for cover modules).
+                if _COVER_MOD_IDS[mod.id] and type(mod.updateCovers) == "function" then
+                    self._cover_mod_slots[mod.id] = {
+                        mod    = mod,
+                        widget = widget,  -- raw widget with _cover_slots attached
+                    }
+                end
             end
             return col_body
         end
@@ -1894,6 +1912,13 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                     body[#body+1] = self:_makeModWrapper(mod, widget, inner_w)
                 else
                     body[#body+1] = widget
+                end
+                -- Record slot for per-module cover poll (only for cover modules).
+                if _COVER_MOD_IDS[mod.id] and type(mod.updateCovers) == "function" then
+                    self._cover_mod_slots[mod.id] = {
+                        mod    = mod,
+                        widget = widget,
+                    }
                 end
             end
         end
@@ -2056,26 +2081,111 @@ end
 -- ---------------------------------------------------------------------------
 -- Cover extraction poll
 -- ---------------------------------------------------------------------------
-function HomescreenWidget:_scheduleCoverPoll(attempt)
-    attempt = (attempt or 0) + 1
-    if attempt > 20 then Config.cover_extraction_pending = false; return end
-    local bim     = Config.getBookInfoManager()
+-- Polls every 1 second (like the History page). On each tick, for every cover
+-- module that still has pending covers, calls mod.updateCovers(widget, ctx)
+-- which swaps only the individual ImageWidgets that have now arrived in the
+-- DB cache — no full build(), no layout recalculation, no TextWidget creation.
+--
+-- Each module's updateCovers() returns true when all its covers are resolved
+-- (either a bitmap arrived or the file is confirmed to have no cover).
+-- The slot is then removed and the poll stops once no slots remain.
+--
+-- Cover extraction flow within the poll:
+--   1. updateCovers() calls getCoverBB() for each missing slot.
+--   2. getCoverBB() returns nil for two reasons:
+--        a) cover_fetched=false  → file not yet extracted; enqueues the filepath.
+--        b) cover_fetched=true, has_cover=false → no cover in file; marks with
+--           the NO_COVER sentinel so future calls skip the BIM query entirely.
+--   3. After the slot loop, flushCoverQueue() submits newly enqueued files to
+--      the BIM as a single extractInBackground call.
+--   4. updateCovers() returns true when every slot either has a bitmap or is
+--      confirmed missing (isCoverMissing).  The module is then dropped from
+--      the poll so we never spin on files that have no cover.
+-- ---------------------------------------------------------------------------
+function HomescreenWidget:_scheduleCoverPoll()
     local self_ref = self
     local timer
     timer = function()
         self_ref._cover_poll_timer = nil
-        if not bim or not bim:isExtractingInBackground() then
+        if Homescreen._instance ~= self_ref then return end
+
+        local bim              = Config.getBookInfoManager()
+        local is_still_running = bim and bim:isExtractingInBackground()
+        local slots            = self_ref._cover_mod_slots
+        local ctx              = self_ref._ctx_cache
+
+        if not slots or not ctx then
             Config.cover_extraction_pending = false
-            if Homescreen._instance == self_ref then
-                self_ref:_refresh(true)
-            end
-        else
-            self_ref:_scheduleCoverPoll(attempt)
+            self_ref:_refresh(true)
+            return
         end
+
+        local any_updated = false
+        local any_pending = false
+
+        for mod_id, slot in pairs(slots) do
+            if type(slot.mod.updateCovers) == "function" then
+                local ok, all_done = pcall(slot.mod.updateCovers, slot.widget, ctx)
+                local dimen = slot.widget and slot.widget.dimen
+                if ok then
+                    if dimen then
+                        self_ref.dithered = true
+                        UIManager:setDirty(self_ref, function()
+                            return "ui", dimen, true
+                        end)
+                        any_updated = true
+                    end
+                    if all_done then
+                        slots[mod_id] = nil
+                    else
+                        any_pending = true
+                    end
+                else
+                    logger.warn("simpleui cover poll: updateCovers error for " .. mod_id)
+                    slots[mod_id] = nil
+                end
+            else
+                slots[mod_id] = nil
+            end
+        end
+
+        -- Submit any filepaths that getCoverBB() enqueued during the
+        -- updateCovers pass above to the BIM as a single batch call.
+        -- Without this, the queue is never flushed inside the poll loop.
+        Config.flushCoverQueue()
+
+        if not any_pending then
+            Config.cover_extraction_pending = false
+            logger.dbg("simpleui cover poll: complete")
+            return
+        end
+
+        if is_still_running then
+            -- BIM subprocess still running — wait for the next tick.
+            logger.dbg("simpleui cover poll: BIM running, rescheduling")
+            self_ref._cover_poll_timer = timer
+            UIManager:scheduleIn(1, timer)
+            return
+        end
+
+        -- BIM has finished but some slots still returned pending.
+        -- Clear the dedup lock so getCoverBB() can re-enqueue on the next tick.
+        -- This handles the race where BIM wrote the result just as we polled,
+        -- meaning getBookInfo() hadn't yet refreshed its in-memory state.
+        -- updateCovers() will see the updated state on the next tick and either
+        -- resolve the cover or mark it NO_COVER (which makes all_done = true).
+        if Config._cover_extract_pending then
+            for fp in pairs(Config._cover_extract_pending) do
+                Config._cover_extract_pending[fp] = nil
+            end
+        end
+
+        logger.dbg("simpleui cover poll: BIM done, one final retry for missing covers")
+        self_ref._cover_poll_timer = timer
+        UIManager:scheduleIn(1, timer)
     end
     self._cover_poll_timer = timer
-    local delay = math.min(0.5 * (2 ^ (attempt - 1)), 5.0)
-    UIManager:scheduleIn(delay, timer)
+    UIManager:scheduleIn(1, timer)
 end
 
 -- ---------------------------------------------------------------------------
@@ -2183,6 +2293,7 @@ function HomescreenWidget:onCloseWidget()
     end
     self._vspan_pool         = nil
     self._wrapper_pool       = nil
+    self._cover_mod_slots    = nil
     self._cached_books_state = nil
     self._enabled_mods_cache = nil
     self._current_page       = nil

@@ -709,13 +709,14 @@ function M.build(w, ctx)
     -- Layout: cover on left, text column on right.
     -- The cover is wrapped in a CenterContainer sized to content_h so it
     -- stays vertically centred when the text column is taller than the cover.
-    local cover_centered = CenterContainer:new{
-        dimen = Geom:new{ w = D.COVER_W + cover_gap, h = content_h },
-        FrameContainer:new{
+    local cover_frame = FrameContainer:new{
             bordersize    = 0, padding = 0,
             padding_right = cover_gap,
             cover,
-        },
+        }
+    local cover_centered = CenterContainer:new{
+        dimen = Geom:new{ w = D.COVER_W + cover_gap, h = content_h },
+        cover_frame,
     }
 
     local meta_centered = CenterContainer:new{
@@ -748,6 +749,10 @@ function M.build(w, ctx)
             },
         },
     }
+    tappable._cover_slots = {
+        { container = cover_frame, idx = 1, fp = ctx.current_fp,
+          w = D.COVER_W, h = D.COVER_H, align = nil, stretch = 0.10 },
+    }
     function tappable:onTapBook()
         if self._open_fn then self._open_fn(self._fp) end
         return true
@@ -772,8 +777,30 @@ function M.build(w, ctx)
     return tappable
 end
 
+-- updateCovers(widget, ctx) — called by the homescreen cover poll instead of
+-- a full build(). Swaps only the cover image(s) inside the existing widget
+-- tree, leaving all text, layout, and gesture handlers untouched.
+-- Returns true if all covers are now resolved, false if some are still missing.
+function M.updateCovers(widget, _ctx)
+    -- widget is either tappable (normal) or OverlapGroup{tappable,...} (kb focus)
+    local tappable = (widget._cover_slots) and widget
+                     or (widget[1] and widget[1]._cover_slots and widget[1])
+    if not tappable or not tappable._cover_slots then return true end
 
--- Returns the total pixel height of the module including the section label.
+    local SH = getSH()
+    if not SH then return true end
+
+    local all_done = true
+    for _, slot in ipairs(tappable._cover_slots) do
+        local new_cover = SH.getBookCover(slot.fp, slot.w, slot.h, slot.align, slot.stretch)
+        if new_cover then
+            slot.container[slot.idx] = new_cover
+        elseif not Config.isCoverMissing(slot.fp) then
+            all_done = false
+        end
+    end
+    return all_done
+end-- Returns the total pixel height of the module including the section label.
 -- Measures real font line heights via Font:getFace() so the estimate matches
 -- what build() actually renders.  This prevents the homescreen from
 -- under-allocating space and causing overlap with the module below.

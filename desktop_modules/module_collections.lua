@@ -269,7 +269,7 @@ local function buildCoverCell(files, cover_override, coll_name, count, d)
     return OverlapGroup:new{
         dimen = Geom:new{ w = d.stack_cell_w, h = d.cell_h },
         base, badge,
-    }
+    }, stack, front_fp
 end
 
 -- ---------------------------------------------------------------------------
@@ -398,12 +398,25 @@ function M.build(w, ctx)
     -- of how many collections are selected.
     local gap = math.floor((inner_w - 5 * d.stack_cell_w) / 4)
     local row = HorizontalGroup:new{ align = "top" }
+    local cover_slots = {}
 
     for i = 1, cols do
         local coll_name = selected[i]
         local files     = rc and getCollectionFilesFromRC(rc, coll_name) or {}
         local count     = #files
-        local thumb     = buildCoverCell(files, overrides[coll_name], coll_name, count, d)
+        local thumb, stack, front_fp = buildCoverCell(files, overrides[coll_name], coll_name, count, d)
+
+        -- Record cover slot: cover is at stack[5] (after two edgeLine groups and two spans).
+        -- Only record if there is a real fp to reload from.
+        if stack and front_fp then
+            cover_slots[#cover_slots+1] = {
+                container = stack,
+                idx       = 5,
+                fp        = front_fp,
+                w         = d.coll_w,
+                h         = d.coll_h,
+            }
+        end
 
         -- Label centred over the cover thumbnail only, not the full stack_cell_w
         -- (which includes the spine on the left). A leading HorizontalSpan
@@ -464,13 +477,43 @@ function M.build(w, ctx)
         }
     end
 
-    return FrameContainer:new{
+    local result = FrameContainer:new{
         bordersize = 0, padding = PAD, padding_top = 0, padding_bottom = 0,
         row,
     }
+    result._cover_slots = cover_slots
+    return result
 end
 
-function M.getHeight(_ctx)
+function M.updateCovers(widget, _ctx)
+    if not widget or not widget._cover_slots then return true end
+    local all_done = true
+    for _, slot in ipairs(widget._cover_slots) do
+        local raw = Config.getCoverBB(slot.fp, slot.w, slot.h, nil, 0.10)
+        if raw then
+            local ok, img = pcall(function()
+                return ImageWidget:new{
+                    image            = raw,
+                    image_disposable = false,
+                    width            = slot.w,
+                    height           = slot.h,
+                    scale_factor     = 1,
+                }
+            end)
+            if ok and img then
+                slot.container[slot.idx] = FrameContainer:new{
+                    bordersize = 1, color = _CLR_COVER_BORDER,
+                    padding    = 0, margin = 0,
+                    dimen      = Geom:new{ w = slot.w, h = slot.h },
+                    img,
+                }
+            end
+        elseif not Config.isCoverMissing(slot.fp) then
+            all_done = false
+        end
+    end
+    return all_done
+end
     local d = getDims(Config.getModuleScale("collections", _ctx and _ctx.pfx),
                       Config.getThumbScale("collections", _ctx and _ctx.pfx))
     if #getSelectedCollections() == 0 then

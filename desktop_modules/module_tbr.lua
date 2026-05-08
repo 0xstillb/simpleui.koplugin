@@ -337,6 +337,7 @@ function M.build(w, ctx)
     local cell_h  = use_overlay and (ch + badge_r) or D.RECENT_CELL_H
 
     local row = HorizontalGroup:new{ align = "top" }
+    local cover_slots = {}
     for i = 1, cols do
         local fp    = tbr_fps[i]
         local bd    = SH.getBookData(fp, ctx.prefetched and ctx.prefetched[fp])
@@ -413,6 +414,12 @@ function M.build(w, ctx)
             return true
         end
 
+        if use_overlay then
+            cover_slots[#cover_slots+1] = { container = cover_widget, idx = 1, fp = fp, w = cw, h = ch, align = nil, stretch = 0.10 }
+        else
+            cover_slots[#cover_slots+1] = { container = cell, idx = 1, fp = fp, w = cw, h = ch, align = nil, stretch = 0.10 }
+        end
+
         local cell_widget = tappable
         if ctx.kb_recent_focus_idx == i then
             local bw = Screen:scaleBySize(3)
@@ -430,10 +437,28 @@ function M.build(w, ctx)
         row[#row + 1] = cell_widget
     end
 
-    return FrameContainer:new{
+    local result = FrameContainer:new{
         bordersize = 0, padding = PAD, padding_top = 0, padding_bottom = 0,
         row,
     }
+    result._cover_slots = cover_slots
+    return result
+end
+
+function M.updateCovers(widget, _ctx)
+    if not widget or not widget._cover_slots then return true end
+    local SH = getSH()
+    if not SH then return true end
+    local all_done = true
+    for _, slot in ipairs(widget._cover_slots) do
+        local new_cover = SH.getBookCover(slot.fp, slot.w, slot.h, slot.align, slot.stretch)
+        if new_cover then
+            slot.container[slot.idx] = new_cover
+        elseif not Config.isCoverMissing(slot.fp) then
+            all_done = false
+        end
+    end
+    return all_done
 end
 
 -- ---------------------------------------------------------------------------

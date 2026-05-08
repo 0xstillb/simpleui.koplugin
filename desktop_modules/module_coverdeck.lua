@@ -437,28 +437,46 @@ function M.build(w, ctx)
     end
 
     local items = {}
+    local cover_slots = {}  -- parallel: {fp, w, h, align} for each items entry
     if count >= 5 then
         items[#items+1] = buildCover(fps[carouselIdx(curIdx, -2, count)], far_w, far_h, "left")
         items[#items].overlap_offset = { math.floor(centerX - half_cw - offset_far),         yTopOf(centerY, far_h) }
+        cover_slots[#cover_slots+1] = { fp = fps[carouselIdx(curIdx, -2, count)], w = far_w,  h = far_h,  align = "left",
+                                        overlap_offset = items[#items].overlap_offset }
         items[#items+1] = buildCover(fps[carouselIdx(curIdx, 2, count)], far_w, far_h, "right")
         items[#items].overlap_offset = { math.floor(centerX + half_cw + offset_far - far_w), yTopOf(centerY, far_h) }
+        cover_slots[#cover_slots+1] = { fp = fps[carouselIdx(curIdx, 2, count)],  w = far_w,  h = far_h,  align = "right",
+                                        overlap_offset = items[#items].overlap_offset }
     end
     if count >= 2 then
         items[#items+1] = buildCover(fps[carouselIdx(curIdx, -1, count)], side_w, side_h, "left")
         items[#items].overlap_offset = { math.floor(centerX - half_cw - offset_near),          yTopOf(centerY, side_h) }
+        cover_slots[#cover_slots+1] = { fp = fps[carouselIdx(curIdx, -1, count)], w = side_w, h = side_h, align = "left",
+                                        overlap_offset = items[#items].overlap_offset }
     end
     if count >= 3 then
         items[#items+1] = buildCover(fps[carouselIdx(curIdx, 1, count)], side_w, side_h, "right")
         items[#items].overlap_offset = { math.floor(centerX + half_cw + offset_near - side_w), yTopOf(centerY, side_h) }
+        cover_slots[#cover_slots+1] = { fp = fps[carouselIdx(curIdx, 1, count)],  w = side_w, h = side_h, align = "right",
+                                        overlap_offset = items[#items].overlap_offset }
     end
     items[#items+1] = buildCover(fps[curIdx], center_w, center_h, "center")
     items[#items].overlap_offset = { math.floor(centerX - half_cw), yTopOf(centerY, center_h) }
+    cover_slots[#cover_slots+1] = { fp = fps[curIdx], w = center_w, h = center_h, align = "center",
+                                    overlap_offset = items[#items].overlap_offset }
 
     -- Tappable carousel container
     local group_h  = center_h + TOP_CLEAR
+    local overlap  = OverlapGroup:new{ dimen = Geom:new{ w = inner_w, h = group_h }, unpack(items) }
+    -- Annotate each cover_slot with its container+index inside the OverlapGroup.
+    for i, slot in ipairs(cover_slots) do
+        slot.container = overlap
+        slot.idx       = i
+        slot.stretch   = 0.20
+    end
     local tappable = InputContainer:new{
         dimen    = Geom:new{ w = inner_w, h = group_h },
-        [1]      = OverlapGroup:new{ dimen = Geom:new{ w = inner_w, h = group_h }, unpack(items) },
+        [1]      = overlap,
         _hs      = ctx._hs_widget,
         _open_fn = ctx.open_fn,
         _fps     = fps,
@@ -636,15 +654,32 @@ function M.build(w, ctx)
         end)
     end
 
-    return FrameContainer:new{
+    local result = FrameContainer:new{
         bordersize = 0, padding = PAD, padding_top = PAD, padding_bottom = 0,
         final_vg,
     }
+    result._cover_slots = cover_slots
+    return result
 end
 
--- ---------------------------------------------------------------------------
--- getHeight
--- ---------------------------------------------------------------------------
+function M.updateCovers(widget, _ctx)
+    if not widget or not widget._cover_slots then return true end
+    local SH = getSH()
+    if not SH then return true end
+    local all_done = true
+    for _, slot in ipairs(widget._cover_slots) do
+        local new_cover = SH.getBookCover(slot.fp, slot.w, slot.h, slot.align, slot.stretch)
+        if new_cover then
+            -- Use the overlap_offset recorded at build() time — the current
+            -- widget at slot.idx may be a placeholder with no overlap_offset.
+            new_cover.overlap_offset = slot.overlap_offset
+            slot.container[slot.idx] = new_cover
+        elseif not Config.isCoverMissing(slot.fp) then
+            all_done = false
+        end
+    end
+    return all_done
+end
 
 function M.getHeight(ctx)
     local pfx         = ctx and ctx.pfx or ""
