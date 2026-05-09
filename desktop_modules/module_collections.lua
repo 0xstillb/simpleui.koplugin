@@ -514,6 +514,8 @@ function M.updateCovers(widget, _ctx)
     end
     return all_done
 end
+
+function M.getHeight(ctx)
     local d = getDims(Config.getModuleScale("collections", _ctx and _ctx.pfx),
                       Config.getThumbScale("collections", _ctx and _ctx.pfx))
     if #getSelectedCollections() == 0 then

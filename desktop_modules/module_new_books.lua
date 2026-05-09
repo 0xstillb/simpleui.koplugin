@@ -173,7 +173,7 @@ function M.build(w, ctx)
     for i = 1, cols do
         local fp    = new_fps[i]
         local bd    = SH.getBookData(fp, ctx.prefetched and ctx.prefetched[fp])
-        local cover = SH.getBookCover(fp, cw, ch) or SH.coverPlaceholder(bd.title, cw, ch)
+        local cover = SH.getBookCover(fp, cw, ch) or SH.coverPlaceholder(bd.title, bd.authors, cw, ch)
 
         -- "New" for unread books, read percentage otherwise.
         local label_text

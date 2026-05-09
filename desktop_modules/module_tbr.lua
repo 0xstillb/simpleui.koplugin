@@ -341,7 +341,7 @@ function M.build(w, ctx)
     for i = 1, cols do
         local fp    = tbr_fps[i]
         local bd    = SH.getBookData(fp, ctx.prefetched and ctx.prefetched[fp])
-        local cover = SH.getBookCover(fp, cw, ch, nil, 0.10) or SH.coverPlaceholder(bd.title, cw, ch)
+        local cover = SH.getBookCover(fp, cw, ch, nil, 0.10) or SH.coverPlaceholder(bd.title, bd.authors, cw, ch)
 
         local cover_widget
         if use_overlay then

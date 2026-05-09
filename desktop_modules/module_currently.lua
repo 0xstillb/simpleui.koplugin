@@ -469,7 +469,7 @@ function M.build(w, ctx)
     local prefetched_entry = ctx.prefetched and ctx.prefetched[ctx.current_fp]
     local bd    = SH.getBookData(ctx.current_fp, prefetched_entry)
     local cover = SH.getBookCover(ctx.current_fp, D.COVER_W, D.COVER_H, nil, 0.10)
-                  or SH.coverPlaceholder(bd.title, D.COVER_W, D.COVER_H)
+                  or SH.coverPlaceholder(bd.title, bd.authors, D.COVER_W, D.COVER_H)
 
     -- Text column width: full width minus both PADs, cover, and cover gap.
     local tw = w - PAD - D.COVER_W - cover_gap - PAD

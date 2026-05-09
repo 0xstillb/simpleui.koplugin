@@ -3,6 +3,7 @@
 -- cover loading, book data, progress bar, prefetch, formatTimeLeft.
 -- Not a module — no id or build(). Pure shared utilities.
 
+local BD             = require("ui/bidi")
 local Blitbuffer      = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device          = require("device")
@@ -11,10 +12,14 @@ local FrameContainer  = require("ui/widget/container/framecontainer")
 local Geom            = require("ui/geometry")
 local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
+local Size            = require("ui/size")
+local TextBoxWidget   = require("ui/widget/textboxwidget")
 local TextWidget      = require("ui/widget/textwidget")
+local VerticalGroup   = require("ui/widget/verticalgroup")
 local VerticalSpan    = require("ui/widget/verticalspan")
 local Screen          = Device.screen
 local lfs             = require("libs/libkoreader-lfs")
+local util            = require("util")
 local Config          = require("sui_config")
 
 local SH = {}
@@ -188,42 +193,151 @@ end
 -- ---------------------------------------------------------------------------
 -- coverPlaceholder
 -- ---------------------------------------------------------------------------
--- Helper function to safely extract first n UTF-8 characters for placeholder text
-local function safeFirstChars(s, n)
-    if not s or n <= 0 then return "" end
-    local chars = {}
-    local i = 1
-    local count = 0
-    while i <= #s and count < n do
-        local byte = s:byte(i)
-        -- Calculate the byte length of the current UTF-8 character
-        local charLen = 1
-        if byte >= 240 then
-            charLen = 4
-        elseif byte >= 224 then
-            charLen = 3
-        elseif byte >= 192 then
-            charLen = 2
-        end
-        chars[#chars + 1] = s:sub(i, i + charLen - 1)
-        count = count + 1
-        i = i + charLen
+-- Renders a FakeCover-style placeholder (mirroring KOReader's coverbrowser
+-- mosaicmenu.lua FakeCover widget) for books that have no cover image.
+-- Displays title and authors as text with decreasing font sizes until they
+-- fit, at the 2:3 proportions used by the homescreen modules.
+--
+-- title   : book title string (or nil — filename used as fallback by callers)
+-- authors : book authors string (or nil)
+-- w, h    : exact pixel dimensions of the cell (should be ~2:3 ratio)
+function SH.coverPlaceholder(title, authors, w, h)
+    -- Backwards-compat: old call sites used (title, w, h) with 3 args.
+    -- Detect by checking whether `authors` is a number (the old w slot).
+    if type(authors) == "number" then
+        h = w; w = authors; authors = nil
     end
-    return table.concat(chars)
-end
+    w = tonumber(w) or 100
+    h = tonumber(h) or 150
 
-function SH.coverPlaceholder(title, w, h)
+    local border = Size.border.thin
+    -- Inner dimensions (FakeCover uses width/height = outer - 2*bordersize,
+    -- since margin=0 and padding=0)
+    local width  = w - 2 * border
+    local height = h - 2 * border
+    -- FakeCover uses 7/8 of width for text to leave lateral breathing room
+    local text_width = math.floor(7 / 8 * width)
+
+    -- BD-wrap title (mirrors FakeCover logic)
+    local bd_wrap_title_as_filename = false
+    if not title then
+        title = authors  -- no title: treat authors string as title fallback
+        authors = nil
+        bd_wrap_title_as_filename = true
+    end
+    if title then
+        -- filename-style cleanup when no authors
+        if not authors then
+            bd_wrap_title_as_filename = true
+            title = title:gsub(" %- ", "\n")
+            title = title:gsub("|", "\n")
+            title = title:gsub("_", " ")
+            title = title:gsub("%.", ".\u{200B}")
+            title = title:gsub("%.\u{200B}(%w%w?%w?%w?%w?)$", "\u{200B}.%1")
+        end
+        title = bd_wrap_title_as_filename and BD.filename(title) or BD.auto(title)
+    end
+    if authors then
+        if authors:find("\n") then
+            local parts = util.splitToArray(authors, "\n")
+            for i = 1, #parts do parts[i] = BD.auto(parts[i]) end
+            if #parts > 3 then
+                parts = { parts[1], parts[2], parts[3] .. " et al." }
+            end
+            authors = table.concat(parts, "\n")
+        else
+            authors = BD.auto(authors)
+        end
+    end
+
+    -- The modules use a 2:3 cover proportion which is narrower than the
+    -- mosaic grid cells FakeCover was designed for. Start with a slightly
+    -- reduced font size so text fits comfortably without many loop iterations.
+    local initial_sizedec = Screen:scaleBySize(4)
+    local sizedec_step    = Screen:scaleBySize(2)
+    local authors_font_max, authors_font_min = 20, 6
+    local title_font_max,   title_font_min   = 24, 10
+    local top_pad    = Size.padding.default
+    local bottom_pad = Size.padding.default
+
+    local authors_wg, title_wg
+    local inter_pad = 0
+    local sizedec   = initial_sizedec
+    local loop2     = false
+
+    while true do
+        if authors_wg then authors_wg:free(true); authors_wg = nil end
+        if title_wg   then title_wg:free(true);   title_wg   = nil end
+
+        local texts_height = 0
+        if authors then
+            authors_wg = TextBoxWidget:new{
+                text      = authors,
+                face      = Font:getFace("cfont", math.max(authors_font_max - sizedec, authors_font_min)),
+                width     = text_width,
+                alignment = "center",
+            }
+            texts_height = texts_height + authors_wg:getSize().h
+        end
+        if title then
+            title_wg = TextBoxWidget:new{
+                text      = title,
+                face      = Font:getFace("cfont", math.max(title_font_max - sizedec, title_font_min)),
+                width     = text_width,
+                alignment = "center",
+            }
+            texts_height = texts_height + title_wg:getSize().h
+        end
+
+        local free_height = height - texts_height
+        if authors then free_height = free_height - top_pad    end
+        inter_pad = math.floor(free_height / 2)
+
+        local textboxes_ok = not (authors_wg and authors_wg.has_split_inside_word)
+                          and not (title_wg   and title_wg.has_split_inside_word)
+
+        if textboxes_ok and free_height > 0.2 * height then break end
+
+        sizedec = sizedec + sizedec_step
+        if sizedec > 20 + initial_sizedec then
+            if not loop2 then
+                loop2  = true
+                sizedec = initial_sizedec
+                if G_reader_settings:nilOrTrue("use_xtext") then
+                    if title   then title   = title:gsub("_",   "_\u{200B}"):gsub("%.", ".\u{200B}") end
+                    if authors then authors = authors:gsub("_", "_\u{200B}"):gsub("%.", ".\u{200B}") end
+                else
+                    if title   then title   = title:gsub("-",   " "):gsub("_", " ") end
+                    if authors then authors = authors:gsub("-",  " "):gsub("_", " ") end
+                end
+            else
+                break
+            end
+        end
+    end
+
+    local vgroup = VerticalGroup:new{}
+    if authors then
+        table.insert(vgroup, VerticalSpan:new{ width = top_pad })
+        table.insert(vgroup, authors_wg)
+    end
+    table.insert(vgroup, VerticalSpan:new{ width = inter_pad })
+    if title then
+        table.insert(vgroup, title_wg)
+    end
+    table.insert(vgroup, VerticalSpan:new{ width = inter_pad })
+
     return FrameContainer:new{
-        bordersize = 1, color = _CLR_COVER_BORDER,
-        background = _CLR_COVER_BG, padding = 0,
-        dimen      = Geom:new{ w = w, h = h },
+        width      = w,
+        height     = h,
+        bordersize = border,
+        margin     = 0,
+        padding    = 0,
+        color      = _CLR_COVER_BORDER,
+        background = Blitbuffer.COLOR_WHITE,
         CenterContainer:new{
-            dimen = Geom:new{ w = w, h = h },
-            TextWidget:new{
-                text = safeFirstChars(title or "?", 2):upper(),
-                face = Font:getFace("smallinfofont", Screen:scaleBySize(18)),
-                bold = true,
-            },
+            dimen = Geom:new{ w = width, h = height },
+            vgroup,
         },
     }
 end

@@ -432,7 +432,7 @@ function M.build(w, ctx)
     -- Covers
     local function buildCover(fp, cw, ch, align)
         local bd    = SH.getBookData(fp, ctx.prefetched and ctx.prefetched[fp])
-        local cover = SH.getBookCover(fp, cw, ch, align, 0.20) or SH.coverPlaceholder(bd.title, cw, ch)
+        local cover = SH.getBookCover(fp, cw, ch, align, 0.20) or SH.coverPlaceholder(bd.title, bd.authors, cw, ch)
         return cover
     end
 
