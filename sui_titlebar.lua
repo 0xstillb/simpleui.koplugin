@@ -26,6 +26,27 @@ local _BROWSE_ICONS = {
 local M = {}
 
 -- ---------------------------------------------------------------------------
+-- Improvement #4 — module-level lazy loader for sui_browsemeta.
+-- Avoids repeated pcall(require, ...) inside hot paths (genItemTable wrapper,
+-- onFolderUp, browse button callback). false means "tried and not available".
+-- ---------------------------------------------------------------------------
+
+local _BM_cache  -- nil = not yet tried; false = unavailable; table = module
+local function _BrowseMeta()
+    if _BM_cache == nil then
+        local ok, m = pcall(require, "sui_browsemeta")
+        _BM_cache = (ok and m) or false
+    end
+    return _BM_cache or nil
+end
+
+-- Invalidate the cache so that reapplyAll picks up a newly-enabled BrowseMeta.
+-- Called by reapply() before re-running apply().
+local function _resetBMCache()
+    _BM_cache = nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Settings keys and defaults
 -- ---------------------------------------------------------------------------
 
@@ -149,29 +170,102 @@ local function _isGoUpItem(item)
     return item.is_go_up or (item.text and item.text:find("\u{2B06}"))
 end
 
--- Returns true when lock_home_folder is on and path equals the home directory.
-local function _isLockedAtHome(path)
-    if not G_reader_settings:isTrue("lock_home_folder") then return false end
-    if not path then return false end
-    local home = G_reader_settings:readSetting("home_dir")
-    if not home then return false end
+-- ---------------------------------------------------------------------------
+-- Path-based navigation helpers
+-- ---------------------------------------------------------------------------
+--
+-- _normPath: resolves symlinks (Android /sdcard → /storage/emulated/0) and
+-- strips trailing slashes so all comparisons are consistent.  Falls back
+-- gracefully when realpath is unavailable or the path does not exist.
+local function _normPath(path)
+    if not path then return nil end
     local ffiUtil = require("ffi/util")
-    local ok_p, p = pcall(ffiUtil.realpath, path)
-    local ok_h, h = pcall(ffiUtil.realpath, home)
-    p = (ok_p and p or path):gsub("/$", "")
-    h = (ok_h and h or home):gsub("/$", "")
-    return p == h
+    local ok, resolved = pcall(ffiUtil.realpath, path)
+    return (ok and resolved or path):gsub("/$", "")
 end
 
--- Returns true when the file-chooser is at a root location (back button hidden).
-local function _isAtRoot(fc)
-    if not fc then return false end
-    if (fc.path or "") == "/" then return true end
-    if _isLockedAtHome(fc.path) then return true end
-    for _, item in ipairs(fc.item_table or {}) do
-        if _isGoUpItem(item) then return false end
+-- _normHome: cached normalised home_dir.  Re-read each call — the user may
+-- change home_dir in settings between navigations.
+local function _normHome()
+    local home = G_reader_settings:readSetting("home_dir")
+    if not home or home == "" then return nil end
+    return _normPath(home)
+end
+
+-- _isAtFSRoot: true when path is the effective navigation root.
+-- With lock ON the root is home_dir; with lock OFF it is "/".
+local function _isAtFSRoot(path)
+    local p = _normPath(path)
+    if not p or p == "" or p == "/" then return true end
+    if G_reader_settings:isTrue("lock_home_folder") then
+        local h = _normHome()
+        return h ~= nil and p == h
     end
-    return true
+    return false
+end
+
+-- _isSubFolder: true when the back button should be shown at `path`.
+--
+-- Virtual BrowseMeta paths (Authors / Series / Tags):
+--   root     — the entry point before choosing a dimension: hide.
+--   dim_list — the list of all authors / series / tags: hide.
+--              This is the virtual equivalent of the home root.
+--   file_list — the books inside one author / series / tag: show.
+--              This is the virtual equivalent of a subfolder.
+--   (BrowseMeta not active → path treated as normal filesystem path)
+--
+-- Normal filesystem paths depend on lock_home_folder:
+--   lock OFF: root of navigation is "/". Show everywhere except "/".
+--   lock ON:  root of navigation is home_dir. Show only when strictly
+--             below home_dir; hide at home_dir and outside home.
+--
+-- Uses realpath so Android /sdcard symlinks normalise consistently.
+-- DOES NOT handle series-view (path unchanged from parent) — caller checks
+-- fc.item_table._sg_is_series_view separately.
+local function _isSubFolder(path)
+    if not path then return false end
+    local p = _normPath(path)
+    if not p or p == "" or p == "/" then return false end
+
+    -- Virtual path: delegate entirely to BrowseMeta's level classification.
+    local BM = _BrowseMeta()
+    if BM then
+        local ok, level = pcall(BM.getPathLevel, path)
+        if ok and level then
+            -- file_list = inside a specific author/series/tag → show.
+            -- root / dim_list = top of the virtual tree → hide.
+            return level == "file_list"
+        end
+        -- getPathLevel returned nil → path is not virtual; fall through.
+    end
+
+    -- Normal filesystem path.
+    if G_reader_settings:isTrue("lock_home_folder") then
+        -- Locked: only show when strictly inside home_dir.
+        local h = _normHome()
+        if not h then return false end              -- no home set → hide
+        if p == h then return false end             -- at home root → hide
+        return p:sub(1, #h + 1) == h .. "/"        -- strictly below home → show
+    else
+        -- Unlocked: any path other than "/" has a parent to go back to.
+        return true
+    end
+end
+
+-- _isAtRoot: backwards-compat wrapper used by early-hide and browse-button.
+local function _isAtRoot(fc)
+    if not fc then return true end
+    -- Series view always has a parent even if the path is the home root.
+    if fc.item_table and fc.item_table._sg_is_series_view then return false end
+    return not _isSubFolder(fc.path)
+end
+
+-- Keep _isLockedAtHome for any callers outside this file that may require it,
+-- but internally we now use _isAtFSRoot / _isSubFolder.
+local function _isLockedAtHome(path)
+    return _isAtFSRoot(path) and
+           G_reader_settings:isTrue("lock_home_folder") and
+           _normPath(path) == _normHome()
 end
 
 -- Pixel x-position for a button at slot (0-based) on a given side.
@@ -296,6 +390,46 @@ local function _layoutParams(tb)
 end
 
 -- ---------------------------------------------------------------------------
+-- _resolveIsSub: single authoritative is_sub resolver.
+-- Replaces the go-up item scan with a path-based approach (Zen UI style),
+-- adapted to handle SimpleUI's virtual folder and series-view cases:
+--
+--   1. Series view (_sg_is_series_view): the path does NOT change when the
+--      user drills into a series group — fc.path stays the parent's path.
+--      We check the flag first because _isSubFolder would return false for a
+--      series opened from the home root, hiding the back button incorrectly.
+--
+--   2. BrowseMeta virtual paths: the VROOT marker (U+E257) sits after the
+--      base_dir segment, so _isSubFolder's prefix test against home_dir still
+--      works correctly without special-casing.
+--
+--   3. Normal filesystem: _isSubFolder compares realpath-normalised strings,
+--      handling Android /sdcard symlinks consistently.
+--
+-- The cached _simpleui_has_go_up flag is kept for the early-hide path in
+-- apply() (before the first genItemTable fires), but is no longer the primary
+-- source of truth here.
+-- ---------------------------------------------------------------------------
+local function _resolveIsSub(fc_self)
+    -- Series view: path is unchanged from parent, so path comparison is blind.
+    -- The flag is set by sui_foldercovers when it calls switchItemTable.
+    if fc_self.item_table and fc_self.item_table._sg_is_series_view then
+        return true
+    end
+    -- Path-based test: handles normal folders, locked-home, and virtual paths.
+    return _isSubFolder(fc_self.path)
+end
+
+-- ---------------------------------------------------------------------------
+-- Improvement #6 — _hideOffset: defensive off-screen x value.
+-- Uses 2× screen width instead of a fixed +100px so the button stays
+-- invisible even after orientation changes before the next reapply.
+-- ---------------------------------------------------------------------------
+local function _hideOffset(sw)
+    return sw * 2
+end
+
+-- ---------------------------------------------------------------------------
 -- FM titlebar — apply
 -- ---------------------------------------------------------------------------
 
@@ -315,8 +449,9 @@ function M.apply(fm_self)
     local show_up     = M.isItemVisible("up_button")
     local show_search = M.isItemVisible("search_button")
     local show_browse = M.isItemVisible("browse_button") and (function()
-        local ok_bm, BM = pcall(require, "sui_browsemeta")
-        return ok_bm and BM and BM.isEnabled()
+        -- Improvement #4: use cached _BrowseMeta() instead of inline pcall.
+        local BM = _BrowseMeta()
+        return BM and BM.isEnabled()
     end)()
     local show_title  = M.isItemVisible("title")
 
@@ -367,7 +502,8 @@ function M.apply(fm_self)
             placeBtn("menu_button", rb)
         else
             rb.overlap_align  = nil
-            rb.overlap_offset = { sw + 100, 0 }
+            -- Improvement #6: use defensive 2× width offset.
+            rb.overlap_offset = { _hideOffset(sw), 0 }
             rb.callback       = function() end
             rb.hold_callback  = function() end
         end
@@ -385,7 +521,8 @@ function M.apply(fm_self)
             -- Hide back button immediately if already at root before the first
             -- genItemTable fires, to avoid a brief flash of the button.
             if _isAtRoot(fm_self.file_chooser) then
-                lb.overlap_offset = { sw + 100, 0 }
+                -- Improvement #6: use defensive 2× width offset.
+                lb.overlap_offset = { _hideOffset(sw), 0 }
                 lb.callback       = function() end
                 lb.hold_callback  = function() end
             end
@@ -399,11 +536,16 @@ function M.apply(fm_self)
                     ICON_UP = BD.mirroredUILayout() and "chevron.right" or "chevron.left"
                 end)
 
-                fm_self._titlebar_orig_fc_genItemTable = fc.genItemTable
-
-                -- Returns injected left-side buttons (excluding up_button) with slots.
-                -- Rebuilt each call because search_btn/browse_btn are assigned later.
+                -- Improvement #7 — _leftSideBtns built once after apply() sets
+                -- _titlebar_search_btn / _titlebar_browse_btn, then cached.
+                -- Rebuilt only on reapply() (which calls restore() + apply() fresh).
+                -- The comment in the original noted "rebuilt each call because
+                -- search_btn/browse_btn are assigned later"; we solve this by
+                -- deferring construction to the first _applyBackButtonState call,
+                -- at which point both injected buttons have been assigned.
+                local _left_btns_cache = nil
                 local function _leftSideBtns()
+                    if _left_btns_cache then return _left_btns_cache end
                     local list = {}
                     for _, id in ipairs(cfg.order_left) do
                         if id ~= "up_button" and slot_map[id] and slot_map[id].side == "left" then
@@ -418,6 +560,7 @@ function M.apply(fm_self)
                             end
                         end
                     end
+                    _left_btns_cache = list
                     return list
                 end
 
@@ -435,7 +578,8 @@ function M.apply(fm_self)
 
                     if not is_sub and page <= 1 then
                         -- Hide back button and compact neighbors left.
-                        btn.overlap_offset = { sw + 100, 0 }
+                        -- Improvement #6: use defensive 2× width offset.
+                        btn.overlap_offset = { _hideOffset(sw), 0 }
                         btn.callback       = function() end
                         btn.hold_callback  = function() end
                         for _, entry in ipairs(neighbors) do
@@ -462,27 +606,48 @@ function M.apply(fm_self)
                     UIManager:setDirty(tb2.show_parent or fm_self, "ui", tb2.dimen)
                 end
 
-                -- genItemTable fires on folder navigation (not on page turns).
-                -- Strips the go-up row and updates back-button state for page 1.
+                -- ---------------------------------------------------------------------------
+                -- Improvement #2 — single genItemTable wrapper with a listener registry.
+                -- Instead of wrapping fc.genItemTable twice (once here for the back button,
+                -- once below for the browse icon), we install one wrapper that calls all
+                -- registered listeners after the original. Each feature registers its own
+                -- listener via fc._simpleui_gen_listeners. restore() clears the list and
+                -- restores the original, avoiding listener-chain fragility.
+                -- ---------------------------------------------------------------------------
+                fm_self._titlebar_orig_fc_genItemTable = fc.genItemTable
+                fc._simpleui_gen_listeners = {}
+
                 local orig_genItemTable = fc.genItemTable
                 fc.genItemTable = function(fc_self, dirs, files, path)
                     local item_table = orig_genItemTable(fc_self, dirs, files, path)
                     if not item_table then return item_table end
-                    local is_sub   = false
+
+                    -- Strip the go-up row from the list (we own the back button now).
+                    -- is_sub is determined by path, not by the presence of this item.
                     local filtered = {}
                     for _, item in ipairs(item_table) do
-                        if _isGoUpItem(item) then
-                            is_sub = true
-                        else
+                        if not _isGoUpItem(item) then
                             filtered[#filtered + 1] = item
                         end
                     end
-                    local p = (path or fc_self.path or ""):gsub("/$", "")
-                    if p == "/" or _isLockedAtHome(path or fc_self.path) then
-                        is_sub = false
+
+                    -- Path-based is_sub: use the path argument when available (it
+                    -- reflects the destination of the current genItemTable call),
+                    -- falling back to fc_self.path for the initial load.
+                    local effective_path = path or fc_self.path
+                    local is_sub = _isSubFolder(effective_path)
+                    -- Series view overrides path-based result (path unchanged from parent).
+                    if fc_self.item_table and fc_self.item_table._sg_is_series_view then
+                        is_sub = true
                     end
                     fc_self._simpleui_has_go_up = is_sub
                     _applyBackButtonState(fc_self, is_sub, 1)
+
+                    -- Notify all other registered listeners (e.g. browse icon refresh).
+                    for _, listener in ipairs(fc_self._simpleui_gen_listeners or {}) do
+                        pcall(listener, fc_self)
+                    end
+
                     return filtered
                 end
 
@@ -514,47 +679,36 @@ function M.apply(fm_self)
                 -- onFolderUp re-evaluates back-button state after navigation.
                 -- FileChooser.onFolderUp is resolved at call time (not captured as an
                 -- upvalue) because sui_foldercovers may swap the class method at runtime.
+                --
+                -- Improvement #8 — save the previous instance value of onFolderUp
+                -- (which may be nil or a value set by another plugin) so restore()
+                -- can reinstate it exactly, rather than blindly nil-ing the slot.
                 local FileChooser_cls = require("ui/widget/filechooser")
-                fm_self._titlebar_orig_fc_onFolderUp = true
+                fm_self._titlebar_orig_fc_onFolderUp = fc.onFolderUp  -- may be nil
                 fc.onFolderUp = function(fc_self, ...)
                     -- At the dim_list level of a virtual browse tree, exit to normal FS.
-                    local ok_bm, BM = pcall(require, "sui_browsemeta")
-                    if ok_bm and BM and BM.exitToNormal then
+                    -- Improvement #4: use cached _BrowseMeta().
+                    local BM = _BrowseMeta()
+                    if BM and BM.exitToNormal then
                         local path = fc_self.path or ""
                         if path:find("/", 1, true) then
                             local ok_pl, level = pcall(BM.getPathLevel, path)
                             if ok_pl and level == "dim_list" then
                                 BM.exitToNormal(fc_self, fm_self)
-                                -- Re-evaluate state; genItemTable may have already set the flag.
-                                local is_sub_after = fc_self._simpleui_has_go_up
-                                if is_sub_after == nil then
-                                    is_sub_after = false
-                                    for _, item in ipairs(fc_self.item_table or {}) do
-                                        if _isGoUpItem(item) then is_sub_after = true; break end
-                                    end
-                                end
-                                if (fc_self.path or "") == "/" or _isLockedAtHome(fc_self.path) then
-                                    is_sub_after = false
-                                end
+                                -- Improvement #1: use _resolveIsSub instead of inline duplicate.
+                                local is_sub_after = _resolveIsSub(fc_self)
+                                fc_self._simpleui_has_go_up = is_sub_after
                                 _applyBackButtonState(fc_self, is_sub_after, 1)
                                 return true
                             end
                         end
                     end
                     -- Delegate to the current class method (resolved at call time).
-                    local current    = FileChooser_cls.onFolderUp
+                    local current = FileChooser_cls.onFolderUp
                     local ok, result = pcall(current, fc_self, ...)
-                    -- Re-evaluate state after navigation; use cached flag if genItemTable ran.
-                    local is_sub = fc_self._simpleui_has_go_up
-                    if is_sub == nil then
-                        is_sub = false
-                        for _, item in ipairs(fc_self.item_table or {}) do
-                            if _isGoUpItem(item) then is_sub = true; break end
-                        end
-                    end
-                    if (fc_self.path or "") == "/" or _isLockedAtHome(fc_self.path) then
-                        is_sub = false
-                    end
+                    -- Improvement #1: use _resolveIsSub instead of inline duplicate.
+                    -- Note: _resolveIsSub prefers the cached flag set by genItemTable.
+                    local is_sub = _resolveIsSub(fc_self)
                     fc_self._simpleui_has_go_up = is_sub
                     _applyBackButtonState(fc_self, is_sub, 1)
                     if not ok then error(result) end
@@ -573,16 +727,13 @@ function M.apply(fm_self)
                         end
                         fc_self._simpleui_in_goto = true
                         local ok, result = pcall(orig_onGotoPage, fc_self, page, ...)
+                        -- Clear re-entrancy guard BEFORE any error() so a failure
+                        -- inside orig_onGotoPage never leaves the flag stuck at true.
                         fc_self._simpleui_in_goto = nil
 
-                        -- Virtual series folders share the real parent's path, so
-                        -- _isLockedAtHome fires even though we are inside a group.
-                        -- The back button must still appear to allow exiting the group.
-                        local current_path      = fc_self.path or ""
-                        local is_at_home_root   = (current_path == "/" or _isLockedAtHome(current_path))
-                        local in_virtual_series = fc_self.item_table and fc_self.item_table._sg_is_series_view
-                        local is_sub            = not (is_at_home_root and not in_virtual_series)
-
+                        -- _resolveIsSub now handles both the series-view flag and the
+                        -- path-based test, so no inline special case is needed here.
+                        local is_sub = _resolveIsSub(fc_self)
                         fc_self._simpleui_has_go_up = is_sub
                         _applyBackButtonState(fc_self, is_sub, page)
                         if not ok then error(result) end
@@ -592,7 +743,8 @@ function M.apply(fm_self)
             end
         else
             lb.overlap_align  = nil
-            lb.overlap_offset = { sw + 100, 0 }
+            -- Improvement #6: use defensive 2× width offset.
+            lb.overlap_offset = { _hideOffset(sw), 0 }
             lb.callback       = function() end
             lb.hold_callback  = function() end
         end
@@ -625,17 +777,18 @@ function M.apply(fm_self)
                 table.insert(tb, search_btn)
                 fm_self._titlebar_search_btn = search_btn
                 fm_self._simpleui_search_x   = _buttonX(s.side, s.slot, iw, pad, gap, sw)
-                -- Pre-compute the compact x-position for when back button is hidden.
+
+                -- Improvement #3 — compute compact slot once, reuse for both
+                -- the cached value and the immediate-at-root initial adjustment.
                 if s.side == "left" then
-                    local up_slot2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                    local dslot    = s.slot > up_slot2 and s.slot - 1 or s.slot
-                    fm_self._simpleui_search_x_compact = _buttonX("left", dslot, iw, pad, gap, sw)
-                end
-                -- If already at root on first apply, shift to compact position now.
-                if show_up and _isAtRoot(fm_self.file_chooser) and s.side == "left" then
-                    local up_slot2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                    local dslot    = s.slot > up_slot2 and s.slot - 1 or s.slot
-                    search_btn.overlap_offset = { _buttonX("left", dslot, iw, pad, gap, sw), 0 }
+                    local up_slot2  = slot_map["up_button"] and slot_map["up_button"].slot or 0
+                    local dslot     = s.slot > up_slot2 and s.slot - 1 or s.slot
+                    local compact_x = _buttonX("left", dslot, iw, pad, gap, sw)
+                    fm_self._simpleui_search_x_compact = compact_x
+                    -- If already at root on first apply, shift to compact position now.
+                    if show_up and _isAtRoot(fm_self.file_chooser) then
+                        search_btn.overlap_offset = { compact_x, 0 }
+                    end
                 end
             end
         end
@@ -643,7 +796,8 @@ function M.apply(fm_self)
 
     -- Browse button ----------------------------------------------------------
     -- Injected like search_button. Icon reflects the current browse mode and
-    -- is refreshed on every genItemTable call.
+    -- is refreshed on every genItemTable call via the listener registry
+    -- (Improvement #2) instead of a second genItemTable wrapper.
 
     if show_browse then
         local ok_ib, IconButton = pcall(require, "ui/widget/iconbutton")
@@ -653,9 +807,10 @@ function M.apply(fm_self)
                 local btn_padding = tb.button_padding or require("device").screen:scaleBySize(11)
 
                 -- Resolve initial icon from the current browse mode.
+                -- Improvement #4: use cached _BrowseMeta().
                 local _initial_icon = _BROWSE_ICONS.normal
-                local ok_bm0, BM0   = pcall(require, "sui_browsemeta")
-                if ok_bm0 and BM0 then
+                local BM0 = _BrowseMeta()
+                if BM0 then
                     local fc0  = fm_self.file_chooser
                     local mode = fc0 and BM0.getCurrentMode(fc0) or "normal"
                     _initial_icon = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
@@ -669,8 +824,9 @@ function M.apply(fm_self)
                     padding     = btn_padding,
                     show_parent = tb.show_parent or fm_self,
                     callback = function()
-                        local ok_bm, BM = pcall(require, "sui_browsemeta")
-                        if not ok_bm or not BM then return end
+                        -- Improvement #4: use cached _BrowseMeta().
+                        local BM = _BrowseMeta()
+                        if not BM then return end
                         local ButtonDialog = require("ui/widget/buttondialog")
                         local fc_ref       = fm_self.file_chooser
                         local cur_mode     = fc_ref and BM.getCurrentMode(fc_ref) or "normal"
@@ -715,41 +871,37 @@ function M.apply(fm_self)
                 table.insert(tb, browse_btn)
                 fm_self._titlebar_browse_btn = browse_btn
 
-                -- Pre-compute compact position for when the back button is hidden.
+                -- Improvement #3 — compute compact slot once, reuse for both
+                -- the cached value and the immediate-at-root initial adjustment.
                 if s.side == "left" then
                     local up_slot_b = slot_map["up_button"] and slot_map["up_button"].slot or 0
                     local dslot_b   = s.slot > up_slot_b and s.slot - 1 or s.slot
-                    fm_self._simpleui_browse_x_compact = _buttonX("left", dslot_b, iw, pad, gap, sw)
-                end
-
-                -- If already at root on first apply, shift to compact position now.
-                if show_up and _isAtRoot(fm_self.file_chooser) and s.side == "left" then
-                    local up_slot_b2 = slot_map["up_button"] and slot_map["up_button"].slot or 0
-                    local dslot_b2   = s.slot > up_slot_b2 and s.slot - 1 or s.slot
-                    browse_btn.overlap_offset = { _buttonX("left", dslot_b2, iw, pad, gap, sw), 0 }
-                end
-
-                -- Wrap genItemTable to refresh the browse-mode icon after folder navigation.
-                local fc_b = fm_self.file_chooser
-                if fc_b then
-                    local prev_gen = fc_b.genItemTable
-                    if prev_gen then
-                        fc_b.genItemTable = function(fc_self, ...)
-                            local result = prev_gen(fc_self, ...)
-                            local ok_bm2, BM2 = pcall(require, "sui_browsemeta")
-                            if ok_bm2 and BM2 and browse_btn.image then
-                                local mode2 = BM2.getCurrentMode(fc_self)
-                                local icon2 = _BROWSE_ICONS[mode2] or _BROWSE_ICONS.normal
-                                if browse_btn.image.file ~= icon2 then
-                                    browse_btn.image.file = icon2
-                                    _reloadImage(browse_btn.image)
-                                    UIManager:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
-                                end
-                            end
-                            return result
-                        end
-                        fm_self._titlebar_browse_gen_hooked = true
+                    local compact_x_b = _buttonX("left", dslot_b, iw, pad, gap, sw)
+                    fm_self._simpleui_browse_x_compact = compact_x_b
+                    -- If already at root on first apply, shift to compact position now.
+                    if show_up and _isAtRoot(fm_self.file_chooser) then
+                        browse_btn.overlap_offset = { compact_x_b, 0 }
                     end
+                end
+
+                -- Improvement #2 — register browse-icon refresh as a listener on the
+                -- shared genItemTable wrapper instead of wrapping genItemTable again.
+                local fc_b = fm_self.file_chooser
+                if fc_b and fc_b._simpleui_gen_listeners then
+                    fc_b._simpleui_gen_listeners[#fc_b._simpleui_gen_listeners + 1] = function(fc_self)
+                        -- Improvement #4: use cached _BrowseMeta().
+                        local BM2 = _BrowseMeta()
+                        if BM2 and browse_btn.image then
+                            local mode2 = BM2.getCurrentMode(fc_self)
+                            local icon2 = _BROWSE_ICONS[mode2] or _BROWSE_ICONS.normal
+                            if browse_btn.image.file ~= icon2 then
+                                browse_btn.image.file = icon2
+                                _reloadImage(browse_btn.image)
+                                UIManager:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
+                            end
+                        end
+                    end
+                    fm_self._titlebar_browse_gen_hooked = true
                 end
             end
         end
@@ -800,10 +952,16 @@ function M.restore(fm_self)
     -- Restore file-chooser patches.
     local fc = fm_self.file_chooser
     if fc then
+        -- Improvement #2: clear the listener registry and restore original genItemTable.
+        fc._simpleui_gen_listeners = nil
         if fm_self._titlebar_orig_fc_genItemTable then
             fc.genItemTable = fm_self._titlebar_orig_fc_genItemTable
         end
-        if fm_self._titlebar_orig_fc_onFolderUp then
+        -- Improvement #8: restore the exact previous value of onFolderUp (may be nil),
+        -- rather than unconditionally setting it to nil.
+        if fm_self._titlebar_orig_fc_onFolderUp ~= nil then
+            fc.onFolderUp = fm_self._titlebar_orig_fc_onFolderUp
+        else
             fc.onFolderUp = nil
         end
         if fm_self._titlebar_orig_fc_onGotoPage then
@@ -823,6 +981,9 @@ function M.restore(fm_self)
 end
 
 function M.reapply(fm_self)
+    -- Improvement #4: reset BrowseMeta cache so a newly-enabled module is
+    -- picked up on the next apply() rather than using a stale false value.
+    _resetBMCache()
     M.restore(fm_self)
     M.apply(fm_self)
 end
@@ -865,7 +1026,8 @@ function M.applyToInjected(widget)
             placeBtn("inj_back", lb)
         else
             lb.overlap_align  = nil
-            lb.overlap_offset = { sw + 100, 0 }
+            -- Improvement #6: use defensive 2× width offset.
+            lb.overlap_offset = { _hideOffset(sw), 0 }
         end
     end
 
