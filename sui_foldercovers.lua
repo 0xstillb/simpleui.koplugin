@@ -1253,7 +1253,16 @@ local function _installSeriesGrouping()
 
     -- After refreshPath (e.g. closing a book) re-enter the virtual folder
     -- if one was active.
+    local _sg_refreshPath_active = false  -- re-entrancy guard
     FileChooser.refreshPath = function(fc)
+        -- Guard against infinite recursion: _sgOpenGroup → switchItemTable
+        -- can trigger another refreshPath call on some KOReader versions,
+        -- causing a stack overflow (sui_foldercovers.lua:1275).
+        if _sg_refreshPath_active then
+            return _sg_orig_refreshPath(fc)
+        end
+        _sg_refreshPath_active = true
+
         -- The item table is stale after closing a book (percent_finished,
         -- bold state, sort position may have changed). Drop the cache so
         -- the next genItemTableFromPath rebuilds cleanly.
@@ -1273,8 +1282,14 @@ local function _installSeriesGrouping()
         end
 
         _sg_orig_refreshPath(fc)
-        if not M.getSeriesGrouping() then return end
-        if not _sg_current then return end
+        if not M.getSeriesGrouping() then
+            _sg_refreshPath_active = false
+            return
+        end
+        if not _sg_current then
+            _sg_refreshPath_active = false
+            return
+        end
 
         local sname      = _sg_current.series_name
         local saved_page = _sg_current.parent_page
@@ -1282,10 +1297,12 @@ local function _installSeriesGrouping()
             if item.is_series_group and item.text == sname then
                 _sgOpenGroup(fc, item)
                 if _sg_current then _sg_current.parent_page = saved_page end
+                _sg_refreshPath_active = false
                 return
             end
         end
         _sg_current = nil
+        _sg_refreshPath_active = false
     end
 
     -- Restore focus to the series group item when returning from a virtual folder.
