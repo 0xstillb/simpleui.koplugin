@@ -57,6 +57,9 @@ local SimpleUIPlugin = WidgetContainer:new{
     _makeTopbarMenu           = nil,
     _makeQuickActionsMenu     = nil,
     _goalTapCallback          = nil,
+
+    _lib_watch_timer          = nil,
+    _lib_watch_mtime          = nil,
 }
 
 -- ---------------------------------------------------------------------------
@@ -423,6 +426,10 @@ function SimpleUIPlugin:init()
                 local ok, Updater = pcall(require, "sui_updater")
                 if ok and Updater then Updater.scheduleAutoCheck() end
             end)
+            -- Start library folder watcher after the first paint is stable.
+            UIManager:scheduleIn(4, function()
+                self:_libWatchStart()
+            end)
         end
     end)
     if not ok then logger.err("simpleui: init failed:", tostring(err)) end
@@ -511,6 +518,7 @@ function SimpleUIPlugin:onSimpleUIToggleHomeLibrary()
 end
 
 function SimpleUIPlugin:onTeardown()
+    self:_libWatchStop()
     if self._topbar_timer then
         UIManager:unschedule(self._topbar_timer)
         self._topbar_timer = nil
@@ -586,6 +594,84 @@ function SimpleUIPlugin:onTeardown()
     if fm_menu then fm_menu.__sui_tab_patched = nil end
     for _, mod in ipairs(_PLUGIN_MODULES) do
         package.loaded[mod] = nil
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Library auto-refresh: poll home_dir mtime to detect new/removed files.
+-- Runs only when the Library tab is active and the reader is not open.
+-- Setting: simpleui_lib_auto_refresh (default: true)
+--          simpleui_lib_auto_refresh_interval (seconds, default: 5)
+-- ---------------------------------------------------------------------------
+
+function SimpleUIPlugin:_libWatchStart()
+    if self._lib_watch_timer then return end
+    if not G_reader_settings:nilOrTrue("simpleui_lib_auto_refresh") then return end
+    local lfs = require("libs/libkoreader-lfs")
+    local interval = G_reader_settings:readSetting("simpleui_lib_auto_refresh_interval") or 5
+
+    local function _poll()
+        self._lib_watch_timer = nil
+        if self._simpleui_suspended then return end
+        local RUI = package.loaded["apps/reader/readerui"]
+        if RUI and RUI.instance then return end
+
+        local home = G_reader_settings:readSetting("home_dir")
+        if not home then return end
+
+        local mtime = lfs.attributes(home, "modification")
+        if mtime and self._lib_watch_mtime and mtime ~= self._lib_watch_mtime then
+            self._lib_watch_mtime = mtime
+            local FM = package.loaded["apps/filemanager/filemanager"]
+            local fm = FM and FM.instance
+            local fc = fm and fm.file_chooser
+            if fc and fc.path == home then
+                local HS = package.loaded["sui_homescreen"]
+                if not (HS and HS._instance) then
+                    logger.dbg("simpleui: library auto-refresh triggered (mtime changed)")
+                    fc:refreshPath()
+                end
+            end
+        elseif mtime and not self._lib_watch_mtime then
+            self._lib_watch_mtime = mtime
+        end
+
+        self._lib_watch_timer = UIManager:scheduleIn(interval, _poll)
+    end
+
+    local home = G_reader_settings:readSetting("home_dir")
+    if home then
+        self._lib_watch_mtime = lfs.attributes(home, "modification")
+    end
+    self._lib_watch_timer = UIManager:scheduleIn(interval, _poll)
+end
+
+function SimpleUIPlugin:_libWatchStop()
+    if self._lib_watch_timer then
+        UIManager:unschedule(self._lib_watch_timer)
+        self._lib_watch_timer = nil
+    end
+    self._lib_watch_mtime = nil
+end
+
+function SimpleUIPlugin:_libWatchCheckNow()
+    if not G_reader_settings:nilOrTrue("simpleui_lib_auto_refresh") then return end
+    local lfs = require("libs/libkoreader-lfs")
+    local home = G_reader_settings:readSetting("home_dir")
+    if not home then return end
+
+    local mtime = lfs.attributes(home, "modification")
+    if mtime and self._lib_watch_mtime and mtime ~= self._lib_watch_mtime then
+        self._lib_watch_mtime = mtime
+        local FM = package.loaded["apps/filemanager/filemanager"]
+        local fm = FM and FM.instance
+        local fc = fm and fm.file_chooser
+        if fc and fc.path == home then
+            logger.dbg("simpleui: library auto-refresh on resume (mtime changed)")
+            fc:refreshPath()
+        end
+    elseif mtime then
+        self._lib_watch_mtime = mtime
     end
 end
 
@@ -669,10 +755,16 @@ function SimpleUIPlugin:onSuspend()
         UIManager:unschedule(self._topbar_timer)
         self._topbar_timer = nil
     end
+    self:_libWatchStop()
 end
 
 function SimpleUIPlugin:onResume()
     self._simpleui_suspended = false
+    -- Check library folder immediately on wake, then restart the watcher.
+    UIManager:scheduleIn(1, function()
+        self:_libWatchCheckNow()
+        self:_libWatchStart()
+    end)
     if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
         -- Small delay to let the wakeup transition finish before refreshing
         -- the topbar. Avoids a race with HomescreenWidget:onResume() and
