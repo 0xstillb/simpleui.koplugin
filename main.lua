@@ -676,6 +676,59 @@ function SimpleUIPlugin:_libWatchCheckNow()
 end
 
 -- ---------------------------------------------------------------------------
+-- GrimmLink integration: react to shelf sync completion.
+-- When GrimmLink downloads or deletes books, refresh the Library view and
+-- homescreen modules so the user sees the changes immediately.
+-- ---------------------------------------------------------------------------
+
+function SimpleUIPlugin:onGrimmLinkShelfSyncComplete(data)
+    if self._simpleui_suspended then return end
+    if type(data) ~= "table" then return end
+    local changed = (data.synced or 0) + (data.deleted or 0)
+    if changed == 0 then return end
+
+    logger.dbg("simpleui: GrimmLink shelf sync —", data.synced, "new,", data.deleted, "deleted")
+
+    -- Refresh library file list if currently viewing the download dir or home dir.
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local fm = FM and FM.instance
+    local fc = fm and fm.file_chooser
+    if fc then
+        local home = G_reader_settings:readSetting("home_dir")
+        local dl = data.download_dir
+        local viewing = fc.path
+        if viewing and (viewing == home or viewing == dl) then
+            local HS = package.loaded["sui_homescreen"]
+            if not (HS and HS._instance) then
+                fc:refreshPath()
+            end
+        end
+    end
+
+    -- Invalidate homescreen caches so New Books / Recent / Currently modules
+    -- pick up the newly downloaded files on next render.
+    local HS = package.loaded["sui_homescreen"]
+    if HS then
+        HS._cached_books_state = nil
+        if HS._instance then
+            HS._instance._cached_books_state = nil
+            HS.refresh(false, true)
+        else
+            HS._stats_need_refresh = true
+        end
+    end
+
+    -- Reset mtime baseline so the mtime watcher doesn't double-fire.
+    if self._lib_watch_mtime then
+        local lfs = require("libs/libkoreader-lfs")
+        local home = G_reader_settings:readSetting("home_dir")
+        if home then
+            self._lib_watch_mtime = lfs.attributes(home, "modification")
+        end
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- System events
 -- ---------------------------------------------------------------------------
 
