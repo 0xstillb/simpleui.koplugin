@@ -1174,17 +1174,44 @@ function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
     local cfg = G_reader_settings:readSetting("navbar_cqa_" .. action_id) or {}
 
     if cfg.dispatcher_action and cfg.dispatcher_action ~= "" then
-        local ok_disp, Dispatcher = pcall(require, "dispatcher")
-        if ok_disp and Dispatcher then
-            local ok, err = pcall(function()
-                Dispatcher:execute({ [cfg.dispatcher_action] = true })
-            end)
-            if not ok then
-                logger.warn("simpleui: dispatcher_action failed:", cfg.dispatcher_action, tostring(err))
-                _unavail(string.format(_("System action error: %s"), tostring(err)))
+        local dispatched = false
+
+        -- Try broadcasting through the live FileManager first — this ensures
+        -- the event reaches FM-registered plugins (e.g. GrimmLink) whose
+        -- handlers are on the FM's widget tree, not the Dispatcher singleton.
+        local _ok_ev, _Event = pcall(require, "ui/event")
+        if _ok_ev and _Event then
+            local live_fm = fm
+            if not live_fm or not live_fm._registered_widgets then
+                local _FM = package.loaded["apps/filemanager/filemanager"]
+                live_fm = _FM and _FM.instance
             end
-        else
-            _unavail(_("Dispatcher not available."))
+            if live_fm and type(live_fm.handleEvent) == "function" then
+                local ok, err = pcall(live_fm.handleEvent, live_fm,
+                    _Event:new(cfg.dispatcher_action))
+                if ok then
+                    dispatched = true
+                else
+                    logger.warn("simpleui: FM handleEvent failed:", cfg.dispatcher_action, tostring(err))
+                end
+            end
+        end
+
+        -- Fallback: use Dispatcher:execute() for actions that don't need
+        -- a specific UI context (e.g. built-in KOReader system actions).
+        if not dispatched then
+            local ok_disp, Dispatcher = pcall(require, "dispatcher")
+            if ok_disp and Dispatcher then
+                local ok, err = pcall(function()
+                    Dispatcher:execute({ [cfg.dispatcher_action] = true })
+                end)
+                if not ok then
+                    logger.warn("simpleui: dispatcher_action failed:", cfg.dispatcher_action, tostring(err))
+                    _unavail(string.format(_("System action error: %s"), tostring(err)))
+                end
+            else
+                _unavail(_("Dispatcher not available."))
+            end
         end
 
     elseif cfg.plugin_key and cfg.plugin_method and cfg.plugin_key ~= "" then
