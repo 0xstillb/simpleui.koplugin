@@ -7,17 +7,32 @@ local InfoMessage     = require("ui/widget/infomessage")
 local logger          = require("logger")
 local Dispatcher      = require("dispatcher")
 
+-- Startup profiling: log wall-clock time for each phase so slow devices
+-- (iReader Ocean 5 Pro, etc.) can identify the actual bottleneck.
+local _t0 = os.clock()
+local _prof_enabled = G_reader_settings:isTrue("simpleui_profile_startup")
+local function _prof(label)
+    if not _prof_enabled then return end
+    logger.info(string.format("simpleui:perf: %s — %.0f ms", label, (os.clock() - _t0) * 1000))
+end
+
 -- Each simpleui module captures its own local translation proxy from sui_i18n.
 -- The native package.loaded["gettext"] is never wrapped or replaced, which
 -- prevents state-mutation conflicts with other plugins (e.g. zlibrary).
 local I18n = require("sui_i18n")
 local _    = I18n.translate
+_prof("require sui_i18n")
 
 local Config    = require("sui_config")
+_prof("require sui_config")
 local UI        = require("sui_core")
+_prof("require sui_core")
 local Bottombar = require("sui_bottombar")
+_prof("require sui_bottombar")
 local Topbar    = require("sui_topbar")
+_prof("require sui_topbar")
 local Patches   = require("sui_patches")
+_prof("require sui_patches")
 
 local SimpleUIPlugin = WidgetContainer:new{
     name = "simpleui",
@@ -49,6 +64,7 @@ local SimpleUIPlugin = WidgetContainer:new{
 -- ---------------------------------------------------------------------------
 
 function SimpleUIPlugin:init()
+    _prof("init() enter")
     local ok, err = pcall(function()
         -- Detect hot update: compare the version now on disk with what was
         -- running last session. If they differ, warn the user to restart so
@@ -128,6 +144,7 @@ function SimpleUIPlugin:init()
         --      Unlike sui_menu.lua's three-strategy approach, both caches are
         --      populated in a single upvalue scan (matching Zen UI's method).
         -- -------------------------------------------------------------------
+        _prof("icon registration start")
         do
             -- Step 1: resolve plugin_root to an absolute path.
             local src = debug.getinfo(1, "S").source or ""
@@ -196,6 +213,7 @@ function SimpleUIPlugin:init()
             end
         end
         -- -------------------------------------------------------------------
+        _prof("icon registration done")
 
         -- -------------------------------------------------------------------
         -- Tab injection: add a dedicated "Simple UI" tab to the KOReader menu
@@ -277,8 +295,11 @@ function SimpleUIPlugin:init()
             if ok_fm and FileManagerMenu then inject_sui_tab(FileManagerMenu) end
         end
         -- -------------------------------------------------------------------
+        _prof("tab injection done")
         if G_reader_settings:nilOrTrue("simpleui_enabled") then
+            _prof("Patches.installAll start")
             Patches.installAll(self)
+            _prof("Patches.installAll done")
             -- Register the TBR button in the Library hold dialog (single book).
             -- addFileDialogButtons is the official KOReader API for this.
             -- The multi-selection button is injected via patchGetPlusDialogButtons
@@ -405,6 +426,7 @@ function SimpleUIPlugin:init()
         end
     end)
     if not ok then logger.err("simpleui: init failed:", tostring(err)) end
+    _prof("init() done — total")
 end
 
 -- ---------------------------------------------------------------------------

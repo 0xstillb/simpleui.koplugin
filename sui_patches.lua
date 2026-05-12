@@ -2358,33 +2358,35 @@ function M.closeReaderToLibrary(plugin)
 end
 
 function M.installAll(plugin)
-    M.patchFileManagerClass(plugin)
-    M.patchStartWithMenu()
-    M.patchBookList(plugin)
-    M.patchCollections(plugin)
-    M.patchFullscreenWidgets(plugin)
-    M.patchUIManagerShow(plugin)
-    M.patchUIManagerClose(plugin)
-    M.patchMenuInitForPagination(plugin)
-    M.patchMenuForNavpager(plugin)
-    M.patchBookInfoNavigation(plugin)
-    -- Install button-bounds overlay when the debug setting is on at startup.
+    local _prof_enabled = G_reader_settings:isTrue("simpleui_profile_startup")
+    local _t0 = _prof_enabled and os.clock() or 0
+    local function _pp(label)
+        if _prof_enabled then
+            logger.info(string.format("simpleui:perf:patch: %s — %.0f ms", label, (os.clock() - _t0) * 1000))
+        end
+    end
+
+    M.patchFileManagerClass(plugin);     _pp("patchFileManagerClass")
+    M.patchStartWithMenu();              _pp("patchStartWithMenu")
+    M.patchBookList(plugin);             _pp("patchBookList")
+    M.patchCollections(plugin);          _pp("patchCollections")
+    M.patchFullscreenWidgets(plugin);    _pp("patchFullscreenWidgets")
+    M.patchUIManagerShow(plugin);        _pp("patchUIManagerShow")
+    M.patchUIManagerClose(plugin);       _pp("patchUIManagerClose")
+    M.patchMenuInitForPagination(plugin); _pp("patchMenuInitForPagination")
+    M.patchMenuForNavpager(plugin);      _pp("patchMenuForNavpager")
+    M.patchBookInfoNavigation(plugin);   _pp("patchBookInfoNavigation")
     if G_reader_settings:isTrue("simpleui_debug_button_bounds") then
         M.installButtonBoundsDebug(plugin)
     end
-    -- Folder covers are installed only when the feature is enabled to avoid
-    -- wrapping MosaicMenuItem.update unconditionally, which would hide the
-    -- BookInfoManager upvalue from third-party user-patches.
-    -- FC.install() is also called from sui_menu.lua when the toggle is turned on.
     local ok_fc, FC = pcall(require, "sui_foldercovers")
     if ok_fc and FC and FC.isEnabled() then
         pcall(FC.install)
     end
-    -- Virtual author/series browser — installed only when the feature is enabled
-    -- in settings (default: on). When disabled, FileChooser is left unpatched so
-    -- third-party user-patches (e.g. 2-author-series.lua) can run unobstructed.
+    _pp("foldercovers")
     local ok_bm, BM = pcall(require, "sui_browsemeta")
     if ok_bm and BM and BM.isEnabled() then pcall(BM.install) end
+    _pp("browsemeta — installAll total")
 end
 
 function M.teardownAll(plugin)

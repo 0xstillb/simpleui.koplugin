@@ -34,40 +34,54 @@ local _plugin_dir = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
 local _P  = _plugin_dir .. "icons/"
 -- Resolve KOReader root for Android compatibility (relative paths fail on Android).
 -- DataStorage.getDataDir() returns the absolute KOReader data/install root.
+--
+-- Perf: the lfs.attributes walk (up to 8 calls) is expensive on slow eMMC
+-- storage (iReader, budget Android devices). Cache the resolved root in
+-- G_reader_settings so subsequent loads skip the filesystem probing entirely.
+-- The cache is invalidated when _plugin_dir changes (= plugin was moved).
 local _ko_root = ""
-local _ok_ds, _ds = pcall(require, "datastorage")
-if _ok_ds and _ds and type(_ds.getDataDir) == "function" then
-    -- getDataDir() returns e.g. /sdcard/koreader — strip trailing slash safety.
-    local _d = _ds.getDataDir():gsub("/$", "")
-    -- Walk up from data dir to find the KOReader install root (contains "resources").
-    -- On most platforms data dir IS the install root; on Android it may differ.
-    local lfs_ok, lfs_m = pcall(require, "libs/libkoreader-lfs")
-    if lfs_ok and lfs_m then
-        local function _is_root(dir)
-            return lfs_m.attributes(dir .. "/resources/icons/mdlight", "mode") == "directory"
-        end
-        if _is_root(_d) then
-            _ko_root = _d .. "/"
-        else
-            local parent = _d:match("^(.+)/[^/]+$")
-            if parent and _is_root(parent) then
-                _ko_root = parent .. "/"
+do
+    local cached = G_reader_settings:readSetting("simpleui_ko_root_cache")
+    local cached_pdir = G_reader_settings:readSetting("simpleui_ko_root_pdir")
+    if type(cached) == "string" and cached ~= "" and cached_pdir == _plugin_dir then
+        _ko_root = cached
+    else
+        local _ok_ds, _ds = pcall(require, "datastorage")
+        if _ok_ds and _ds and type(_ds.getDataDir) == "function" then
+            local _d = _ds.getDataDir():gsub("/$", "")
+            local lfs_ok, lfs_m = pcall(require, "libs/libkoreader-lfs")
+            if lfs_ok and lfs_m then
+                local function _is_root(dir)
+                    return lfs_m.attributes(dir .. "/resources/icons/mdlight", "mode") == "directory"
+                end
+                if _is_root(_d) then
+                    _ko_root = _d .. "/"
+                else
+                    local parent = _d:match("^(.+)/[^/]+$")
+                    if parent and _is_root(parent) then
+                        _ko_root = parent .. "/"
+                    end
+                end
             end
         end
-    end
-end
-if _ko_root == "" then
-    local lfs_ok, lfs_m = pcall(require, "libs/libkoreader-lfs")
-    if lfs_ok and lfs_m then
-        local p = (_plugin_dir:gsub("/$", ""))
-        for _i = 1, 8 do
-            if lfs_m.attributes(p .. "/resources/icons/mdlight", "mode") == "directory" then
-                _ko_root = p .. "/"
-                break
+        if _ko_root == "" then
+            local lfs_ok, lfs_m = pcall(require, "libs/libkoreader-lfs")
+            if lfs_ok and lfs_m then
+                local p = (_plugin_dir:gsub("/$", ""))
+                for _i = 1, 8 do
+                    if lfs_m.attributes(p .. "/resources/icons/mdlight", "mode") == "directory" then
+                        _ko_root = p .. "/"
+                        break
+                    end
+                    local parent = p:match("^(.+)/[^/]+$")
+                    if not parent or parent == p then break end
+                    p = parent
+                end
             end
-            local parent = p:match("^(.+)/[^/]+$")
-            if not parent or parent == p then break end
-            p = parent
+        end
+        if _ko_root ~= "" then
+            G_reader_settings:saveSetting("simpleui_ko_root_cache", _ko_root)
+            G_reader_settings:saveSetting("simpleui_ko_root_pdir", _plugin_dir)
         end
     end
 end
