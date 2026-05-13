@@ -87,8 +87,13 @@ All features are accessible via **Menu → Tools → SimpleUI**
 1. Download this repository as a ZIP — click **Code → Download ZIP**
 2. Extract the folder and confirm it is named `simpleui.koplugin`
 3. Copy the folder to the `plugins/` directory on your KOReader device
-4. Restart KOReader
-5. Go to **Menu → Tools → SimpleUI** to enable and configure the plugin
+   
+* Kobo: `/.adds/koreader/plugins`
+* Kindle: `/koreader/plugins`
+* Android: `koreader/plugins` at the root of onboard storage.
+   
+5. Restart KOReader
+6. Go to **Menu → Tools → SimpleUI** to enable and configure the plugin
 
 > **Tip:** After enabling the plugin, tap the **Home Screen** tab in the bottom bar to open your new home screen.
 
