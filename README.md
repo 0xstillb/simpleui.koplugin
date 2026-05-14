@@ -166,7 +166,7 @@ Changes take effect the next time the Home Screen is opened.
 
 ## 0xstillb Fork Changes
 
-This fork keeps the upstream base and adds stability, UI tweaks, and release automation focused on the current working package at `build_codex/simpleui.koplugin`.
+This fork keeps the upstream base and adds stability, UI tweaks, and release automation for the packaged `simpleui.koplugin` plugin.
 
 - Folder view refresh hardening after cover-related actions.
 - Collection/Folder Book UI cover adjustments.
