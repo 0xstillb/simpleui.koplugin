@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release source
+        run: |
+          test -d "build_codex/simpleui.koplugin"
+
+      - name: Build release zip
+        run: |
+          mkdir -p dist/stage
+          cp -a build_codex/simpleui.koplugin dist/stage/simpleui.koplugin
+          cd dist/stage
+          zip -r ../simpleui.koplugin.zip simpleui.koplugin
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/simpleui.koplugin.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
