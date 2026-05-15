@@ -273,7 +273,7 @@ msgstr "Dolny margines"
 
 #: sui_menu.lua:951
 msgid "Bottom Margin — %d%%"
-msgstr "Dolny margines — %d%%"
+msgstr ""
 
 #: sui_config.lua:142
 #: sui_config.lua:170
@@ -393,7 +393,7 @@ msgstr "Kolekcje"
 #: desktop_modules/module_collections.lua:570
 #: desktop_modules/module_collections.lua:576
 msgid "Collection is empty."
-msgstr "Kolekcja jest pusta."
+msgstr ""
 
 #: sui_quickactions.lua:1226
 msgid "Collection not available: %s"
@@ -472,7 +472,7 @@ msgstr "Niestandardowy"
 
 #: desktop_modules/module_quote.lua:1268
 msgid "Custom File"
-msgstr "Plik niestandardowy"
+msgstr ""
 
 #: sui_config.lua:174
 #: sui_menu.lua:643
@@ -530,7 +530,7 @@ msgstr "Domyślne"
 #: sui_quickactions.lua:782
 #: sui_quickactions.lua:801
 msgid "Default (Folder)"
-msgstr "Domyślne (Folder)"
+msgstr ""
 
 #: sui_quickactions.lua:828
 msgid "Default (Plugin)"
@@ -559,7 +559,7 @@ msgstr "Wyszukiwanie w słowniku"
 
 #: sui_menu.lua:1319
 msgid "Digital Goal  (%s)"
-msgstr "Cel cyfrowy (%s)"
+msgstr ""
 
 #: sui_menu.lua:1846
 msgid "Disable \"Lock Scale\" first to set a custom label scale."
@@ -591,7 +591,7 @@ msgstr "Błąd pobierania: "
 
 #: sui_updater.lua:393
 msgid "Downloading Simple UI %s…"
-msgstr "Pobieranie Simple UI %s…"
+msgstr ""
 
 #: sui_quickactions.lua:1118
 msgid "Edit"
@@ -684,7 +684,7 @@ msgstr "Auto (pojedyncza ↔ siatka 4 okładek)"
 
 #: sui_menu.lua:2303
 msgid "Folder Name"
-msgstr "Nazwa Folderu"
+msgstr ""
 
 #: sui_menu.lua:2355
 msgid "Folder Name Text Size"
@@ -787,11 +787,11 @@ msgstr "Ekran główny"
 
 #: sui_bottombar.lua:1090
 msgid "Home folder"
-msgstr "Folder domowy"
+msgstr ""
 
 #: sui_bottombar.lua:1092
 msgid "Home folder + subfolders"
-msgstr "Folder domowy + podfoldery"
+msgstr ""
 
 #: sui_homescreen.lua:900
 msgid "Homescreen"
@@ -870,7 +870,7 @@ msgstr "KOReader"
 
 #: sui_menu.lua:1854
 msgid "Label Scale"
-msgstr "Skala etykiety"
+msgstr ""
 
 #: sui_menu.lua:992
 #: sui_menu.lua:995
@@ -1171,7 +1171,7 @@ msgstr "Strona %1 z %2"
 
 #: sui_menu.lua:2098
 msgid "Pagination Bar"
-msgstr "Pasek paginacji"
+msgstr ""
 
 #: sui_menu.lua:468
 msgid "Pagination bar hidden.\n\nRestart now?"
@@ -1531,7 +1531,7 @@ msgstr "Cykl"
 
 #: sui_menu.lua:2297
 msgid "Series Index"
-msgstr "Indeks cyklu"
+msgstr ""
 
 #: sui_foldercovers.lua:620
 #: sui_foldercovers.lua:1185
@@ -1611,7 +1611,7 @@ msgstr "Simple UI %s jest dostępne!\n"
 
 #: sui_updater.lua:468
 msgid "Simple UI is up to date (%s)."
-msgstr "Simple UI jest aktualne (%s)."
+msgstr ""
 
 #: sui_menu.lua:2054
 msgid "Simple UI will be %s after restart.\n\nRestart now?"
@@ -1743,11 +1743,11 @@ msgstr "Tekst"
 #: desktop_modules/module_collections.lua:514
 #: desktop_modules/module_collections.lua:515
 msgid "Text Size"
-msgstr "Rozmiar tekstu"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:484
 msgid "Text Size — %d%%"
-msgstr "Rozmiar tekstu — %d%%"
+msgstr ""
 
 #: sui_menu.lua:194
 msgid "Text only"
@@ -1757,7 +1757,7 @@ msgstr "Tylko tekst"
 #: desktop_modules/module_coverdeck.lua:720
 #: desktop_modules/module_coverdeck.lua:721
 msgid "Text size"
-msgstr "Rozmiar tekstu"
+msgstr ""
 
 #: sui_patches.lua:879
 msgid "The «To Be Read» collection cannot be renamed."
@@ -1849,7 +1849,7 @@ msgstr ""
 
 #: sui_homescreen.lua:1480
 msgid "Top Margin  (%d%%)"
-msgstr "Górny margines (%d%%)"
+msgstr ""
 
 #: sui_menu.lua:1010
 msgid "Top separator"
@@ -1985,11 +1985,11 @@ msgstr "wyłączony"
 
 #: sui_quickactions.lua:781
 msgid "e.g. Comics…"
-msgstr "np. Komiksy…"
+msgstr ""
 
 #: sui_quickactions.lua:827
 msgid "e.g. Rakuyomi…"
-msgstr "np. Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:800
 msgid "e.g. Sci-Fi…"
@@ -2008,7 +2008,7 @@ msgstr "włączony"
 
 #: sui_quickactions.lua:421
 msgid "hex code, e.g. E001"
-msgstr "kod hex, np. E001"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:81
 msgid "no streak"

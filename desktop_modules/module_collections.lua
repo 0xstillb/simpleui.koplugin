@@ -16,6 +16,7 @@ local InputContainer  = require("ui/widget/container/inputcontainer")
 local HorizontalSpan  = require("ui/widget/horizontalspan")
 local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
+local Size            = require("ui/size")
 local TextWidget      = require("ui/widget/textwidget")
 local TextBoxWidget   = require("ui/widget/textboxwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
@@ -27,6 +28,7 @@ local _ = require("sui_i18n").translate
 local Config          = require("sui_config")
 
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 local PAD     = UI.PAD
 local PAD2    = UI.PAD2
@@ -111,28 +113,46 @@ end
 -- ---------------------------------------------------------------------------
 -- Settings keys
 -- ---------------------------------------------------------------------------
-local SETTINGS_KEY       = "navbar_collections_list"
-local COVER_OVERRIDE_KEY = "navbar_collections_covers"
-local BADGE_POSITION_KEY = "navbar_collections_badge_position"
+local SETTINGS_KEY       = "simpleui_collections_list"
+local COVER_OVERRIDE_KEY = "simpleui_collections_covers"
+local BADGE_POSITION_KEY = "simpleui_collections_badge_position"
+local BADGE_COLOR_KEY    = "simpleui_collections_badge_color"
+local BADGE_HIDDEN_KEY   = "simpleui_collections_badge_hidden"
 
 local function getBadgePosition()
-    return G_reader_settings:readSetting(BADGE_POSITION_KEY) or "top"
+    return SUISettings:readSetting(BADGE_POSITION_KEY) or "top"
 end
 local function saveBadgePosition(v)
-    G_reader_settings:saveSetting(BADGE_POSITION_KEY, v)
+    SUISettings:saveSetting(BADGE_POSITION_KEY, v)
+end
+
+-- "dark"  = black background, white text, gray border.
+-- "light" = white background, black text, gray border.
+local function getBadgeColor()
+    return SUISettings:readSetting(BADGE_COLOR_KEY) or "dark"
+end
+local function saveBadgeColor(v)
+    SUISettings:saveSetting(BADGE_COLOR_KEY, v)
+end
+
+local function getBadgeHidden()
+    return SUISettings:readSetting(BADGE_HIDDEN_KEY) or false
+end
+local function saveBadgeHidden(v)
+    SUISettings:saveSetting(BADGE_HIDDEN_KEY, v)
 end
 
 local function getSelectedCollections()
-    return G_reader_settings:readSetting(SETTINGS_KEY) or {}
+    return SUISettings:readSetting(SETTINGS_KEY) or {}
 end
 local function saveSelectedCollections(list)
-    G_reader_settings:saveSetting(SETTINGS_KEY, list)
+    SUISettings:saveSetting(SETTINGS_KEY, list)
 end
 local function getCoverOverrides()
-    return G_reader_settings:readSetting(COVER_OVERRIDE_KEY) or {}
+    return SUISettings:readSetting(COVER_OVERRIDE_KEY) or {}
 end
 local function saveCoverOverrides(t)
-    G_reader_settings:saveSetting(COVER_OVERRIDE_KEY, t)
+    SUISettings:saveSetting(COVER_OVERRIDE_KEY, t)
 end
 
 -- ---------------------------------------------------------------------------
@@ -174,7 +194,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Cover cell
 -- ---------------------------------------------------------------------------
-local function buildCoverCell(files, cover_override, coll_name, count, d)
+local function buildCoverCell(files, cover_override, coll_name, count, d, accent_color)
     local front_fp = cover_override
     if front_fp and lfs.attributes(front_fp, "mode") ~= "file" then front_fp = nil end
     if not front_fp and #files > 0 then front_fp = files[1] end
@@ -235,25 +255,43 @@ local function buildCoverCell(files, cover_override, coll_name, count, d)
 
     local accent = FrameContainer:new{
         bordersize = 0, padding = 0,
-        background = Blitbuffer.COLOR_BLACK,
+        background = accent_color or Blitbuffer.COLOR_BLACK,
         dimen      = Geom:new{ w = d.coll_w, h = d.accent_h },
         VerticalSpan:new{ width = 0 },
     }
 
     local base = VerticalGroup:new{ align = "left", stack, accent }
 
+    if getBadgeHidden() then
+        return OverlapGroup:new{
+            dimen = Geom:new{ w = d.stack_cell_w, h = d.cell_h },
+            base,
+        }, stack, front_fp
+    end
+
+    local dark      = getBadgeColor() == "dark"
+    local bg_color  = dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local fg_color  = dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+
+    local badge_tw = UI.makeColoredText{
+        text    = tostring(math.min(count, 99)),
+        face    = Font:getFace("cfont", d.badge_fs),
+        fgcolor = fg_color,
+        bold    = true,
+    }
+    local _orig_pt = badge_tw.paintTo
+    badge_tw.paintTo = function(self, bb, x, y)
+        _orig_pt(self, bb, x, y + 1) -- HACK: Muda este +1 para +2 ou +3 conforme a tua fonte precisar
+    end
+
     local badge_inner = CenterContainer:new{
         dimen = Geom:new{ w = d.badge_sz, h = d.badge_sz },
-        TextWidget:new{
-            text    = tostring(math.min(count, 99)),
-            face    = Font:getFace("cfont", d.badge_fs),
-            fgcolor = Blitbuffer.COLOR_WHITE,
-            bold    = true,
-        },
+        badge_tw,
     }
     local badge = FrameContainer:new{
-        bordersize = 0,
-        background = Blitbuffer.COLOR_BLACK,
+        bordersize = Size.border.thin,
+        color      = Blitbuffer.COLOR_GRAY,
+        background = bg_color,
         radius     = math.floor(d.badge_sz / 2),
         padding    = 0,
         dimen      = Geom:new{ w = d.badge_sz, h = d.badge_sz },
@@ -299,9 +337,10 @@ M.name        = _("Collections")
 M.label       = _("Collections")
 M.enabled_key = "collections"
 M.default_on  = false
+M.has_covers  = true   -- activates e-ink dithering and cover poll
 
 function M.setEnabled(pfx, on)
-    G_reader_settings:saveSetting(pfx .. "collections", on)
+    SUISettings:saveSetting(pfx .. "collections", on)
 end
 
 local MAX_COLL = 5
@@ -329,6 +368,12 @@ function M.build(w, ctx)
         d.coll_cell_h = d.coll_h + d.accent_h + d.label_gap + 2 * d.tbw_line_h
     end
     local selected_raw = getSelectedCollections()
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _theme_accent    = ok_ss and SUIStyle and SUIStyle.getThemeColor("accent")
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+    local CLR_ACCENT_EFF   = _theme_accent or Blitbuffer.COLOR_BLACK
     -- -----------------------------------------------------------------------
     -- Sync with native KoReader collections (Problem 2).
     -- Filter out any collection that no longer exists in rc.coll (renamed or
@@ -374,10 +419,10 @@ function M.build(w, ctx)
     if #selected == 0 then
         return CenterContainer:new{
             dimen = Geom:new{ w = w, h = d.empty_h },
-            TextWidget:new{
+            UI.makeColoredText{
                 text    = _("No collections selected"),
                 face    = Font:getFace("cfont", d.empty_fs),
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = CLR_TEXT_SUB_EFF,
                 width   = w - PAD * 2,
             },
         }
@@ -404,7 +449,7 @@ function M.build(w, ctx)
         local coll_name = selected[i]
         local files     = rc and getCollectionFilesFromRC(rc, coll_name) or {}
         local count     = #files
-        local thumb, stack, front_fp = buildCoverCell(files, overrides[coll_name], coll_name, count, d)
+        local thumb, stack, front_fp = buildCoverCell(files, overrides[coll_name], coll_name, count, d, CLR_ACCENT_EFF)
 
         -- Record cover slot: cover is at stack[5] (after two edgeLine groups and two spans).
         -- Only record if there is a real fp to reload from.
@@ -431,15 +476,24 @@ function M.build(w, ctx)
         -- d.tbw_line_h mirrors TextBoxWidget's internal line_height_px formula
         -- (math.floor(1.3 * font_size + 0.5)), calculated once in getDims so that
         -- coll_cell_h and the widget height are always in sync.
-        local label_w = TextBoxWidget:new{
+   
+        local label_args = {
             text      = display_name,
-            face      = Font:getFace("cfont", d.coll_lbl_fs),
-            fgcolor   = CLR_TEXT_SUB,
+            face      = Font:getFace("smallinfofont", d.coll_lbl_fs),
+            bold      = true,
+            fgcolor   = CLR_TEXT_SUB_EFF,
             width     = d.coll_w,
-            height    = d.tbw_line_h * 2,
+            max_lines = 2,
             alignment = "center",
-            height_overflow_show_ellipsis = true,
         }
+
+        local label_w
+        if ctx.has_wallpaper then
+            label_w = UI.makeAlphaTextBox(label_args)
+        else
+            label_w = TextBoxWidget:new(label_args)
+        end
+
         local label_aligned = HorizontalGroup:new{
             HorizontalSpan:new{ width = d.stack_extra },
             label_w,
@@ -534,6 +588,10 @@ function M.saveCoverOverride(coll_name, filepath)
 end
 function M.getBadgePosition()      return getBadgePosition() end
 function M.saveBadgePosition(v)    saveBadgePosition(v) end
+function M.getBadgeColor()         return getBadgeColor() end
+function M.saveBadgeColor(v)       saveBadgeColor(v) end
+function M.getBadgeHidden()        return getBadgeHidden() end
+function M.saveBadgeHidden(v)      saveBadgeHidden(v) end
 
 
 
@@ -702,16 +760,50 @@ function M.getMenuItems(ctx_menu)
         refresh   = ctx_menu.refresh,
     })
     items[#items + 1] = {
-        text_func = function()
-            return getBadgePosition() == "bottom"
-                and _lc("Badge position: Bottom")
-                or  _lc("Badge position: Top")
-        end,
-        keep_menu_open = true,
-        callback = function()
-            saveBadgePosition(getBadgePosition() == "bottom" and "top" or "bottom")
-            refresh()
-        end,
+        text         = _lc("Badge"),
+        sub_item_table = {
+            {
+                text           = _lc("Hidden"),
+                checked_func   = function() return getBadgeHidden() end,
+                keep_menu_open = true,
+                separator      = true,
+                callback       = function()
+                    saveBadgeHidden(not getBadgeHidden())
+                    refresh()
+                end,
+            },
+            {
+                text           = _lc("Top"),
+                radio          = true,
+                checked_func   = function() return not getBadgeHidden() and getBadgePosition() == "top" end,
+                enabled_func   = function() return not getBadgeHidden() end,
+                keep_menu_open = true,
+                callback       = function() saveBadgePosition("top"); refresh() end,
+            },
+            {
+                text           = _lc("Bottom"),
+                radio          = true,
+                checked_func   = function() return not getBadgeHidden() and getBadgePosition() == "bottom" end,
+                enabled_func   = function() return not getBadgeHidden() end,
+                keep_menu_open = true,
+                separator      = true,
+                callback       = function() saveBadgePosition("bottom"); refresh() end,
+            },
+            {
+                text           = _lc("Dark"),
+                radio          = true,
+                checked_func   = function() return getBadgeColor() == "dark" end,
+                keep_menu_open = true,
+                callback       = function() saveBadgeColor("dark"); refresh() end,
+            },
+            {
+                text           = _lc("Light"),
+                radio          = true,
+                checked_func   = function() return getBadgeColor() == "light" end,
+                keep_menu_open = true,
+                callback       = function() saveBadgeColor("light"); refresh() end,
+            },
+        },
     }
 
     if #all_colls == 0 then

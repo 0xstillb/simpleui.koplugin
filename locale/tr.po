@@ -25,7 +25,7 @@ msgstr "  Hedef Belirle  (%d dk/gün)"
 
 #: desktop_modules/module_reading_goals.lua:620
 msgid "  Set Goal  (%s)"
-msgstr "  Hedef Belirle  (%s)"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:640
 msgid "  Set Goal  (disabled)"
@@ -199,11 +199,11 @@ msgstr "Geri"
 
 #: desktop_modules/module_collections.lua:662
 msgid "Badge position: Bottom"
-msgstr "Rozet konumu: Alt"
+msgstr ""
 
 #: desktop_modules/module_collections.lua:663
 msgid "Badge position: Top"
-msgstr "Rozet konumu: Üst"
+msgstr ""
 
 #: sui_config.lua:168
 msgid "Battery"
@@ -412,7 +412,7 @@ msgstr "Devam Et"
 
 #: desktop_modules/module_coverdeck.lua:325
 msgid "Cover Deck"
-msgstr "Kapak Destesi"
+msgstr ""
 
 #: desktop_modules/module_collections.lua:613
 msgid "Cover for \"%s\""
@@ -429,7 +429,7 @@ msgstr "\"%s\" için kapak"
 #: desktop_modules/module_recent.lua:256
 #: desktop_modules/module_recent.lua:258
 msgid "Cover size"
-msgstr "Kapak boyutu"
+msgstr ""
 
 #: sui_quickactions.lua:1119
 msgid "Create Quick Action"
@@ -441,7 +441,7 @@ msgstr "Hızlı Eylem Oluştur"
 #: desktop_modules/module_currently.lua:402
 #: desktop_modules/module_currently.lua:981
 msgid "Currently Reading"
-msgstr "Şu An Okunan"
+msgstr ""
 
 #: sui_config.lua:561
 msgid "Custom"
@@ -533,7 +533,7 @@ msgstr "Sözlükte Ara"
 
 #: sui_menu.lua:1234
 msgid "Digital Goal  (%s)"
-msgstr "Dijital Hedef  (%s)"
+msgstr ""
 
 #: sui_menu.lua:1760
 msgid "Disable \"Lock Scale\" first to set a custom label scale."
@@ -736,7 +736,7 @@ msgstr "Ana klasör"
 
 #: sui_bottombar.lua:1052
 msgid "Home folder + subfolders"
-msgstr "Ana klasör + alt klasörler"
+msgstr ""
 
 #: sui_homescreen.lua:1080
 msgid "Homescreen"
@@ -754,11 +754,11 @@ msgstr "Simge"
 #: sui_menu.lua:887
 #: sui_menu.lua:890
 msgid "Icon Size"
-msgstr "Simge Boyutu"
+msgstr ""
 
 #: sui_menu.lua:888
 msgid "Icon Size — %d%%"
-msgstr "Simge Boyutu — %%%d"
+msgstr ""
 
 #: sui_quickactions.lua:756
 msgid "Icon: Default"
@@ -815,11 +815,11 @@ msgstr "Etiket Ölçeği"
 #: sui_menu.lua:907
 #: sui_menu.lua:910
 msgid "Label Size"
-msgstr "Etiket Boyutu"
+msgstr ""
 
 #: sui_menu.lua:908
 msgid "Label Size — %d%%"
-msgstr "Etiket Boyutu — %%%d"
+msgstr ""
 
 #: sui_menu.lua:1753
 msgid "Labels"
@@ -937,11 +937,11 @@ msgstr "Navpager etkinleştirildi.\n\nŞimdi yeniden başlatılsın mı?"
 
 #: sui_quickactions.lua:488
 msgid "Nerd Font Icon"
-msgstr "Nerd Font Simgesi"
+msgstr ""
 
 #: sui_quickactions.lua:573
 msgid "Nerd Font symbol…"
-msgstr "Nerd Font sembolü…"
+msgstr ""
 
 #: sui_bottombar.lua:1454
 msgid "Network manager unavailable."
@@ -1111,7 +1111,7 @@ msgstr "Katmanlar"
 #: sui_patches.lua:1759
 #: sui_homescreen.lua:1673
 msgid "Page %1 of %2"
-msgstr "Sayfa %1 / %2"
+msgstr ""
 
 #: sui_menu.lua:1948
 msgid "Pagination Bar"
@@ -1246,7 +1246,7 @@ msgstr "Okuma İstatistikleri"
 #: desktop_modules/module_recent.lua:72
 #: desktop_modules/module_recent.lua:281
 msgid "Recent Books"
-msgstr "Son Kitaplar"
+msgstr ""
 
 #: desktop_modules/module_tbr.lua:265
 msgid "Remove from To Be Read"
@@ -1463,7 +1463,7 @@ msgstr "Pili Göster"
 
 #: desktop_modules/module_clock.lua:482
 msgid "Show Clock"
-msgstr "Saati Göster"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:488
 msgid "Show Date"
@@ -1502,7 +1502,7 @@ msgstr "Simple UI %s başarıyla kuruldu.\n\nGüncellemeyi uygulamak için KORea
 
 #: sui_updater.lua:399
 msgid "Simple UI is up to date (%s)."
-msgstr "Simple UI güncel (%s)."
+msgstr ""
 
 #: sui_menu.lua:1923
 msgid "Simple UI will be %s after restart.\n\nRestart now?"
@@ -1622,7 +1622,7 @@ msgstr "Metin Boyutu"
 
 #: desktop_modules/module_reading_stats.lua:470
 msgid "Text Size — %d%%"
-msgstr "Metin Boyutu — %%%d"
+msgstr ""
 
 #: sui_menu.lua:109
 msgid "Text only"
@@ -1820,7 +1820,7 @@ msgstr "WiFi bu cihazda kullanılamıyor."
 
 #: sui_quickactions.lua:625
 msgid "Wikipedia Lookup"
-msgstr "Wikipedia'da Ara"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:936
 msgid "With percentage"
@@ -1886,7 +1886,7 @@ msgstr "etkin"
 
 #: sui_quickactions.lua:490
 msgid "hex code, e.g. E001"
-msgstr "hex kodu, örn. E001"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "no streak"

@@ -13,11 +13,12 @@ local Dispatcher      = require("dispatcher")
 local I18n = require("sui_i18n")
 local _    = I18n.translate
 
-local Config    = require("sui_config")
-local UI        = require("sui_core")
-local Bottombar = require("sui_bottombar")
-local Topbar    = require("sui_topbar")
-local Patches   = require("sui_patches")
+local Config       = require("sui_config")
+local UI           = require("sui_core")
+local Bottombar    = require("sui_bottombar")
+local Topbar       = require("sui_topbar")
+local Patches      = require("sui_patches")
+local SUISettings  = require("sui_store")
 
 local SimpleUIPlugin = WidgetContainer:new{
     name = "simpleui",
@@ -50,12 +51,45 @@ local SimpleUIPlugin = WidgetContainer:new{
 
 function SimpleUIPlugin:init()
     local ok, err = pcall(function()
+        -- Ensure the simpleui settings directory tree exists before any
+        -- SUISettings call.  SUISettings is lazy — its LuaSettings store is
+        -- opened on first use — but LuaSettings:open() cannot create the
+        -- parent directory.  If the directory is missing (fresh install, or
+        -- the dir was wiped) the open will succeed but flush() will silently
+        -- fail, discarding all writes for the session.
+        --
+        -- We create all five user-data directories here unconditionally so
+        -- that (a) SUISettings can write safely and (b) a fresh install never
+        -- needs to wait until the migration block to have a usable directory
+        -- structure.  All five lfs.attributes calls are cheap (single stat
+        -- syscall each) and lfs.mkdir is only called when the directory is
+        -- actually absent, so the common steady-state cost is negligible.
+        do
+            local ok_ds,  DataStorage = pcall(require, "datastorage")
+            local ok_lfs, lfs_early  = pcall(require, "libs/libkoreader-lfs")
+            if ok_ds and ok_lfs then
+                local base = DataStorage:getSettingsDir() .. "/simpleui"
+                for _, sub in ipairs({
+                    "", "/sui_icons", "/sui_icons/packs", "/sui_quotes",
+                    "/sui_wallpapers", "/sui_presets", "/sui_presets/sui_presets_export", "/sui_presets/sui_presets_import"
+                }) do
+                    local path = base .. sub
+                    if lfs_early.attributes(path, "mode") ~= "directory" then
+                        lfs_early.mkdir(path)
+                    end
+                end
+            end
+        end
+
         -- Detect hot update: compare the version now on disk with what was
         -- running last session. If they differ, warn the user to restart so
         -- that all plugin modules are loaded fresh.
         local meta_ok, meta = pcall(require, "_meta")
         local current_version = meta_ok and meta and meta.version
-        local prev_version = G_reader_settings:readSetting("simpleui_loaded_version")
+        -- Read version from SUISettings; fall back to G_reader_settings for the
+        -- first boot after the Phase-4 migration (before v2 migration has run).
+        local prev_version = SUISettings:get("simpleui_loaded_version")
+            or G_reader_settings:readSetting("simpleui_loaded_version")
         if current_version then
             if prev_version and prev_version ~= current_version then
                 logger.info("simpleui: updated from", prev_version, "to", current_version,
@@ -72,8 +106,346 @@ function SimpleUIPlugin:init()
                     })
                 end)
             end
-            G_reader_settings:saveSetting("simpleui_loaded_version", current_version)
+            SUISettings:set("simpleui_loaded_version", current_version)
         end
+
+        -- -------------------------------------------------------------------
+        -- User-data migration (runs once per install / once after upgrade).
+        --
+        -- v1: move user files out of the plugin folder into DataStorage so
+        --     they survive plugin updates, and normalise all settings keys to
+        --     the simpleui_ / navbar_ namespace.
+        -- -------------------------------------------------------------------
+        if not G_reader_settings:isTrue("simpleui_userdata_migrated_v1") then
+            pcall(function()
+                local ok_ds, DataStorage = pcall(require, "datastorage")
+                local ok_lfs, lfs        = pcall(require, "libs/libkoreader-lfs")
+                local ok_ffi, ffiutil    = pcall(require, "ffi/util")
+                if not (ok_ds and ok_lfs and ok_ffi) then return end
+
+                local data_dir = DataStorage:getSettingsDir() .. "/simpleui"
+
+                -- ── 1. Migrate user files (copy, never overwrite) ─────────
+                -- Directory structure is guaranteed by the startup block above.
+                -- Resolve plugin root from this file's path.
+                local src_info   = debug.getinfo(1, "S").source or ""
+                local plugin_root = src_info:sub(1,1) == "@"
+                    and src_info:sub(2):match("^(.*)/[^/]+$") or nil
+                if plugin_root and plugin_root:sub(1,1) ~= "/" then
+                    local ok_lfs2, lfs2 = pcall(require, "libs/libkoreader-lfs")
+                    local cwd = ok_lfs2 and lfs2 and lfs2.currentdir()
+                    if cwd then plugin_root = cwd .. "/" .. plugin_root end
+                end
+
+                if plugin_root then
+                    -- Copy files from src/ to dst/ (never overwrite existing).
+                    local function copyDirContents(src, dst)
+                        if lfs.attributes(src, "mode") ~= "directory" then return end
+                        for fname in lfs.dir(src) do
+                            if fname ~= "." and fname ~= ".." then
+                                local src_f = src .. "/" .. fname
+                                local dst_f = dst .. "/" .. fname
+                                if lfs.attributes(src_f, "mode") == "file"
+                                    and lfs.attributes(dst_f, "mode") ~= "file" then
+                                    ffiutil.copyFile(src_f, dst_f)
+                                end
+                            end
+                        end
+                    end
+
+                    -- Removes all plain files inside dir, then the dir itself.
+                    -- Skips silently if dir doesn't exist or still has subdirs.
+                    local function removeDirIfEmpty(dir)
+                        if lfs.attributes(dir, "mode") ~= "directory" then return end
+                        for fname in lfs.dir(dir) do
+                            if fname ~= "." and fname ~= ".." then
+                                local p = dir .. "/" .. fname
+                                if lfs.attributes(p, "mode") == "file" then
+                                    os.remove(p)
+                                end
+                            end
+                        end
+                        lfs.rmdir(dir)  -- only succeeds when empty
+                    end
+
+                    -- icons/custom → DataStorage/simpleui/sui_icons/
+                    -- then remove the now-redundant in-plugin directory.
+                    copyDirContents(plugin_root .. "/icons/custom",
+                                    data_dir    .. "/sui_icons")
+                    removeDirIfEmpty(plugin_root .. "/icons/custom")
+
+                    -- desktop_modules/custom_quotes → DataStorage/simpleui/sui_quotes/
+                    -- then remove the now-redundant in-plugin directory.
+                    copyDirContents(plugin_root .. "/desktop_modules/custom_quotes",
+                                    data_dir    .. "/sui_quotes")
+                    removeDirIfEmpty(plugin_root .. "/desktop_modules/custom_quotes")
+                end
+
+                -- ── 2. Migrate renamed settings keys ──────────────────────
+                -- Each entry: { old_key, new_key }
+                local key_renames = {
+                    { "sui_tbr_list",             "simpleui_tbr_list"                    },
+                    { "quote_deck_order",          "simpleui_quote_deck_order"            },
+                    { "quote_deck_pos",            "simpleui_quote_deck_pos"              },
+                    { "quote_deck_count",          "simpleui_quote_deck_count"            },
+                    { "quote_hl_deck_order",       "simpleui_quote_hl_deck_order"         },
+                    { "quote_hl_deck_pos",         "simpleui_quote_hl_deck_pos"           },
+                    { "quote_hl_deck_count",       "simpleui_quote_hl_deck_count"         },
+                    { "quote_custom_deck_order",   "simpleui_quote_custom_deck_order"     },
+                    { "quote_custom_deck_pos",     "simpleui_quote_custom_deck_pos"       },
+                    { "quote_custom_deck_count",   "simpleui_quote_custom_deck_count"     },
+                    { "quote_custom_deck_file",    "simpleui_quote_custom_deck_file"      },
+                    -- quote_source and quote_custom_file are per-instance (prefixed
+                    -- with navbar_homescreen_ at runtime); migrate all known slots.
+                    { "navbar_homescreen_quote_source",      "navbar_homescreen_simpleui_quote_source"      },
+                    { "navbar_homescreen_quote_custom_file", "navbar_homescreen_simpleui_quote_custom_file" },
+                }
+                for _, pair in ipairs(key_renames) do
+                    local old_key, new_key = pair[1], pair[2]
+                    local val = G_reader_settings:readSetting(old_key)
+                    if val ~= nil and G_reader_settings:readSetting(new_key) == nil then
+                        G_reader_settings:saveSetting(new_key, val)
+                    end
+                    G_reader_settings:delSetting(old_key)
+                end
+
+                logger.info("simpleui: userdata migration v1 complete")
+            end)
+            G_reader_settings:saveSetting("simpleui_userdata_migrated_v1", true)
+        end
+        -- -------------------------------------------------------------------
+        -- Settings migration v2: move all navbar_* and simpleui_* keys from
+        -- G_reader_settings into SUISettings (the dedicated per-plugin store).
+        --
+        -- This runs once on first boot after the Phase-3 refactor.  It is safe
+        -- to re-run if interrupted: keys that already exist in SUISettings are
+        -- not overwritten; keys successfully copied are removed from
+        -- G_reader_settings.
+        -- -------------------------------------------------------------------
+        if not SUISettings:isTrue("simpleui_settings_migrated_v2") then
+            pcall(function()
+                -- Enumerate every key currently stored in G_reader_settings
+                -- and migrate the ones owned by SimpleUI.
+                local raw = G_reader_settings.data  -- LuaSettings exposes .data
+                if type(raw) ~= "table" then return end
+
+                -- Collect owned keys first; deleting from raw while iterating
+                -- it with pairs() has undefined behaviour in Lua and can cause
+                -- entries to be skipped.
+                local to_migrate = {}
+                for k, v in pairs(raw) do
+                    local owned = (type(k) == "string")
+                        and (k:sub(1, 7) == "navbar_" or k:sub(1, 9) == "simpleui_")
+                        -- Keep the v1 and v2 migration flags in G_reader_settings
+                        -- so they survive a factory reset of sui_settings.lua.
+                        and k ~= "simpleui_userdata_migrated_v1"
+                    if owned then
+                        to_migrate[#to_migrate + 1] = { k = k, v = v }
+                    end
+                end
+
+                local migrated = 0
+                for _, entry in ipairs(to_migrate) do
+                    local k, v = entry.k, entry.v
+                    -- Only copy if SUISettings does not already have the key
+                    -- (e.g. the user already made changes after the code update).
+                    if SUISettings:get(k) == nil then
+                        SUISettings:set(k, v)
+                    end
+                    G_reader_settings:delSetting(k)
+                    migrated = migrated + 1
+                end
+
+                SUISettings:flush()
+                logger.info("simpleui: settings migration v2 complete —", migrated, "keys moved to SUISettings")
+            end)
+            SUISettings:set("simpleui_settings_migrated_v2", true)
+            SUISettings:flush()
+        end
+        -- -------------------------------------------------------------------
+        -- Settings migration v3: rename all navbar_* keys inside SUISettings
+        -- to the canonical simpleui_* namespace.
+        --
+        -- Two passes:
+        --   1. Fixed renames  — explicit old → new map (fast, readable).
+        --   2. Dynamic prefix — bulk rename of per-slot / per-id keys that are
+        --      built at runtime via string concatenation.
+        --
+        -- Rules:
+        --   • Only copies when the destination key is absent (never overwrites).
+        --   • Old key is always deleted, even when the copy is skipped.
+        --   • The whole block runs inside pcall — a crash must never prevent
+        --     the plugin from loading on a resource-constrained e-reader.
+        --   • Guarded by simpleui_settings_migrated_v3 so it runs at most once.
+        -- -------------------------------------------------------------------
+        if not SUISettings:isTrue("simpleui_settings_migrated_v3") then
+            pcall(function()
+                -- ── 1. Fixed renames ─────────────────────────────────────────
+                local fixed_renames = {
+                    -- Bottom bar — general
+                    { "navbar_enabled",                      "simpleui_bar_enabled"                   },
+                    { "navbar_mode",                         "simpleui_bar_mode"                      },
+                    { "navbar_bar_size",                     "simpleui_bar_size"                      },
+                    { "navbar_bar_size_pct",                 "simpleui_bar_size_pct"                  },
+                    { "navbar_hide_separator",               "simpleui_bar_hide_separator"            },
+                    { "navbar_bottom_margin_pct",            "simpleui_bar_bottom_margin_pct"         },
+                    { "navbar_icon_scale_pct",               "simpleui_bar_icon_scale_pct"            },
+                    { "navbar_label_scale_pct",              "simpleui_bar_label_scale_pct"           },
+                    { "navbar_rs_text_scale_pct",            "simpleui_bar_rs_text_scale_pct"         },
+                    -- Bottom bar — pagination / pager
+                    { "navbar_pagination_visible",           "simpleui_bar_pagination_visible"        },
+                    { "navbar_pagination_size",              "simpleui_bar_pagination_size"           },
+                    { "navbar_pagination_show_subtitle",     "simpleui_bar_pagination_show_subtitle"  },
+                    { "navbar_navpager_enabled",             "simpleui_bar_navpager_enabled"          },
+                    { "navbar_dotpager_always",              "simpleui_bar_dotpager_always"           },
+                    -- Bottom bar — tabs & settings
+                    { "navbar_tabs",                         "simpleui_bar_tabs"                      },
+                    { "navbar_bottombar_settings_on_hold",   "simpleui_bar_settings_on_hold"          },
+                    -- Top bar
+                    { "navbar_topbar_enabled",               "simpleui_topbar_enabled"                },
+                    { "navbar_topbar_config",                "simpleui_topbar_config"                 },
+                    { "navbar_topbar_custom_text",           "simpleui_topbar_custom_text"            },
+                    { "navbar_topbar_settings_on_hold",      "simpleui_topbar_settings_on_hold"       },
+                    { "navbar_topbar_swipe_indicator",       "simpleui_topbar_swipe_indicator"        },
+                    { "navbar_topbar_wifi_hide_when_off",    "simpleui_topbar_wifi_hide_when_off"     },
+                    { "navbar_topbar_size_pct",              "simpleui_topbar_size_pct"               },
+                    -- Homescreen bar — fixed keys
+                    { "navbar_homescreen_pagination_hidden", "simpleui_hs_pagination_hidden"          },
+                    { "navbar_homescreen_settings_on_hold",  "simpleui_hs_settings_on_hold"           },
+                    { "navbar_homescreen_overflow_warn",     "simpleui_hs_overflow_warn"              },
+                    { "navbar_hs_return_to_book_folder",     "simpleui_hs_return_to_book_folder"      },
+                    { "navbar_homescreen_module_scale",      "simpleui_hs_module_scale"               },
+                    { "navbar_homescreen_label_scale",       "simpleui_hs_label_scale"                },
+                    { "navbar_homescreen_scale_linked",      "simpleui_hs_scale_linked"               },
+                    -- Reading goal
+                    { "navbar_reading_goal",                 "simpleui_reading_goal"                  },
+                    { "navbar_reading_goal_physical",        "simpleui_reading_goal_physical"         },
+                    { "navbar_daily_reading_goal_secs",      "simpleui_daily_reading_goal_secs"       },
+                    -- Reading goals module display
+                    { "navbar_reading_goals_show_annual",    "simpleui_reading_goals_show_annual"     },
+                    { "navbar_reading_goals_show_daily",     "simpleui_reading_goals_show_daily"      },
+                    { "navbar_reading_goals_layout",         "simpleui_reading_goals_layout"          },
+                    -- Collections module
+                    { "navbar_collections_list",             "simpleui_collections_list"              },
+                    { "navbar_collections_covers",           "simpleui_collections_covers"            },
+                    { "navbar_collections_badge_position",   "simpleui_collections_badge_position"    },
+                    { "navbar_collections_badge_color",      "simpleui_collections_badge_color"       },
+                    { "navbar_collections_badge_hidden",     "simpleui_collections_badge_hidden"      },
+                    -- Custom quick actions — list & migration flag
+                    { "navbar_custom_qa_list",               "simpleui_cqa_list"                      },
+                    { "navbar_custom_qa_migrated_v1",        "simpleui_cqa_migrated_v1"               },
+                }
+
+                local migrated = 0
+
+                for _, pair in ipairs(fixed_renames) do
+                    local old_k, new_k = pair[1], pair[2]
+                    local val = SUISettings:get(old_k)
+                    if val ~= nil then
+                        if SUISettings:get(new_k) == nil then
+                            SUISettings:set(new_k, val)
+                        end
+                        SUISettings:del(old_k)
+                        migrated = migrated + 1
+                    end
+                end
+
+                -- ── 2. Dynamic-prefix renames ─────────────────────────────────
+                -- Keys built at runtime via string concatenation:
+                --   simpleui_hs_*        (was navbar_homescreen_*)
+                --   navbar_cqa_*         →  simpleui_cqa_*
+                --   navbar_action_*      →  simpleui_action_*
+                --   navbar_custom_*      →  simpleui_custom_*
+                --
+                -- We collect all renames first, then apply — modifying a table
+                -- while iterating it is undefined behaviour in Lua 5.1/5.2.
+                local dynamic_prefixes = {
+                    { old = "navbar_homescreen_",  new = "simpleui_hs_"     },
+                    { old = "navbar_cqa_",         new = "simpleui_cqa_"    },
+                    { old = "navbar_action_",      new = "simpleui_action_" },
+                    { old = "navbar_custom_",      new = "simpleui_custom_" },
+                }
+
+                local pending = {}
+                for k, v in SUISettings:iterateKeys() do
+                    for _, pfx in ipairs(dynamic_prefixes) do
+                        local plen = #pfx.old
+                        if k:sub(1, plen) == pfx.old then
+                            local new_k = pfx.new .. k:sub(plen + 1)
+                            pending[#pending + 1] = { old_k = k, new_k = new_k, val = v }
+                            break
+                        end
+                    end
+                end
+
+                for _, entry in ipairs(pending) do
+                    if SUISettings:get(entry.new_k) == nil then
+                        SUISettings:set(entry.new_k, entry.val)
+                    end
+                    SUISettings:del(entry.old_k)
+                    migrated = migrated + 1
+                end
+
+                SUISettings:flush()
+                logger.info("simpleui: settings migration v3 complete —", migrated, "navbar_* keys renamed to simpleui_*")
+            end)
+            SUISettings:set("simpleui_settings_migrated_v3", true)
+            SUISettings:flush()
+        end
+        -- -------------------------------------------------------------------
+        -- Settings migration v4: rename icon pack keys to integrated sui_ scheme.
+        -- -------------------------------------------------------------------
+        if not SUISettings:isTrue("simpleui_settings_migrated_v4") then
+            pcall(function()
+                local icon_renames = {
+                    { "simpleui_sysicon_bm_normal",     "simpleui_sysicon_sui_browse_normal" },
+                    { "simpleui_sysicon_bm_author",     "simpleui_sysicon_sui_browse_author" },
+                    { "simpleui_sysicon_bm_series",     "simpleui_sysicon_sui_browse_series" },
+                    { "simpleui_sysicon_bm_tags",       "simpleui_sysicon_sui_browse_tags" },
+                    { "simpleui_sysicon_pg_chev_left",  "simpleui_sysicon_sui_pager_prev" },
+                    { "simpleui_sysicon_pg_chev_right", "simpleui_sysicon_sui_pager_next" },
+                    { "simpleui_sysicon_pg_chev_first", "simpleui_sysicon_sui_pager_first" },
+                    { "simpleui_sysicon_pg_chev_last",  "simpleui_sysicon_sui_pager_last" },
+                    { "simpleui_sysicon_coll_back",     "simpleui_sysicon_sui_coll_back" },
+                }
+                local migrated = 0
+                for _, pair in ipairs(icon_renames) do
+                    local old_k, new_k = pair[1], pair[2]
+                    local val = SUISettings:get(old_k)
+                    if val ~= nil then
+                        if SUISettings:get(new_k) == nil then
+                            SUISettings:set(new_k, val)
+                        end
+                        SUISettings:del(old_k)
+                        migrated = migrated + 1
+                    end
+                end
+                local icon_presets = SUISettings:get("simpleui_icon_presets")
+                if type(icon_presets) == "table" then
+                    local changed = false
+                    for _, preset in pairs(icon_presets) do
+                        if type(preset._scalar) == "table" then
+                            for _, pair in ipairs(icon_renames) do
+                                local old_k, new_k = pair[1], pair[2]
+                                if preset._scalar[old_k] ~= nil then
+                                    if preset._scalar[new_k] == nil then
+                                        preset._scalar[new_k] = preset._scalar[old_k]
+                                    end
+                                    preset._scalar[old_k] = nil
+                                    changed = true
+                                end
+                            end
+                        end
+                    end
+                    if changed then SUISettings:set("simpleui_icon_presets", icon_presets) end
+                end
+                SUISettings:flush()
+                logger.info("simpleui: settings migration v4 complete —", migrated, "icon keys renamed")
+            end)
+            SUISettings:set("simpleui_settings_migrated_v4", true)
+            SUISettings:flush()
+        end
+        -- -------------------------------------------------------------------
 
         Config.applyFirstRunDefaults()
         Config.migrateOldCustomSlots()
@@ -82,6 +454,15 @@ function SimpleUIPlugin:init()
         -- it reads a handful of settings and only writes back when it finds
         -- something invalid, so the common no-op case costs only a few reads.
         Config.sanitizeQASlots()
+        -- Apply the saved UI font preference early, before any widget is built.
+        -- SUIStyle is lazy (module-level init runs only when the font menu opens)
+        -- so this pcall is cheap on the common path where no custom font is set.
+        do
+            local ok_ss, SUIStyle = pcall(require, "sui_style")
+            if ok_ss and SUIStyle and SUIStyle.applyUIFont then
+                pcall(SUIStyle.applyUIFont)
+            end
+        end
         self.ui.menu:registerToMainMenu(self)
 
         -- Register gesture-assignable actions via Dispatcher.
@@ -254,7 +635,7 @@ function SimpleUIPlugin:init()
                 menu_class.setUpdateItemTable = function(m_self)
                     orig_sut(m_self)
                     -- Respect the user's choice: default on (nilOrTrue), skip if explicitly false.
-                    if not G_reader_settings:nilOrTrue("simpleui_settings_tab_enabled") then return end
+                    if not SUISettings:nilOrTrue("simpleui_settings_tab_enabled") then return end
                     if type(m_self.tab_item_table) ~= "table" then return end
                     local build_fn = rawget(SimpleUIPlugin, "buildTabItems")
                     if type(build_fn) ~= "function" then return end
@@ -277,7 +658,7 @@ function SimpleUIPlugin:init()
             if ok_fm and FileManagerMenu then inject_sui_tab(FileManagerMenu) end
         end
         -- -------------------------------------------------------------------
-        if G_reader_settings:nilOrTrue("simpleui_enabled") then
+        if SUISettings:nilOrTrue("simpleui_enabled") then
             Patches.installAll(self)
             -- Register the TBR button in the Library hold dialog (single book).
             -- addFileDialogButtons is the official KOReader API for this.
@@ -382,7 +763,7 @@ function SimpleUIPlugin:init()
                     end
                 end
             end)
-            if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
+            if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
                 Topbar.scheduleRefresh(self, 0)
             end
             -- Pre-load ALL desktop modules during boot idle time so the first
@@ -416,6 +797,7 @@ local _PLUGIN_MODULES = {
     "sui_i18n", "sui_config", "sui_core", "sui_bottombar", "sui_topbar",
     "sui_patches", "sui_menu", "sui_titlebar", "sui_quickactions",
     "sui_homescreen", "sui_foldercovers", "sui_browsemeta", "sui_updater",
+    "sui_store", "sui_presets", "sui_style",
     "desktop_modules/moduleregistry",
     "desktop_modules/module_books_shared",
     "desktop_modules/module_clock",
@@ -489,6 +871,9 @@ function SimpleUIPlugin:onSimpleUIToggleHomeLibrary()
 end
 
 function SimpleUIPlugin:onTeardown()
+    -- Flush the plugin settings store so any in-memory writes are persisted
+    -- before the plugin is unloaded or KOReader exits.
+    SUISettings:flush()
     if self._topbar_timer then
         UIManager:unschedule(self._topbar_timer)
         self._topbar_timer = nil
@@ -651,7 +1036,7 @@ end
 
 function SimpleUIPlugin:onResume()
     self._simpleui_suspended = false
-    if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
+    if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
         -- Small delay to let the wakeup transition finish before refreshing
         -- the topbar. Avoids a race with HomescreenWidget:onResume() and
         -- prevents the timer firing while the device is still mid-wakeup.
@@ -686,7 +1071,7 @@ function SimpleUIPlugin:onResume()
             HS.refresh(true)
         end
         -- Re-open the Homescreen on wakeup when \"Start with Homescreen\" is set.
-        if G_reader_settings:nilOrTrue("simpleui_enabled") then
+        if SUISettings:nilOrTrue("simpleui_enabled") then
             Patches.showHSAfterResume(self)
         end
     end
@@ -728,9 +1113,9 @@ function SimpleUIPlugin:onCloseDocument()
     -- Migration: if simpleui_hs_closing_notice_mode is absent, fall back to the
     -- old boolean simpleui_hs_closing_notice (nil/true → "always", false → "never").
     do
-        local notice_mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+        local notice_mode = SUISettings:readSetting("simpleui_hs_closing_notice_mode")
         if not notice_mode then
-            notice_mode = G_reader_settings:nilOrTrue("simpleui_hs_closing_notice") and "always" or "never"
+            notice_mode = SUISettings:nilOrTrue("simpleui_hs_closing_notice") and "always" or "never"
         end
 
         if notice_mode == "always"
@@ -758,7 +1143,7 @@ function SimpleUIPlugin:onCloseDocument()
     -- there is nothing further to do — the next Homescreen.show() will rebuild
     -- from scratch. Avoids loading the Registry and all module pcalls.
     if not HS._instance and HS._stats_need_refresh then
-        if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
+        if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
             Topbar.scheduleRefresh(self, 0)
         end
         return
@@ -774,7 +1159,7 @@ function SimpleUIPlugin:onCloseDocument()
         Registry = reg
     end
 
-    local PFX = "navbar_homescreen_"
+    local PFX = "simpleui_hs_"
     local needs_refresh    = false
     local currently_active = false
 
@@ -986,7 +1371,7 @@ function SimpleUIPlugin:onCloseDocument()
     -- charge) — wifi state changes that happened during reading would not be
     -- reflected for up to 60 s. scheduleRefresh guards against suspend internally
     -- via shouldRunTimer, so this is safe to call unconditionally here.
-    if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
+    if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
         Topbar.scheduleRefresh(self, 0)
     end
 end
@@ -1039,19 +1424,19 @@ end
 
 function SimpleUIPlugin:onFrontlightStateChanged()
     if self._simpleui_suspended then return end
-    if not G_reader_settings:nilOrTrue("navbar_topbar_enabled") then return end
+    if not SUISettings:nilOrTrue("simpleui_topbar_enabled") then return end
     Topbar.scheduleRefresh(self, 0)
 end
 
 function SimpleUIPlugin:onCharging()
     if self._simpleui_suspended then return end
-    if not G_reader_settings:nilOrTrue("navbar_topbar_enabled") then return end
+    if not SUISettings:nilOrTrue("simpleui_topbar_enabled") then return end
     Topbar.scheduleRefresh(self, 0)
 end
 
 function SimpleUIPlugin:onNotCharging()
     if self._simpleui_suspended then return end
-    if not G_reader_settings:nilOrTrue("navbar_topbar_enabled") then return end
+    if not SUISettings:nilOrTrue("simpleui_topbar_enabled") then return end
     Topbar.scheduleRefresh(self, 0)
 end
 

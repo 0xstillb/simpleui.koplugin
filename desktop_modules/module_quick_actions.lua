@@ -25,6 +25,7 @@ local Config          = require("sui_config")
 local QA              = require("sui_quickactions")
 
 local UI  = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD = UI.PAD
 local LABEL_H = UI.LABEL_H
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -77,12 +78,15 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Core widget builder (shared by all slots)
--- mode: "default" | "flat" | "bare"
---   default — white background, grey border, frame_pad padding
---   flat    — dark background, no border, frame_pad padding
---   bare    — no background, no border, no padding (icon fills frame_sz)
+-- mode: "default" | "flat" | "bare" | "default_transparent"
+--   default             — white background, grey border, frame_pad padding
+--   default_transparent — no background, grey border, frame_pad padding
+--   flat                — dark background, no border, frame_pad padding
+--   bare                — no background, no border, no padding (icon fills frame_sz)
 -- ---------------------------------------------------------------------------
-local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
+local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode, colors)
+    local clr_blk = colors and colors.blk or Blitbuffer.COLOR_BLACK
+    local clr_sub = colors and colors.sub or CLR_TEXT_SUB
     local ph_fs = math.max(8, math.floor(_BASE_PH_FS * (d.frame_sz / (_BASE_ICON_SZ + _BASE_FRAME_PAD * 2))))
     local function _placeholder()
         return CenterContainer:new{
@@ -90,7 +94,7 @@ local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
             TextWidget:new{
                 text    = _("No actions configured"),
                 face    = Font:getFace("smallinfofont", ph_fs),
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = clr_sub,
                 width   = w - PAD * 2,
             },
         }
@@ -103,7 +107,7 @@ local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
     for _, aid in ipairs(action_ids) do
         if aid:match("^custom_qa_%d+$") then
             if cqa_valid[aid] then valid_ids[#valid_ids + 1] = aid end
-        elseif Config.ACTION_BY_ID[aid] then
+        elseif QA.isBuiltin(aid) then
             valid_ids[#valid_ids + 1] = aid
         end
         -- unknown IDs (neither a live custom QA nor a known built-in) are silently dropped
@@ -135,7 +139,7 @@ local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
                 TextWidget:new{
                     text    = nerd_char,
                     face    = Font:getFace("symbols", math.floor(icon_sz_used * 0.6)),
-                    fgcolor = Blitbuffer.COLOR_BLACK,
+                    fgcolor = clr_blk,
                     padding = 0,
                 },
             }
@@ -150,9 +154,9 @@ local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
         end
 
         local icon_frame = FrameContainer:new{
-            bordersize = (mode == "default") and 1 or 0,
-            color      = (mode == "default") and _CLR_BAR_FG or nil,
-            background = (mode == "flat") and _CLR_FLAT_BG or nil,
+            bordersize = (mode == "default" or mode == "default_transparent") and 1 or 0,
+            color      = (mode == "default" or mode == "default_transparent") and _CLR_BAR_FG or nil,
+            background = (mode == "flat") and _CLR_FLAT_BG or (mode == "default" and Blitbuffer.COLOR_WHITE or nil),
             radius     = is_bare and 0 or d.corner_r,
             padding    = is_bare and 0 or d.frame_pad,
             icon_widget,
@@ -167,7 +171,7 @@ local function buildQAWidget(w, action_ids, show_labels, on_tap_fn, d, mode)
                 TextWidget:new{
                     text    = entry.label,
                     face    = Font:getFace("cfont", d.lbl_fs),
-                    fgcolor = Blitbuffer.COLOR_BLACK,
+                    fgcolor = clr_blk,
                     width   = d.frame_sz,
                 },
             }
@@ -216,7 +220,7 @@ local function makeSlot(slot)
 
     -- Returns the current type string; defaults to "default" when unset.
     local function getType(pfx)
-        return G_reader_settings:readSetting(pfx .. TYPE_KEY) or "default"
+        return SUISettings:readSetting(pfx .. TYPE_KEY) or "default"
     end
 
     local S = {}
@@ -226,11 +230,11 @@ local function makeSlot(slot)
     S.default_on = false
 
     function S.isEnabled(pfx)
-        return G_reader_settings:readSetting(pfx .. slot_suffix .. "_enabled") == true
+        return SUISettings:readSetting(pfx .. slot_suffix .. "_enabled") == true
     end
 
     function S.setEnabled(pfx, on)
-        G_reader_settings:saveSetting(pfx .. slot_suffix .. "_enabled", on)
+        SUISettings:saveSetting(pfx .. slot_suffix .. "_enabled", on)
     end
 
     local MAX_QA = 6
@@ -253,11 +257,11 @@ local function makeSlot(slot)
 
     local function getQAPool()
         local available = {}
-        for _, a in ipairs(Config.ALL_ACTIONS) do
-            if actionAvailable(a.id) then
+        for desc in QA.iterBuiltin() do
+            if actionAvailable(desc.id) then
                 available[#available + 1] = {
-                    id = a.id,
-                    label = a.id == "home" and Config.homeLabel() or a.label,
+                    id    = desc.id,
+                    label = desc.id == "home" and Config.homeLabel() or QA.getEntry(desc.id).label,
                 }
             end
         end
@@ -272,7 +276,7 @@ local function makeSlot(slot)
         local items_key  = ctx_menu.pfx_qa .. slot_n .. "_items"
         local labels_key = ctx_menu.pfx_qa .. slot_n .. "_labels"
         local slot_label = string.format(_("Quick Actions %d"), slot_n)
-        local function getItems() return G_reader_settings:readSetting(items_key) or {} end
+        local function getItems() return SUISettings:readSetting(items_key) or {} end
         local function isSelected(id)
             for _i, v in ipairs(getItems()) do if v == id then return true end end
             return false
@@ -297,7 +301,7 @@ local function makeSlot(slot)
                 end
                 new_items[#new_items + 1] = id
             end
-            G_reader_settings:saveSetting(items_key, new_items)
+            SUISettings:saveSetting(items_key, new_items)
             ctx_menu.refresh()
         end
 
@@ -333,7 +337,7 @@ local function makeSlot(slot)
                     callback          = function()
                         local new_order = {}
                         for _i, item in ipairs(sort_items) do new_order[#new_order + 1] = item.orig_item end
-                        G_reader_settings:saveSetting(items_key, new_order)
+                        SUISettings:saveSetting(items_key, new_order)
                         ctx_menu.refresh()
                     end,
                 })
@@ -357,11 +361,11 @@ local function makeSlot(slot)
         return {
             {
                 text           = _("Hide Text"),
-                checked_func   = function() return not G_reader_settings:nilOrTrue(labels_key) end,
+                checked_func   = function() return not SUISettings:nilOrTrue(labels_key) end,
                 keep_menu_open = true,
                 separator      = true,
                 callback       = function()
-                    G_reader_settings:saveSetting(labels_key, not G_reader_settings:nilOrTrue(labels_key))
+                    SUISettings:saveSetting(labels_key, not SUISettings:nilOrTrue(labels_key))
                     ctx_menu.refresh()
                 end,
             },
@@ -373,7 +377,7 @@ local function makeSlot(slot)
     end
 
     function S.getCountLabel(pfx)
-        local n   = #(G_reader_settings:readSetting(pfx .. slot_suffix .. "_items") or {})
+        local n   = #(SUISettings:readSetting(pfx .. slot_suffix .. "_items") or {})
         local rem = MAX_QA - n
         if n == 0   then return nil end
         if rem <= 0 then return string.format("(%d/%d — at limit)", n, MAX_QA) end
@@ -382,20 +386,32 @@ local function makeSlot(slot)
 
     function S.build(w, ctx)
         if not S.isEnabled(ctx.pfx) then return nil end
-        local items_key   = ctx.pfx .. slot_suffix .. "_items"
-        local labels_key  = ctx.pfx .. slot_suffix .. "_labels"
-        local qa_ids      = G_reader_settings:readSetting(items_key) or {}
-        local show_labels = G_reader_settings:nilOrTrue(labels_key)
+        -- Items and labels are stored under pfx_qa (the short QA prefix) so
+        -- that the menu writers (makeQAMenu / makeQAMenuFallback) and the widget
+        -- builder read/write the same settings key.
+        local qa_pfx      = ctx.pfx_qa or ctx.pfx
+        local items_key   = qa_pfx .. slot .. "_items"
+        local labels_key  = qa_pfx .. slot .. "_labels"
+        local qa_ids      = SUISettings:readSetting(items_key) or {}
+        local show_labels = SUISettings:nilOrTrue(labels_key)
         local d           = _getQADims(Config.getModuleScale(S.id, ctx.pfx))
         -- Apply independent label text scale.
         local lbl_scale = Config.getItemLabelScale(S.id, ctx.pfx)
         d.lbl_fs = math.max(6, math.floor(d.lbl_fs * lbl_scale))
-        return buildQAWidget(w, qa_ids, show_labels, ctx.on_qa_tap, d, getType(ctx.pfx))
+        local ok_ss, SUIStyle  = pcall(require, "sui_style")
+        local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+        local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+        local colors = (_theme_fg or _theme_secondary) and {
+            blk = _theme_fg or Blitbuffer.COLOR_BLACK,
+            sub = _theme_secondary or _theme_fg or CLR_TEXT_SUB,
+        } or nil
+        return buildQAWidget(w, qa_ids, show_labels, ctx.on_qa_tap, d, getType(ctx.pfx), colors)
     end
 
     function S.getHeight(ctx)
-        local labels_key  = ctx.pfx .. slot_suffix .. "_labels"
-        local show_labels = G_reader_settings:nilOrTrue(labels_key)
+        local qa_pfx      = ctx.pfx_qa or ctx.pfx
+        local labels_key  = qa_pfx .. slot .. "_labels"
+        local show_labels = SUISettings:nilOrTrue(labels_key)
         local d           = _getQADims(Config.getModuleScale(S.id, ctx.pfx))
         return (show_labels and (d.frame_sz + d.lbl_sp + d.lbl_h) or d.frame_sz)
     end
@@ -418,7 +434,7 @@ local function makeSlot(slot)
         local labels_key_local = pfx .. slot_suffix .. "_labels"
         items[#items + 1] = Config.makeScaleItem({
             text_func    = function() return _lc("Text Size") end,
-            enabled_func = function() return G_reader_settings:nilOrTrue(labels_key_local) end,
+            enabled_func = function() return SUISettings:nilOrTrue(labels_key_local) end,
             separator    = true,
             title        = _lc("Text Size"),
             info         = _lc("Scale for the button label text.\n100% is the default size."),
@@ -431,16 +447,26 @@ local function makeSlot(slot)
                 local mode = getType(pfx)
                 local label = mode == "flat" and _lc("Flat")
                            or mode == "bare" and _lc("Bare")
-                           or _lc("Default")
+                           or mode == "default_transparent" and _lc("Square Buttons - Transparent")
+                           or _lc("Square Buttons")
                 return _lc("Type") .. " — " .. label
             end,
             sub_item_table = {
                 {
-                    text           = _lc("Default"),
+                    text           = _lc("Square Buttons"),
                     checked_func   = function() return getType(pfx) == "default" end,
                     keep_menu_open = true,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. TYPE_KEY, "default")
+                        SUISettings:saveSetting(pfx .. TYPE_KEY, "default")
+                        refresh()
+                    end,
+                },
+                {
+                    text           = _lc("Square Buttons - Transparent"),
+                    checked_func   = function() return getType(pfx) == "default_transparent" end,
+                    keep_menu_open = true,
+                    callback       = function()
+                        SUISettings:saveSetting(pfx .. TYPE_KEY, "default_transparent")
                         refresh()
                     end,
                 },
@@ -449,7 +475,7 @@ local function makeSlot(slot)
                     checked_func   = function() return getType(pfx) == "flat" end,
                     keep_menu_open = true,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. TYPE_KEY, "flat")
+                        SUISettings:saveSetting(pfx .. TYPE_KEY, "flat")
                         refresh()
                     end,
                 },
@@ -458,7 +484,7 @@ local function makeSlot(slot)
                     checked_func   = function() return getType(pfx) == "bare" end,
                     keep_menu_open = true,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. TYPE_KEY, "bare")
+                        SUISettings:saveSetting(pfx .. TYPE_KEY, "bare")
                         refresh()
                     end,
                 },

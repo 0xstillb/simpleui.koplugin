@@ -156,12 +156,6 @@ msgstr "Auto (primeiro livro)"
 #: sui_titlebar.lua:55
 msgid "Back"
 msgstr "Voltar"
-#: desktop_modules/module_collections.lua:662
-msgid "Badge position: Bottom"
-msgstr "Posição do distintivo: Base"
-#: desktop_modules/module_collections.lua:663
-msgid "Badge position: Top"
-msgstr "Posição do distintivo: Topo"
 #: sui_config.lua:168
 msgid "Battery"
 msgstr "Bateria"
@@ -397,6 +391,10 @@ msgid "Daily avg — Time"
 msgstr "Média diária — Tempo"
 #: desktop_modules/module_currently.lua:269
 #: desktop_modules/module_coverdeck.lua:76
+#: sui_menu.lua:2375
+msgid "Dark"
+msgstr "Escuro"
+
 msgid "Days of reading"
 msgstr "Dias de leitura"
 #: desktop_modules/module_clock.lua:56
@@ -734,6 +732,10 @@ msgstr "Esquerda"
 #: sui_config.lua:409
 #: sui_menu.lua:1964
 #: sui_titlebar.lua:967
+#: sui_menu.lua:2386
+msgid "Light"
+msgstr "Claro"
+
 msgid "Library"
 msgstr "Biblioteca"
 #: sui_menu.lua:1175
@@ -1287,21 +1289,13 @@ msgstr "Série"
 #: sui_menu.lua:2096
 msgid "Series Index"
 msgstr "Índice de Série"
-#: sui_foldercovers.lua:589
-msgid "Series cover"
-msgstr "Capa da série"
 #: sui_menu.lua:571
 msgid "Set"
 msgstr "Definir"
-#: sui_foldercovers.lua:693
-msgid "Set folder cover…"
-msgstr "Definir capa da pasta…"
-#: sui_foldercovers.lua:689
-msgid "Set series cover…"
-msgstr "Definir capa da série…"
-#: sui_foldercovers.lua:691
-msgid "Set virtual folder cover…"
-msgstr "Definir capa da pasta virtual…"
+#: sui_foldercovers.lua:788
+#: sui_browsemeta.lua:1099
+msgid "Set folder cover"
+msgstr "Definir capa da pasta"
 #: sui_menu.lua:1933
 msgid "Settings"
 msgstr "Configurações"
@@ -1536,6 +1530,31 @@ msgstr "Barra de Título"
 #: desktop_modules/module_coverdeck.lua:747
 msgid "Title Position"
 msgstr "Posição do Título"
+
+#: sui_menu.lua:2534
+msgid "Title and Author Below Covers"
+msgstr "Título e Autor Abaixo das Capas"
+
+#: sui_menu.lua:2488
+msgid "Title only"
+msgstr "Somente o Título"
+
+#: sui_menu.lua:2508
+msgid "Title and Author"
+msgstr "Título e Autor"
+
+#: sui_menu.lua:2477
+msgid "Title strip disabled.\n\nRestart now?"
+msgstr "Faixa de título desativada.\n\nReiniciar agora?"
+
+#: sui_menu.lua:2498
+msgid "Title strip enabled.\n\nRestart now?"
+msgstr "Faixa de título ativada.\n\nReiniciar agora?"
+
+#: sui_menu.lua:2518
+msgid "Title and author strip enabled.\n\nRestart now?"
+msgstr "Faixa de título e autor ativada.\n\nReiniciar agora?"
+
 #: desktop_modules/module_tbr.lua:229
 #: desktop_modules/module_tbr.lua:230
 #: desktop_modules/module_tbr.lua:244
@@ -1633,9 +1652,6 @@ msgid ""
 msgstr ""
 "Espaço vertical acima deste módulo.\n"
 "100% é o espaçamento padrão."
-#: sui_browsemeta.lua:778
-msgid "Virtual folder cover"
-msgstr "Capa da pasta virtual"
 #: sui_menu.lua:925
 msgid "Visible"
 msgstr "Visível"
@@ -1780,6 +1796,12 @@ msgid "  Set Goal  (%d book in %s)"
 msgid_plural "  Set Goal  (%d books in %s)"
 msgstr[0] "  Definir Meta  (%d livro em %s)"
 msgstr[1] "  Definir Meta  (%d livros em %s)"
+
+msgid "Cover Spacing"
+msgstr "Espaçamento da Capa"
+
+msgid "Horizontal space between the cover and the text.\n100% is the default spacing."
+msgstr "Espaço horizontal entre a capa e o texto.\n100% é o espaçamento padrão."
 #: desktop_modules/module_reading_goals.lua:418
 msgid "%d book"
 msgid_plural "%d books"
@@ -2233,6 +2255,412 @@ msgstr "mais recente"
 msgid "shown"
 msgstr "visível"
 
-#: sui_updater.lua:655
-msgid "⬆ Update available: %s"
-msgstr "⬆ Atualização disponível: %s"
+#: desktop_modules/module_collections.lua:740
+msgid "Badge"
+msgstr "Emblema"
+
+#: sui_menu.lua:2278
+msgid "Badges"
+msgstr "Emblemas"
+
+#: sui_menu.lua:2324
+msgid "Banner"
+msgstr "Banner"
+
+#: sui_menu.lua:2335
+msgid "Native"
+msgstr "Nativo"
+
+#: sui_menu.lua:2346
+msgid "None"
+msgstr "Nenhum"
+
+#: sui_menu.lua:2321
+msgid "Progress"
+msgstr "Progresso"
+
+#: sui_menu.lua:2359
+msgid "New Book"
+msgstr "Livro Novo"
+
+msgid "Enable wallpaper"
+msgstr "Ativar papel de parede"
+
+
+msgid "Transparent status bar"
+msgstr "Barra de estado transparente"
+
+
+msgid "Transparent navigation bar"
+msgstr "Barra de navegação transparente"
+
+
+msgid "Stretch to fill screen"
+msgstr "Esticar para preencher a tela"
+
+
+msgid "Rotate image"
+msgstr "Girar imagem"
+
+
+msgid "Invert image colours in night mode"
+msgstr "Inverter cores da imagem no modo noturno"
+
+
+msgid "Image opacity: %1%"
+msgstr "Opacidade da imagem: %1%"
+
+
+msgid "Image opacity"
+msgstr "Opacidade da imagem"
+
+
+msgid "Lower the opacity to improve readability."
+msgstr "Reduza a opacidade para melhorar a legibilidade."
+
+
+msgid "No images found.\nDrop files into:\n%1"
+msgstr "Nenhuma imagem encontrada.\nColoque arquivos em:\n%1"
+
+
+msgid "Wallpaper"
+msgstr "Papel de parede"
+
+
+msgid "Behaviour"
+msgstr "Comportamento"
+
+# ── Presets ────────────────────────────────────────────────────────────────
+#: sui_menu.lua:2232
+msgid "Preset "%s" not found."
+msgstr "Predefinição "%s" não encontrada."
+
+#: sui_menu.lua:2245
+msgid "Save as new preset…"
+msgstr "Salvar como nova predefinição…"
+
+#: sui_menu.lua:2251
+msgid "Save preset"
+msgstr "Salvar predefinição"
+
+#: sui_menu.lua:2253
+msgid "Preset name"
+msgstr "Nome da predefinição"
+
+#: sui_menu.lua:2270
+msgid "Please enter a name for the preset."
+msgstr "Por favor insira um nome para a predefinição."
+
+#: sui_menu.lua:2281
+msgid "Preset "%s" saved."
+msgstr "Predefinição "%s" salva."
+
+#: sui_menu.lua:2288
+msgid "A preset named "%s" already exists.\nOverwrite it?"
+msgstr "Já existe uma predefinição com o nome "%s".\nSobrescrever?"
+
+#: sui_menu.lua:2291
+#: sui_menu.lua:2326
+#: sui_menu.lua:2327
+msgid "Overwrite"
+msgstr "Sobrescrever"
+
+#: sui_menu.lua:2309
+msgid "Update existing preset…"
+msgstr "Atualizar predefinição existente…"
+
+#: sui_menu.lua:2322
+msgid "Overwrite preset "%s" with the current homescreen settings?"
+msgstr "Sobrescrever a predefinição "%s" com as configurações atuais da tela inicial?"
+
+#: sui_menu.lua:2331
+msgid "Preset "%s" updated."
+msgstr "Predefinição "%s" atualizada."
+
+#: sui_menu.lua:2347
+msgid "Rename preset…"
+msgstr "Renomear predefinição…"
+
+#: sui_menu.lua:2358
+msgid "Rename "%s""
+msgstr "Renomear "%s""
+
+#: sui_menu.lua:2383
+msgid "A preset named "%s" already exists."
+msgstr "Já existe uma predefinição com o nome "%s"."
+
+#: sui_menu.lua:2412
+msgid "Delete preset…"
+msgstr "Excluir predefinição…"
+
+#: sui_menu.lua:2423
+msgid "Delete preset "%s"?"
+msgstr "Excluir a predefinição "%s"?"
+
+
+msgid "A preset named \"%s\" already exists.\nOverwrite it?"
+msgstr "Já existe uma predefinição com o nome \"%s\".\nSubstituir?"
+
+msgid "Also search system fonts"
+msgstr "Incluir fontes do sistema"
+
+msgid "Back Button"
+msgstr "Botão de voltar"
+
+msgid "Browse Button (author)"
+msgstr "Botão de navegação (autor)"
+
+msgid "Browse Button (default)"
+msgstr "Botão de navegação (padrão)"
+
+msgid "Browse Button (series)"
+msgstr "Botão de navegação (série)"
+
+msgid "Browse Button (tags)"
+msgstr "Botão de navegação (etiquetas)"
+
+msgid "Enable custom UI font"
+msgstr "Ativar fonte personalizada"
+
+msgid "Icon Presets"
+msgstr "Predefinições de ícones"
+
+msgid "Icon Presets  (%d)"
+msgstr "Predefinições de ícones  (%d)"
+
+msgid "Icon Presets  [%s]"
+msgstr "Predefinições de ícones  [%s]"
+
+msgid "Menu Button"
+msgstr "Botão de menu"
+
+msgid "No fonts found — place .ttf/.otf files in sui_fonts/"
+msgstr "Nenhuma fonte encontrada — coloque arquivos .ttf/.otf em sui_fonts/"
+
+msgid "Overwrite preset \"%s\" with the current icon settings?"
+msgstr "Substituir a predefinição \"%s\" pelas configurações de ícones atuais?"
+
+msgid "Presets"
+msgstr "Predefinições"
+
+msgid "Presets  (%d)"
+msgstr "Predefinições  (%d)"
+
+msgid "Homepage Presets  (%d)"
+msgstr "Predefinições da página inicial  (%d)"
+
+msgid "Presets  [%s]"
+msgstr "Predefinições  [%s]"
+
+msgid "Homepage Presets  [%s]"
+msgstr "Predefinições da página inicial  [%s]"
+
+msgid "Quick Actions Icons"
+msgstr "Ícones de Ações Rápidas"
+
+msgid "Reset All System Icons"
+msgstr "Redefinir todos os ícones do sistema"
+
+msgid "Restart to fully apply the UI font change."
+msgstr "Reinicie para aplicar completamente a alteração de fonte."
+
+msgid "Save icon preset"
+msgstr "Salvar predefinição de ícones"
+
+msgid "Search Button"
+msgstr "Botão de pesquisa"
+
+msgid "Style"
+msgstr "Estilo"
+
+msgid "System Icons"
+msgstr "Ícones do sistema"
+
+msgid "UI Font"
+msgstr "Fonte da interface"
+
+msgid "UI Font  (default)"
+msgstr "Fonte da interface  (padrão)"
+
+msgid "UI Font  [%s]"
+msgstr "Fonte da interface  [%s]"
+
+
+msgid "Homepage Presets"
+msgstr "Predefinições da página inicial"
+
+
+msgid "Show wallpaper in File Manager"
+msgstr "Mostrar papel de parede no gestor de ficheiros"
+
+
+msgid "Show wallpaper in Reader"
+msgstr "Mostrar papel de parede no leitor"
+
+msgid "Home Screen — Background"
+msgstr "Tela Inicial — Fundo"
+
+msgid "Bottom Bar — Background"
+msgstr "Barra Inferior — Fundo"
+
+msgid "Status Bar — Background"
+msgstr "Barra de Status — Fundo"
+
+msgid "Home Screen — Text"
+msgstr "Tela Inicial — Texto"
+
+msgid "Bottom Bar — Text and Icons"
+msgstr "Barra Inferior — Texto e Ícones"
+
+msgid "Status Bar — Text"
+msgstr "Barra de Status — Texto"
+
+msgid "Secondary / Dim Text"
+msgstr "Texto Secundário / Esmaecido"
+
+msgid "Separator Line"
+msgstr "Linha Separadora"
+
+msgid "Accent / Active Color"
+msgstr "Cor de Destaque / Ativa"
+
+msgid "Apply Palette…"
+msgstr "Aplicar Paleta…"
+
+msgid "Reset All Theme Colors"
+msgstr "Redefinir Todas as Cores do Tema"
+
+msgid "Theme Colors"
+msgstr "Cores do Tema"
+
+msgid "Icon Packs"
+msgstr "Pacotes de Ícones"
+
+msgid "Icon Packs  (%d)"
+msgstr "Pacotes de Ícones  (%d)"
+
+msgid "Install pack from ZIP…"
+msgstr "Instalar pacote a partir de ZIP…"
+
+msgid "Open packs folder"
+msgstr "Abrir pasta de pacotes"
+
+msgid "No packs found.\nPlace a folder or .zip in:\n%1"
+msgstr "Nenhum pacote encontrado.\nColoque uma pasta ou .zip em:\n%1"
+
+msgid "Pack \"%s\" installed.\nYou can now apply it from the list."
+msgstr "Pacote \"%s\" instalado.\nAgora você pode aplicá-lo a partir da lista."
+
+msgid "Error installing pack:"
+msgstr "Erro ao instalar o pacote:"
+
+msgid "[zip]"
+msgstr "[zip]"
+
+msgid "Pack \"%s\" applied.\n%d icons replaced."
+msgstr "Pacote \"%s\" aplicado.\n%d ícones substituídos."
+
+msgid "Error applying pack:"
+msgstr "Erro ao aplicar o pacote:"
+
+msgid "Pagination Chevrons"
+msgstr "Setas de Paginação"
+
+msgid "Pagination: Previous Page"
+msgstr "Paginação: Página Anterior"
+
+msgid "Pagination: Next Page"
+msgstr "Paginação: Próxima Página"
+
+msgid "Pagination: First Page"
+msgstr "Paginação: Primeira Página"
+
+msgid "Pagination: Last Page"
+msgstr "Paginação: Última Página"
+
+msgid "Collections: Back Button"
+msgstr "Coleções: Botão Voltar"
+
+msgid "Show wallpaper on all screens"
+msgstr "Mostrar papel de parede em todas as telas"
+
+msgid "Navpager Arrows"
+msgstr "Setas do Navpager"
+
+msgid "Navpager: Previous"
+msgstr "Navpager: Anterior"
+
+msgid "Navpager: Next"
+msgstr "Navpager: Próxima"
+
+msgid "Import preset…"
+msgstr "Importar predefinição…"
+
+msgid "Preset \"%s\" imported."
+msgstr "Predefinição \"%s\" importada."
+
+msgid "Error importing preset: "
+msgstr "Erro ao importar predefinição: "
+
+msgid "Export preset…"
+msgstr "Exportar predefinição…"
+
+msgid "Preset exported to:\n%s"
+msgstr "Predefinição exportada para:\n%s"
+
+msgid "Error exporting preset: "
+msgstr "Erro ao exportar predefinição: "
+
+msgid "No export directory"
+msgstr "Nenhum diretório de exportação"
+
+msgid "Preset not found"
+msgstr "Predefinição não encontrada"
+
+msgid "LuaSettings module unavailable"
+msgstr "Módulo LuaSettings indisponível"
+
+msgid "Invalid preset file"
+msgstr "Arquivo de predefinição inválido"
+
+msgid "Invalid data"
+msgstr "Dados inválidos"
+
+msgid "Open import folder"
+msgstr "Abrir pasta de importação"
+
+msgid "No preset files found.\nPlace .lua files in:\n%1"
+msgstr "Nenhum arquivo de predefinição encontrado.\nColoque arquivos .lua em:\n%1"
+
+msgid "Factory Reset"
+msgstr "Restauração de Fábrica"
+
+msgid "This will delete all Simple UI settings and restart KOReader.\nAre you sure?"
+msgstr "Isso excluirá todas as configurações do Simple UI e reiniciará o KOReader.\nTem certeza?"
+
+msgid "Delete Settings"
+msgstr "Excluir Configurações"
+
+msgid "Cards - Transparent"
+msgstr "Cartões - Transparentes"
+
+msgid "Square Buttons"
+msgstr "Botões Quadrados"
+
+msgid "Square Buttons - Transparent"
+msgstr "Botões Quadrados - Transparentes"
+
+msgid "Default: Folder"
+msgstr "Padrão: Pasta"
+
+msgid "Default: Plugin"
+msgstr "Padrão: Plugin"
+
+msgid "Default: System"
+msgstr "Padrão: Sistema"
+
+msgid "Folder Covers: Empty Folder"
+msgstr "Capas de Pastas: Pasta Vazia"
+
+msgid "Reset All Quick Action Icons"
+msgstr "Redefinir Todos os Ícones de Ações Rápidas"

@@ -276,6 +276,8 @@ function SH.coverPlaceholder(title, authors, w, h)
                 face      = Font:getFace("cfont", math.max(authors_font_max - sizedec, authors_font_min)),
                 width     = text_width,
                 alignment = "center",
+                bgcolor   = nil,
+                alpha     = true,
             }
             texts_height = texts_height + authors_wg:getSize().h
         end
@@ -285,6 +287,8 @@ function SH.coverPlaceholder(title, authors, w, h)
                 face      = Font:getFace("cfont", math.max(title_font_max - sizedec, title_font_min)),
                 width     = text_width,
                 alignment = "center",
+                bgcolor   = nil,
+                alpha     = true,
             }
             texts_height = texts_height + title_wg:getSize().h
         end

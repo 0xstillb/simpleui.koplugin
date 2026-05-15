@@ -23,6 +23,7 @@ local logger          = require("logger")
 local Config          = require("sui_config")
 
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local PAD2         = UI.PAD2
 local LABEL_H      = UI.LABEL_H
@@ -79,17 +80,17 @@ end
 local function _getYearStr() return os.date("%Y") end
 
 -- Settings keys
-local SHOW_ANNUAL = "navbar_reading_goals_show_annual"
-local SHOW_DAILY  = "navbar_reading_goals_show_daily"
-local LAYOUT_KEY  = "navbar_reading_goals_layout"  -- "default" | "compact"
+local SHOW_ANNUAL = "simpleui_reading_goals_show_annual"
+local SHOW_DAILY  = "simpleui_reading_goals_show_daily"
+local LAYOUT_KEY  = "simpleui_reading_goals_layout"  -- "default" | "compact"
 
-local function isCompact()    return G_reader_settings:readSetting(LAYOUT_KEY) == "compact" end
-local function showAnnual()   return G_reader_settings:readSetting(SHOW_ANNUAL) ~= false end
-local function showDaily()    return G_reader_settings:readSetting(SHOW_DAILY)  ~= false end
+local function isCompact()    return SUISettings:readSetting(LAYOUT_KEY) == "compact" end
+local function showAnnual()   return SUISettings:readSetting(SHOW_ANNUAL) ~= false end
+local function showDaily()    return SUISettings:readSetting(SHOW_DAILY)  ~= false end
 
-local function getAnnualGoal()     return G_reader_settings:readSetting("navbar_reading_goal") or 0 end
-local function getAnnualPhysical() return G_reader_settings:readSetting("navbar_reading_goal_physical") or 0 end
-local function getDailyGoalSecs()  return G_reader_settings:readSetting("navbar_daily_reading_goal_secs") or 0 end
+local function getAnnualGoal()     return SUISettings:readSetting("simpleui_reading_goal") or 0 end
+local function getAnnualPhysical() return SUISettings:readSetting("simpleui_reading_goal_physical") or 0 end
+local function getDailyGoalSecs()  return SUISettings:readSetting("simpleui_daily_reading_goal_secs") or 0 end
 
 -- Formats seconds as "Xh Ym" / "Xh" / "Ym"
 local function formatDuration(secs)
@@ -190,7 +191,7 @@ end
 -- Builds a single inline row: Label [bar] XX%  detail
 -- Used by the Compact layout. All elements are horizontally laid out and vertically centred.
 -- lbl_w is pre-computed by _measureLblW so both rows share the same column width.
-local function buildCompactGoalRow(inner_w, lbl_w, pct_w, label_str, pct, pct_str, detail_str, on_tap, cd)
+local function buildCompactGoalRow(inner_w, lbl_w, pct_w, label_str, pct, pct_str, detail_str, on_tap, cd, clr_sub, clr_blk)
     local LeftContainer  = require("ui/widget/container/leftcontainer")
     local RightContainer = require("ui/widget/container/rightcontainer")
 
@@ -220,30 +221,31 @@ local function buildCompactGoalRow(inner_w, lbl_w, pct_w, label_str, pct, pct_st
         return RightContainer:new{ dimen = Geom:new{ w = col_w, h = ROW_H }, child }
     end
 
+    local eff_blk = clr_blk or _CLR_TEXT_LBL
     local row = HorizontalGroup:new{
         align = "center",
-        vcenter_left(TextWidget:new{
+        vcenter_left(UI.makeColoredText{
             text    = label_str,
             face    = cd.face_row,
             bold    = true,
-            fgcolor = _CLR_TEXT_LBL,
+            fgcolor = eff_blk,
             width   = lbl_w,
         }, lbl_w),
         HorizontalSpan:new{ width = LBL_BAR_GAP },
         vcenter_left(buildProgressBar(bar_w, pct, cd.bar_h), bar_w),
         HorizontalSpan:new{ width = BAR_PCT_GAP },
-        vcenter_left(TextWidget:new{
+        vcenter_left(UI.makeColoredText{
             text    = pct_str,
             face    = cd.face_row,
             bold    = true,
-            fgcolor = _CLR_TEXT_PCT,
+            fgcolor = eff_blk,
             width   = PCT_W,
         }, PCT_W),
         HorizontalSpan:new{ width = PCT_DETAIL_GAP },
-        vcenter_right(TextWidget:new{
+        vcenter_right(UI.makeColoredText{
             text      = detail_str,
             face      = cd.face_sub,
-            fgcolor   = CLR_TEXT_SUB,
+            fgcolor   = clr_sub or CLR_TEXT_SUB,
             width     = DETAIL_W,
             alignment = "right",
         }, DETAIL_W),
@@ -276,7 +278,9 @@ end
 
 -- Builds a two-line goal row: label + bar + pct on the first line, detail text below.
 -- Used by the Default layout. Accepts a pre-computed dims table from _scaledDims.
-local function buildGoalRow(inner_w, label_str, pct, pct_str, detail_str, on_tap, d)
+local function buildGoalRow(inner_w, label_str, pct, pct_str, detail_str, on_tap, d, clr_sub_eff, clr_blk_eff)
+    clr_sub_eff = clr_sub_eff or CLR_TEXT_SUB
+    clr_blk_eff = clr_blk_eff or _CLR_TEXT_LBL
     local PCT_W       = d.pct_w
     local LBL_BAR_GAP = d.col_gap
     local BAR_PCT_GAP = d.col_gap
@@ -291,30 +295,30 @@ local function buildGoalRow(inner_w, label_str, pct, pct_str, detail_str, on_tap
         align = "left",
         HorizontalGroup:new{
             align = "center",
-            TextWidget:new{
+            UI.makeColoredText{
                 text    = label_str,
                 face    = d.face_row,
                 bold    = true,
-                fgcolor = _CLR_TEXT_LBL,
+                fgcolor = clr_blk_eff,
                 width   = d.lbl_w,
             },
             HorizontalSpan:new{ width = LBL_BAR_GAP },
             buildProgressBar(bar_w, pct, d.bar_h),
             HorizontalSpan:new{ width = BAR_PCT_GAP },
-            TextWidget:new{
+            UI.makeColoredText{
                 text      = pct_str,
                 face      = d.face_row,
                 bold      = true,
-                fgcolor   = _CLR_TEXT_PCT,
+                fgcolor   = clr_blk_eff,
                 width     = PCT_W,
                 alignment = "right",
             },
         },
         VerticalSpan:new{ width = d.sub_gap },
-        TextWidget:new{
+        UI.makeColoredText{
             text    = detail_str,
             face    = d.face_sub,
-            fgcolor = CLR_TEXT_SUB,
+            fgcolor = clr_sub_eff,
             width   = inner_w,
         },
     }
@@ -364,7 +368,7 @@ local function showAnnualGoalDialog(on_confirm)
         value_min   = 0, value_max = 365, value_step = 1,
         ok_text     = _("Save"), cancel_text = _("Cancel"),
         callback    = function(spin)
-            G_reader_settings:saveSetting("navbar_reading_goal", math.floor(spin.value))
+            SUISettings:saveSetting("simpleui_reading_goal", math.floor(spin.value))
             _refreshHS()
             if on_confirm then on_confirm() end
         end,
@@ -380,7 +384,7 @@ local function showAnnualPhysicalDialog(on_confirm)
         value       = getAnnualPhysical(), value_min = 0, value_max = 365, value_step = 1,
         ok_text     = _("Save"), cancel_text = _("Cancel"),
         callback    = function(spin)
-            G_reader_settings:saveSetting("navbar_reading_goal_physical", math.floor(spin.value))
+            SUISettings:saveSetting("simpleui_reading_goal_physical", math.floor(spin.value))
             _refreshHS()
             if on_confirm then on_confirm() end
         end,
@@ -397,7 +401,7 @@ local function showDailySettingsDialog(on_confirm)
         value       = cur_minutes, value_min = 0, value_max = 720, value_step = 5,
         ok_text     = _("Save"), cancel_text = _("Cancel"),
         callback    = function(spin)
-            G_reader_settings:saveSetting("navbar_daily_reading_goal_secs",
+            SUISettings:saveSetting("simpleui_daily_reading_goal_secs",
                 math.floor(spin.value) * 60)
             _refreshHS()
             if on_confirm then on_confirm() end
@@ -488,6 +492,13 @@ function M.build(w, ctx)
     local rows    = VerticalGroup:new{ align = "left" }
     local compact = isCompact()
 
+    -- Theme
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local CLR_TEXT_BLK_EFF = _theme_fg or _CLR_TEXT_LBL
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+
     if compact then
         -- Compute compact dims using Config.getModuleScale so the landscape
         -- override in sui_homescreen (scale *= 0.65) is automatically honoured.
@@ -509,7 +520,7 @@ function M.build(w, ctx)
             local lbl_w = _measureLblW({ year_str }, cd.face_row, cd.lbl_w)
             rows[#rows+1] = buildCompactGoalRow(
                 inner_w, lbl_w, pct_w, year_str, ann_pct, ann_pct_str, ann_detail,
-                function() showAnnualGoalDialog() end, cd)
+                function() showAnnualGoalDialog() end, cd, CLR_TEXT_SUB_EFF, CLR_TEXT_BLK_EFF)
         end
         if show_ann and show_day then
             rows[#rows+1] = VerticalSpan:new{ width = cd.row_gap }
@@ -518,7 +529,7 @@ function M.build(w, ctx)
             local lbl_w = _measureLblW({ _("Today") }, cd.face_row, cd.lbl_w)
             rows[#rows+1] = buildCompactGoalRow(
                 inner_w, lbl_w, pct_w, _("Today"), day_pct, day_pct_str, day_detail,
-                function() showDailySettingsDialog() end, cd)
+                function() showDailySettingsDialog() end, cd, CLR_TEXT_SUB_EFF, CLR_TEXT_BLK_EFF)
         end
     else
         local scale    = Config.getModuleScale("reading_goals", ctx.pfx)
@@ -533,7 +544,7 @@ function M.build(w, ctx)
             d.lbl_w = ann_lbl_w
             rows[#rows+1] = buildGoalRow(
                 inner_w, year_str, pct, pct_str, detail,
-                function() showAnnualGoalDialog() end, d)
+                function() showAnnualGoalDialog() end, d, CLR_TEXT_SUB_EFF, CLR_TEXT_BLK_EFF)
         end
         if show_ann and show_day then
             rows[#rows+1] = VerticalSpan:new{ width = d.row_gap }
@@ -544,7 +555,7 @@ function M.build(w, ctx)
             d.lbl_w = day_lbl_w
             rows[#rows+1] = buildGoalRow(
                 inner_w, _("Today"), pct, pct_str, detail,
-                function() showDailySettingsDialog() end, d)
+                function() showDailySettingsDialog() end, d, CLR_TEXT_SUB_EFF, CLR_TEXT_BLK_EFF)
         end
     end
 
@@ -597,7 +608,7 @@ function M.getMenuItems(ctx_menu)
                 checked_func = function() return not isCompact() end,
                 keep_menu_open = true,
                 callback = function()
-                    G_reader_settings:saveSetting(LAYOUT_KEY, "default")
+                    SUISettings:saveSetting(LAYOUT_KEY, "default")
                     refresh()
                 end },
               { text         = _lc("Compact"),
@@ -605,7 +616,7 @@ function M.getMenuItems(ctx_menu)
                 checked_func = function() return isCompact() end,
                 keep_menu_open = true,
                 callback = function()
-                    G_reader_settings:saveSetting(LAYOUT_KEY, "compact")
+                    SUISettings:saveSetting(LAYOUT_KEY, "compact")
                     refresh()
                 end },
           },
@@ -617,7 +628,7 @@ function M.getMenuItems(ctx_menu)
           checked_func = function() return showAnnual() end,
           keep_menu_open = true,
           callback = function()
-              G_reader_settings:saveSetting(SHOW_ANNUAL, not showAnnual())
+              SUISettings:saveSetting(SHOW_ANNUAL, not showAnnual())
               refresh()
           end },
         { text_func = function()
@@ -638,7 +649,7 @@ function M.getMenuItems(ctx_menu)
           checked_func = function() return showDaily() end,
           keep_menu_open = true,
           callback = function()
-              G_reader_settings:saveSetting(SHOW_DAILY, not showDaily())
+              SUISettings:saveSetting(SHOW_DAILY, not showDaily())
               refresh()
           end },
         { text_func = function()

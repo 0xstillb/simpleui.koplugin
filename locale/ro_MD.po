@@ -182,7 +182,7 @@ msgstr "Autor: %s"
 #: sui_foldercovers.lua:540 sui_foldercovers.lua:605
 #: desktop_modules/module_collections.lua:583
 msgid "Auto (first book)"
-msgstr "Auto (prima carte)"
+msgstr ""
 
 #: sui_titlebar.lua:55
 msgid "Back"
@@ -252,7 +252,7 @@ msgstr "Marginea de jos"
 
 #: sui_menu.lua:862
 msgid "Bottom Margin — %d%%"
-msgstr "Marginea de jos — %d%%"
+msgstr ""
 
 #: sui_config.lua:139 sui_config.lua:161
 msgid "Brightness"
@@ -384,7 +384,7 @@ msgstr "Carte în curs"
 
 #: sui_config.lua:555
 msgid "Custom"
-msgstr "Personalizat"
+msgstr ""
 
 #: sui_config.lua:165 sui_menu.lua:554
 msgid "Custom Text"
@@ -423,7 +423,7 @@ msgstr "Media zilnică — Timp"
 #: desktop_modules/module_coverdeck.lua:76
 #: desktop_modules/module_currently.lua:269
 msgid "Days of reading"
-msgstr "Zile de citire"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:56
 msgid "December"
@@ -439,7 +439,7 @@ msgstr "Implicit"
 
 #: sui_quickactions.lua:801 sui_quickactions.lua:820
 msgid "Default (Folder)"
-msgstr "Implicit (dosar)"
+msgstr ""
 
 #: sui_quickactions.lua:847
 msgid "Default (Plugin)"
@@ -451,7 +451,7 @@ msgstr "Implicit (sistem)"
 
 #: desktop_modules/module_quote.lua:1042
 msgid "Default Quotes"
-msgstr "Citate implicite"
+msgstr ""
 
 #: sui_quickactions.lua:1147 sui_quickactions.lua:1152
 msgid "Delete"
@@ -763,7 +763,7 @@ msgstr "KOReader"
 
 #: sui_menu.lua:1764
 msgid "Label Scale"
-msgstr "Scalare etichete"
+msgstr ""
 
 #: sui_menu.lua:903 sui_menu.lua:906
 msgid "Label Size"
@@ -848,7 +848,7 @@ msgstr "Module"
 
 #: sui_menu.lua:1473
 msgid "Modules  (%d)"
-msgstr "Module  (%d)"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:50
 msgid "Monday"
@@ -865,7 +865,7 @@ msgstr "Nume"
 
 #: sui_menu.lua:1943
 msgid "Navigation Bar"
-msgstr "Bara de navigare"
+msgstr ""
 
 #: sui_menu.lua:362
 msgid "Navpager"
@@ -887,7 +887,7 @@ msgstr "Pictogramă Nerd Font"
 
 #: sui_quickactions.lua:523
 msgid "Nerd Font symbol…"
-msgstr "Simbol Nerd Font…"
+msgstr ""
 
 #: sui_bottombar.lua:1437
 msgid "Network manager unavailable."
@@ -1043,11 +1043,11 @@ msgstr "Overlay-uri"
 
 #: sui_homescreen.lua:1611 sui_patches.lua:1567
 msgid "Page %1 of %2"
-msgstr "Pagina %1 din %2"
+msgstr ""
 
 #: sui_menu.lua:1944
 msgid "Pagination Bar"
-msgstr "Bara de paginare"
+msgstr ""
 
 #: sui_menu.lua:379
 msgid ""
@@ -1091,11 +1091,11 @@ msgstr "Overlay de procentaj pe copertă"
 #: desktop_modules/module_currently.lua:268
 #: desktop_modules/module_currently.lua:911
 msgid "Percentage read"
-msgstr "Procentaj citit"
+msgstr ""
 
 #: desktop_modules/module_recent.lua:294
 msgid "Percentage text"
-msgstr "Text procentaj"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:370
 msgid "Physical Books — %s"
@@ -1119,7 +1119,7 @@ msgstr "Eroare plugin: %s"
 
 #: sui_quickactions.lua:1239
 msgid "Plugin not available: %s"
-msgstr "Plugin indisponibil: %s"
+msgstr ""
 
 #: sui_config.lua:141
 msgid "Power"
@@ -1132,7 +1132,7 @@ msgstr "Ant."
 #: desktop_modules/module_currently.lua:267
 #: desktop_modules/module_recent.lua:284
 msgid "Progress bar"
-msgstr "Bara de progres"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:923
 msgid "Progress bar style"
@@ -1180,7 +1180,7 @@ msgstr "Obiective citire"
 
 #: desktop_modules/module_reading_stats.lua:218
 msgid "Reading Stats"
-msgstr "Statistici citire"
+msgstr ""
 
 #: desktop_modules/module_coverdeck.lua:728
 #: desktop_modules/module_recent.lua:62 desktop_modules/module_recent.lua:63
@@ -1593,7 +1593,7 @@ msgstr "Aspectul statisticilor"
 
 #: sui_menu.lua:1935
 msgid "Status Bar"
-msgstr "Bara de stare"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:67
 msgid "Streak"
@@ -1609,7 +1609,7 @@ msgstr "duminică"
 
 #: sui_menu.lua:518
 msgid "Swipe Indicator"
-msgstr "Indicator de glisare"
+msgstr ""
 
 #: sui_quickactions.lua:897
 msgid "System Actions"
@@ -1621,7 +1621,7 @@ msgstr "Eroare acțiune de sistem: %s"
 
 #: sui_menu.lua:945
 msgid "Tabs  (%d/%d — %d left)"
-msgstr "File  (%d/%d — %d rămase)"
+msgstr ""
 
 #: sui_menu.lua:943
 msgid "Tabs  (%d/%d — at limit)"
@@ -1682,7 +1682,7 @@ msgstr "Titlu"
 
 #: sui_menu.lua:1936
 msgid "Title Bar"
-msgstr "Bara de titlu"
+msgstr ""
 
 #: desktop_modules/module_coverdeck.lua:747
 msgid "Title Position"
@@ -1742,11 +1742,11 @@ msgstr ""
 
 #: sui_homescreen.lua:1681
 msgid "Top Margin  (%d%%)"
-msgstr "Marginea de sus  (%d%%)"
+msgstr ""
 
 #: sui_menu.lua:921
 msgid "Top separator"
-msgstr "Separator superior"
+msgstr ""
 
 #: sui_menu.lua:2071
 msgid "Transparent"
@@ -1788,7 +1788,7 @@ msgstr ""
 
 #: sui_menu.lua:2185
 msgid "Version: %s"
-msgstr "Versiune: %s"
+msgstr ""
 
 #: sui_homescreen.lua:1684
 msgid ""
@@ -1808,7 +1808,7 @@ msgstr "miercuri"
 
 #: sui_updater.lua:412
 msgid "What's new:"
-msgstr "Ce este nou:"
+msgstr ""
 
 #: sui_menu.lua:1854
 msgid ""
@@ -1875,7 +1875,7 @@ msgstr "Căutare pe Wikipedia"
 
 #: desktop_modules/module_currently.lua:936
 msgid "With percentage"
-msgstr "Cu procentaj"
+msgstr ""
 
 #: desktop_modules/module_quote.lua:748
 msgid "Your highlights"
@@ -1917,11 +1917,11 @@ msgstr "dezactivat"
 
 #: sui_quickactions.lua:800
 msgid "e.g. Comics…"
-msgstr "ex: benzi desenate…"
+msgstr ""
 
 #: sui_quickactions.lua:846
 msgid "e.g. Rakuyomi…"
-msgstr "ex: Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:819
 msgid "e.g. Sci-Fi…"
@@ -1937,7 +1937,7 @@ msgstr "activat"
 
 #: sui_quickactions.lua:440
 msgid "hex code, e.g. E001"
-msgstr "cod hex, ex: E001"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "no streak"
@@ -1945,7 +1945,7 @@ msgstr "nicio serie"
 
 #: sui_quickactions.lua:1113 sui_quickactions.lua:1129
 msgid "not configured"
-msgstr "neconfigurat"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:61
 msgid "of reading today"
@@ -1961,7 +1961,7 @@ msgstr "pagini citite astăzi"
 
 #: desktop_modules/module_reading_stats.lua:64
 msgid "pages/day (7 days)"
-msgstr "pagini/zi (7 zile)"
+msgstr ""
 
 #: sui_menu.lua:238 sui_menu.lua:1336
 #: desktop_modules/module_collections.lua:689

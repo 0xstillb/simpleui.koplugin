@@ -41,7 +41,7 @@ msgstr "%d%%"
 #: desktop_modules/module_coverdeck.lua:571
 #: desktop_modules/module_recent.lua:159
 msgid "%d%% Read"
-msgstr "%d%% прочетено"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:605
 msgid "%s left"
@@ -52,7 +52,7 @@ msgstr "остават %s"
 #: desktop_modules/module_reading_goals.lua:434
 #: desktop_modules/module_coverdeck.lua:576
 msgid "%s read"
-msgstr "%s прочетено"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:572
 #: desktop_modules/module_coverdeck.lua:582
@@ -97,7 +97,7 @@ msgstr "Годишна цел"
 
 #: sui_menu.lua:1233 desktop_modules/module_reading_goals.lua:354
 msgid "Annual Reading Goal"
-msgstr "Годишна цел за четене"
+msgstr ""
 
 #: sui_config.lua:1653 sui_config.lua:1734 sui_menu.lua:769 sui_menu.lua:839
 #: sui_menu.lua:1740 sui_menu.lua:1775
@@ -232,7 +232,7 @@ msgstr "Долно поле"
 
 #: sui_menu.lua:866
 msgid "Bottom Margin — %d%%"
-msgstr "Долно поле — %d%%"
+msgstr ""
 
 #: sui_config.lua:141 sui_config.lua:167
 msgid "Brightness"
@@ -256,7 +256,7 @@ msgstr "Прегледът по Автори/Поредици не е налич
 
 #: sui_titlebar.lua:817
 msgid "Browse library"
-msgstr "Преглед на библиотеката"
+msgstr ""
 
 #: sui_menu.lua:1165
 msgid "Button Size"
@@ -300,11 +300,11 @@ msgstr "Промяна на иконите"
 
 #: sui_menu.lua:2242
 msgid "Check for Updates"
-msgstr "Проверка за актуализации"
+msgstr ""
 
 #: sui_updater.lua:460
 msgid "Checking for updates…"
-msgstr "Проверка за актуализации…"
+msgstr ""
 
 #: sui_config.lua:165 desktop_modules/module_clock.lua:227
 msgid "Clock"
@@ -341,7 +341,7 @@ msgstr "Колекции"
 
 #: sui_patches.lua:1062
 msgid "Collections (%1)"
-msgstr "Колекции (%1)"
+msgstr ""
 
 #: sui_bottombar.lua:1317
 msgid "Collections not available."
@@ -362,7 +362,7 @@ msgstr "Продължаване"
 
 #: desktop_modules/module_coverdeck.lua:325
 msgid "Cover Deck"
-msgstr "Колода корици"
+msgstr ""
 
 #: desktop_modules/module_collections.lua:613
 msgid "Cover for \"%s\""
@@ -389,7 +389,7 @@ msgstr "Създаване на бързо действие"
 #: desktop_modules/module_currently.lua:402
 #: desktop_modules/module_currently.lua:981
 msgid "Currently Reading"
-msgstr "В момента чета"
+msgstr ""
 
 #: sui_config.lua:561
 msgid "Custom"
@@ -401,11 +401,11 @@ msgstr "Файл по избор"
 
 #: sui_config.lua:171 sui_menu.lua:558
 msgid "Custom Text"
-msgstr "Текст по избор"
+msgstr ""
 
 #: sui_menu.lua:1142
 msgid "Custom Title Bar"
-msgstr "Заглавна лента по избор"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:630
 msgid "Daily Goal"
@@ -439,11 +439,11 @@ msgstr "Декември"
 #: desktop_modules/module_quick_actions.lua:406
 #: desktop_modules/module_quick_actions.lua:411
 msgid "Default"
-msgstr "По подразбиране"
+msgstr ""
 
 #: sui_quickactions.lua:851 sui_quickactions.lua:870
 msgid "Default (Folder)"
-msgstr "По подразбиране (Папка)"
+msgstr ""
 
 #: sui_quickactions.lua:897
 msgid "Default (Plugin)"
@@ -451,11 +451,11 @@ msgstr "По подразбиране (Плъгин)"
 
 #: sui_quickactions.lua:925
 msgid "Default (System)"
-msgstr "По подразбиране (Система)"
+msgstr ""
 
 #: desktop_modules/module_quote.lua:1198
 msgid "Default Quotes"
-msgstr "Цитати по подразбиране"
+msgstr ""
 
 #: sui_quickactions.lua:1197 sui_quickactions.lua:1202
 msgid "Delete"
@@ -471,7 +471,7 @@ msgstr "Търсене в речник"
 
 #: sui_menu.lua:1234
 msgid "Digital Goal  (%s)"
-msgstr "Дигитална цел  (%s)"
+msgstr ""
 
 #: sui_menu.lua:1760
 msgid "Disable \"Lock Scale\" first to set a custom label scale."
@@ -513,7 +513,7 @@ msgstr "Редактиране"
 
 #: sui_menu.lua:550 sui_menu.lua:552
 msgid "Edit Custom Text"
-msgstr "Редактиране на текста по избор"
+msgstr ""
 
 #: sui_quickactions.lua:752
 msgid "Edit Quick Action"
@@ -526,11 +526,11 @@ msgstr ""
 
 #: sui_updater.lua:466
 msgid "Error checking for updates."
-msgstr "Грешка при проверка за актуализации."
+msgstr ""
 
 #: sui_updater.lua:471
 msgid "Error checking for updates: "
-msgstr "Грешка при проверка за актуализации: "
+msgstr ""
 
 #: sui_menu.lua:461
 msgid "Extra Small"
@@ -538,7 +538,7 @@ msgstr "Много малък"
 
 #: sui_updater.lua:350
 msgid "Extraction error: "
-msgstr "Грешка при разархивиране: "
+msgstr ""
 
 #: sui_quickactions.lua:620 sui_config.lua:138
 msgid "Favorites"
@@ -572,15 +572,15 @@ msgstr "Папка"
 
 #: sui_menu.lua:2023
 msgid "Folder Covers"
-msgstr "Корици на папки"
+msgstr ""
 
 #: sui_menu.lua:2102
 msgid "Folder Name"
-msgstr "Име на папка"
+msgstr ""
 
 #: sui_menu.lua:2154
 msgid "Folder Name Text Size"
-msgstr "Размер на текста за име на папка"
+msgstr ""
 
 #: sui_quickactions.lua:623
 msgid "Folder Shortcuts"
@@ -588,7 +588,7 @@ msgstr "Преки пътища към папки"
 
 #: sui_foldercovers.lua:656
 msgid "Folder cover"
-msgstr "Корица на папка"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:51
 msgid "Friday"
@@ -613,7 +613,7 @@ msgstr "Скрито"
 
 #: sui_menu.lua:1350 desktop_modules/module_quick_actions.lua:334
 msgid "Hide Text"
-msgstr "Скриване на текста"
+msgstr ""
 
 #: sui_menu.lua:532
 msgid "Hide Wi-Fi icon when off"
@@ -670,7 +670,7 @@ msgstr "Размер на иконата — %d%%"
 
 #: sui_quickactions.lua:756
 msgid "Icon: Default"
-msgstr "Икона: По подразбиране"
+msgstr ""
 
 #: sui_menu.lua:107
 msgid "Icons"
@@ -744,7 +744,7 @@ msgstr "Библиотека"
 
 #: sui_menu.lua:1175
 msgid "Library Buttons"
-msgstr "Бутони на библиотеката"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:453
 msgid "List"
@@ -761,9 +761,6 @@ msgstr "Март"
 #: desktop_modules/module_collections.lua:709
 msgid "Maximum 5 collections. Remove one first."
 msgstr ""
-"Максимум 5 колекции.\n"
-"Премахнете една."
-
 #: desktop_modules/module_clock.lua:55
 msgid "May"
 msgstr "Май"
@@ -784,7 +781,7 @@ msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:389
 msgid "Minutes per day:"
-msgstr "Минути на ден:"
+msgstr ""
 
 #: sui_menu.lua:1731
 msgid "Module Scale"
@@ -800,7 +797,7 @@ msgstr "Модули"
 
 #: sui_menu.lua:1477
 msgid "Modules  (%d)"
-msgstr "Модули  (%d)"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:50
 msgid "Monday"
@@ -825,7 +822,7 @@ msgstr "Навигатор"
 
 #: sui_quickactions.lua:488
 msgid "Nerd Font Icon"
-msgstr "Nerd Font икона"
+msgstr ""
 
 #: sui_quickactions.lua:573
 msgid "Nerd Font symbol…"
@@ -946,7 +943,7 @@ msgstr "Брой книги в папката"
 
 #: sui_menu.lua:1482 sui_menu.lua:2090
 msgid "Number of Pages"
-msgstr "Брой страници"
+msgstr ""
 
 #: sui_menu.lua:500
 msgid "Number of Pages in Title Bar Always"
@@ -996,7 +993,7 @@ msgstr "Страница %1 от %2"
 
 #: sui_menu.lua:1948
 msgid "Pagination Bar"
-msgstr "Лента за страници"
+msgstr ""
 
 #: sui_quickactions.lua:833
 msgid "Path chooser not available."
@@ -1010,11 +1007,11 @@ msgstr "Процент върху корицата"
 #: desktop_modules/module_currently.lua:911
 #: desktop_modules/module_coverdeck.lua:75
 msgid "Percentage read"
-msgstr "Процент прочетено"
+msgstr ""
 
 #: desktop_modules/module_recent.lua:294
 msgid "Percentage text"
-msgstr "Текст на процента"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:371
 msgid "Physical Books — %s"
@@ -1060,7 +1057,7 @@ msgstr "Лента на прогреса"
 
 #: desktop_modules/module_currently.lua:923
 msgid "Progress bar style"
-msgstr "Стил на лентата за прогрес"
+msgstr ""
 
 #: sui_menu.lua:1455 sui_menu.lua:1955
 msgid "Quick Actions"
@@ -1110,7 +1107,7 @@ msgstr "Статистика за четене"
 #: desktop_modules/module_recent.lua:62 desktop_modules/module_recent.lua:63
 #: desktop_modules/module_recent.lua:72 desktop_modules/module_recent.lua:281
 msgid "Recent Books"
-msgstr "Последни книги"
+msgstr ""
 
 #: desktop_modules/module_tbr.lua:265
 msgid "Remove from To Be Read"
@@ -1118,7 +1115,7 @@ msgstr "Премахване от „За четене“"
 
 #: sui_quickactions.lua:1056 sui_quickactions.lua:1114
 msgid "Rename"
-msgstr "Преименуване"
+msgstr ""
 
 #: sui_quickactions.lua:1065 sui_menu.lua:1796
 msgid "Reset"
@@ -1226,7 +1223,7 @@ msgstr "Задаване корица на поредица…"
 
 #: sui_foldercovers.lua:691
 msgid "Set virtual folder cover…"
-msgstr "Задаване корица на виртуална папка…"
+msgstr ""
 
 #: sui_menu.lua:1933
 msgid "Settings"
@@ -1262,7 +1259,7 @@ msgstr "Simple UI"
 
 #: sui_updater.lua:399
 msgid "Simple UI is up to date (%s)."
-msgstr "Simple UI е актуален (%s)."
+msgstr ""
 
 #: sui_menu.lua:457 sui_menu.lua:756 sui_menu.lua:826
 msgid "Size"
@@ -1299,7 +1296,7 @@ msgstr "Статистики"
 
 #: desktop_modules/module_currently.lua:951
 msgid "Stats layout"
-msgstr "Изглед на статистиките"
+msgstr ""
 
 #: sui_menu.lua:1939
 msgid "Status Bar"
@@ -1311,7 +1308,7 @@ msgstr "Серия"
 
 #: sui_menu.lua:1180
 msgid "Sub-pages Buttons"
-msgstr "Бутони за подстраници"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:50
 msgid "Sunday"
@@ -1335,7 +1332,7 @@ msgstr "Раздели  (%d/%d — остават %d)"
 
 #: sui_menu.lua:947
 msgid "Tabs  (%d/%d — at limit)"
-msgstr "Раздели  (%d/%d — лимит)"
+msgstr ""
 
 #: sui_menu.lua:107
 msgid "Text"
@@ -1392,7 +1389,7 @@ msgstr "Заглавие"
 
 #: sui_menu.lua:1940
 msgid "Title Bar"
-msgstr "Заглавна лента"
+msgstr ""
 
 #: desktop_modules/module_coverdeck.lua:747
 msgid "Title Position"
@@ -1444,7 +1441,7 @@ msgstr "Размер на горната лента"
 
 #: sui_homescreen.lua:1743
 msgid "Top Margin  (%d%%)"
-msgstr "Горно поле  (%d%%)"
+msgstr ""
 
 #: sui_menu.lua:925
 msgid "Top separator"
@@ -1486,7 +1483,7 @@ msgstr "Версия: %s"
 
 #: sui_browsemeta.lua:778
 msgid "Virtual folder cover"
-msgstr "Корица на виртуална папка"
+msgstr ""
 
 #: sui_menu.lua:925
 msgid "Visible"
@@ -1538,7 +1535,7 @@ msgstr "ср. дневно (7 дни)"
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "day streak"
-msgstr "1 пореден ден"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "days streak"
@@ -1546,7 +1543,7 @@ msgstr "поредни дни"
 
 #: sui_quickactions.lua:1010
 msgid "default"
-msgstr "по подразбиране"
+msgstr ""
 
 #: sui_menu.lua:745 sui_menu.lua:814 sui_menu.lua:1154 sui_menu.lua:1923
 msgid "disabled"
@@ -1560,7 +1557,7 @@ msgstr ""
 
 #: sui_quickactions.lua:896
 msgid "e.g. Rakuyomi…"
-msgstr "напр. Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:869
 msgid "e.g. Sci-Fi…"
@@ -1579,16 +1576,13 @@ msgstr "включено"
 #: sui_quickactions.lua:490
 msgid "hex code, e.g. E001"
 msgstr ""
-"hex код, напр.\n"
-"E001"
-
 #: desktop_modules/module_reading_stats.lua:68
 msgid "no streak"
 msgstr "няма поредни дни"
 
 #: sui_quickactions.lua:1163 sui_quickactions.lua:1179
 msgid "not configured"
-msgstr "не е конфигурирано"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:61
 msgid "of reading today"
@@ -1600,7 +1594,7 @@ msgstr "четене, общо"
 
 #: desktop_modules/module_reading_stats.lua:62
 msgid "pages read today"
-msgstr "прочетени страници днес"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:64
 msgid "pages/day (7 days)"
@@ -1826,20 +1820,12 @@ msgid ""
 "\n"
 "Restart now?"
 msgstr ""
-"Лентата за страници е скрита.\n"
-"\n"
-"Рестарт сега?"
-
 #: sui_menu.lua:362
 msgid ""
 "Pagination bar set to Default.\n"
 "\n"
 "Restart now?"
 msgstr ""
-"Лентата за страници е зададена на По подразбиране.\n"
-"\n"
-"Рестарт сега?"
-
 #: sui_menu.lua:469 sui_menu.lua:481 sui_menu.lua:493
 msgid ""
 "Pagination bar size will change after restart.\n"
@@ -1987,7 +1973,7 @@ msgstr ""
 
 #: sui_menu.lua:2035
 msgid "Settings Tab"
-msgstr "Раздел Настройки"
+msgstr ""
 
 #: sui_menu.lua:2036
 msgid ""

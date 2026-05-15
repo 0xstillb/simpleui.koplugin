@@ -26,7 +26,7 @@ msgstr "    Dimensione"
 
 #: desktop_modules/module_reading_goals.lua:602
 msgid "  Physical Books  (%d in %s)"
-msgstr "  Libri cartacei  (%d in %s)"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:595
 msgid "  Set Goal  (%d books in %s)"
@@ -89,11 +89,11 @@ msgstr "Aggiungi almeno 2 statistiche da disporre."
 
 #: desktop_modules/module_reading_stats.lua:67
 msgid "All time — Books"
-msgstr "Sempre — Libri"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:66
 msgid "All time — Time"
-msgstr "Sempre — Tempo"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:585
 msgid "Annual Goal"
@@ -145,7 +145,7 @@ msgstr "Disponi elementi"
 #: sui_menu.lua:1280
 #: sui_menu.lua:1296
 msgid "Arrange Modules"
-msgstr "Disponi moduli"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:552
 msgid "Arrange Reading Stats"
@@ -346,7 +346,7 @@ msgstr "Continua"
 
 #: desktop_modules/module_collections.lua:527
 msgid "Cover for \"%s\""
-msgstr "Copertina per \"%s\""
+msgstr ""
 
 #: desktop_modules/module_collections.lua:564
 #: desktop_modules/module_collections.lua:566
@@ -499,7 +499,7 @@ msgstr "Febbraio"
 
 #: sui_bottombar.lua:867
 msgid "Fetching bookmarks\xe2\x80\xa6"
-msgstr "Recupero segnalibri\xe2\x80\xa6"
+msgstr ""
 
 #: sui_quickactions.lua:407
 msgid "File Search"
@@ -704,7 +704,7 @@ msgstr "Libreria"
 
 #: sui_menu.lua:966
 msgid "Library Buttons"
-msgstr "Pulsanti libreria"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:514
 msgid "List"
@@ -765,7 +765,7 @@ msgstr "Minuti al giorno:"
 
 #: sui_menu.lua:1355
 msgid "Module Scale"
-msgstr "Scala moduli"
+msgstr ""
 
 #: sui_menu.lua:1314
 msgid "Module Settings"
@@ -781,10 +781,10 @@ msgstr "Moduli"
 
 #: sui_menu.lua:1271
 msgid "Modules  (%d — no limit)"
-msgstr "Moduli  (%d — nessun limite)"
+msgstr ""
 #: sui_menu.lua:1385
 msgid "Modules  (%d)"
-msgstr "Moduli  (%d)"
+msgstr ""
 
 
 #: sui_menu.lua:1275
@@ -793,7 +793,7 @@ msgstr "Moduli  (%d/%d — %d rimasti)"
 
 #: sui_menu.lua:1274
 msgid "Modules  (%d/%d — at limit)"
-msgstr "Moduli  (%d/%d — al limite)"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:45
 msgid "Monday"
@@ -974,7 +974,7 @@ msgstr "Sovrapposizioni"
 #: sui_patches.lua:1125
 #: sui_patches.lua:1239
 msgid "Page %1 of %2"
-msgstr "Pagina %1 di %2"
+msgstr ""
 
 #: sui_menu.lua:356
 msgid "Page number in title bar"
@@ -1014,7 +1014,7 @@ msgstr "Percentuale di testo"
 
 #: desktop_modules/module_reading_goals.lua:380
 msgid "Physical Books — %s"
-msgstr "Libri cartacei — %s"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:381
 msgid "Physical books read this year:"
@@ -1022,7 +1022,7 @@ msgstr "Libri cartacei letti quest'anno:"
 
 #: sui_menu.lua:1031
 msgid "Physical: %d books in %s"
-msgstr "Cartacei: %d libri in %s"
+msgstr ""
 
 #: sui_quickactions.lua:704
 msgid "Plugin"
@@ -1030,7 +1030,7 @@ msgstr "Plugin"
 
 #: sui_quickactions.lua:1021
 msgid "Plugin error: %s"
-msgstr "Errore plugin: %s"
+msgstr ""
 
 #: sui_quickactions.lua:1023
 msgid "Plugin not available: %s"
@@ -1366,7 +1366,7 @@ msgstr "Schede  (%d/%d — %d rimasti)"
 
 #: sui_menu.lua:750
 msgid "Tabs  (%d/%d — at limit)"
-msgstr "Schede  (%d/%d — al limite)"
+msgstr ""
 
 #: sui_menu.lua:101
 msgid "Text"
@@ -1416,11 +1416,11 @@ msgstr "Oggi"
 
 #: desktop_modules/module_reading_stats.lua:63
 msgid "Today — Pages"
-msgstr "Oggi — Pagine"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:62
 msgid "Today — Time"
-msgstr "Oggi — Tempo"
+msgstr ""
 
 #: sui_menu.lua:1537
 #: sui_menu.lua:1616
@@ -1431,7 +1431,7 @@ msgstr "In alto"
 #: sui_menu.lua:561
 #: sui_topbar.lua:473
 msgid "Top Bar"
-msgstr "Barra superiore"
+msgstr ""
 
 #: sui_menu.lua:586
 msgid "Top Bar Size"
@@ -1490,11 +1490,11 @@ msgstr "WiFi non disponibile su questo dispositivo."
 
 #: sui_quickactions.lua:410
 msgid "Wikipedia Lookup"
-msgstr "Cerca su Wikipedia"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:512
 msgid "With percentage"
-msgstr "Con percentuale"
+msgstr ""
 
 #: desktop_modules/module_quote.lua:701
 msgid "Your highlights"
@@ -1538,15 +1538,15 @@ msgstr "es. Fumetti…"
 
 #: sui_quickactions.lua:655
 msgid "e.g. Rakuyomi…"
-msgstr "es. Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:628
 msgid "e.g. Sci-Fi…"
-msgstr "es. Fantascienza…"
+msgstr ""
 
 #: sui_quickactions.lua:683
 msgid "e.g. Sleep, Refresh…"
-msgstr "es. Riposo, Aggiornamento…"
+msgstr ""
 
 #: sui_menu.lua:395
 #: sui_menu.lua:569
@@ -1558,7 +1558,7 @@ msgstr "abilitato"
 
 #: sui_quickactions.lua:270
 msgid "hex code, e.g. E001"
-msgstr "codice esadecimale, es. E001"
+msgstr ""
 
 #: sui_menu.lua:307
 msgid "hidden"
@@ -1619,7 +1619,7 @@ msgstr "%d giorni"
 
 #: desktop_modules/module_currently.lua
 msgid "Stats layout"
-msgstr "Layout delle statistiche"
+msgstr ""
 
 
 
@@ -1653,11 +1653,11 @@ msgstr "Nasconde la barra di paginazione nella schermata iniziale.\nNon disponib
 
 #: sui_menu.lua:1566
 msgid "Modules per Page  (%d)"
-msgstr "Moduli per Pagina  (%d)"
+msgstr ""
 
 #: sui_menu.lua:1572
 msgid "Modules per Page"
-msgstr "Moduli per Pagina"
+msgstr ""
 
 #: sui_menu.lua:1573
 msgid "Maximum number of modules shown on each page.\nSwipe left/right on the Home Screen to turn pages."
@@ -1681,7 +1681,7 @@ msgstr "Informazioni su"
 
 #: sui_menu.lua
 msgid "Version: %s"
-msgstr "Versione: %s"
+msgstr ""
 
 #: sui_menu.lua
 msgid "Author: %s"
@@ -1690,7 +1690,7 @@ msgstr "Autore: %s"
 #: sui_homescreen.lua:407
 #: desktop_modules/module_quote.lua:950
 msgid "Open this file?"
-msgstr "Vuoi aprire questo file?"
+msgstr ""
 
 #: sui_bottombar.lua:1638
 msgid "Sleep"
@@ -1779,7 +1779,7 @@ msgstr "Aggiungi almeno 2 libri da disporre."
 
 #: desktop_modules/module_tbr.lua
 msgid "To Be Read books"
-msgstr "Libri Da Leggere"
+msgstr ""
 
 #: desktop_modules/module_tbr.lua
 msgid "No books in To Be Read list."

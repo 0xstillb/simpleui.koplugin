@@ -1,9 +1,10 @@
 -- sui_foldercovers.lua — Simple UI
 -- Folder cover art and book cover overlays for the CoverBrowser mosaic/list views.
 
-local _        = require("sui_i18n").translate
-local lfs      = require("libs/libkoreader-lfs")
-local logger   = require("logger")
+local _           = require("sui_i18n").translate
+local lfs         = require("libs/libkoreader-lfs")
+local logger      = require("logger")
+local SUISettings = require("sui_store")
 
 -- Widget requires at module level so the require() cache is hit once,
 -- not on every cell render.
@@ -45,14 +46,24 @@ local SK = {
     badge_hidden    = "simpleui_fc_badge_hidden",
     cover_mode      = "simpleui_fc_cover_mode",
     label_mode      = "simpleui_fc_label_mode",
-    overlay_pages   = "simpleui_fc_overlay_pages",
-    overlay_series  = "simpleui_fc_overlay_series",
+    overlay_pages    = "simpleui_fc_overlay_pages",
+    overlay_series   = "simpleui_fc_overlay_series",
+    overlay_progress = "simpleui_fc_overlay_progress",
+    progress_mode    = "simpleui_fc_progress_mode",
+    overlay_new      = "simpleui_fc_overlay_new",
     series_grouping = "simpleui_fc_series_grouping",
     subfolder_cover = "simpleui_fc_subfolder_cover",
     recursive_cover = "simpleui_fc_recursive_cover",
     label_scale     = "simpleui_fc_label_scale",
-    folder_style    = "simpleui_fc_folder_style",
-    hide_spine      = "simpleui_fc_hide_spine",
+    folder_style      = "simpleui_fc_folder_style",
+    hide_spine        = "simpleui_fc_hide_spine",
+    show_title_strip  = "simpleui_fc_show_title_strip",
+    show_author_strip = "simpleui_fc_show_author_strip",
+    badge_color_pages    = "simpleui_fc_badge_color_pages",
+    badge_color_series   = "simpleui_fc_badge_color_series",
+    badge_color_progress = "simpleui_fc_badge_color_progress",
+    badge_color_new      = "simpleui_fc_badge_color_new",
+    badge_color_folder   = "simpleui_fc_badge_color_folder",
 }
 
 -- ---------------------------------------------------------------------------
@@ -70,11 +81,11 @@ local _sg_last_evicted_path = nil
 -- Settings API
 -- ---------------------------------------------------------------------------
 
-function M.isEnabled()   return G_reader_settings:isTrue(SK.enabled)          end
-function M.setEnabled(v) G_reader_settings:saveSetting(SK.enabled, v)         end
+function M.isEnabled()   return SUISettings:isTrue(SK.enabled)          end
+function M.setEnabled(v) SUISettings:saveSetting(SK.enabled, v)         end
 
-local function _getFlag(key)      return G_reader_settings:readSetting(key) ~= false end
-local function _setFlag(key, v)   G_reader_settings:saveSetting(key, v)              end
+local function _getFlag(key)      return SUISettings:readSetting(key) ~= false end
+local function _setFlag(key, v)   SUISettings:saveSetting(key, v)              end
 
 function M.getShowName()       return _getFlag(SK.show_name)      end
 function M.setShowName(v)      _setFlag(SK.show_name, v)          end
@@ -82,60 +93,121 @@ function M.getHideUnderline()  return _getFlag(SK.hide_underline) end
 function M.setHideUnderline(v) _setFlag(SK.hide_underline, v)     end
 
 -- "alpha" (default) = semitransparent white overlay; "frame" = solid grey border.
-function M.getLabelStyle()    return G_reader_settings:readSetting(SK.label_style)    or "alpha"   end
-function M.setLabelStyle(v)   G_reader_settings:saveSetting(SK.label_style, v)                     end
+function M.getLabelStyle()    return SUISettings:readSetting(SK.label_style)    or "alpha"   end
+function M.setLabelStyle(v)   SUISettings:saveSetting(SK.label_style, v)                     end
 
 -- "bottom" (default) | "center" | "top"
-function M.getLabelPosition()  return G_reader_settings:readSetting(SK.label_position) or "bottom" end
-function M.setLabelPosition(v) G_reader_settings:saveSetting(SK.label_position, v)                 end
+function M.getLabelPosition()  return SUISettings:readSetting(SK.label_position) or "bottom" end
+function M.setLabelPosition(v) SUISettings:saveSetting(SK.label_position, v)                 end
 
 -- "top" (default) | "bottom"
-function M.getBadgePosition()  return G_reader_settings:readSetting(SK.badge_position) or "top"   end
-function M.setBadgePosition(v) G_reader_settings:saveSetting(SK.badge_position, v)                 end
+function M.getBadgePosition()  return SUISettings:readSetting(SK.badge_position) or "top"   end
+function M.setBadgePosition(v) SUISettings:saveSetting(SK.badge_position, v)                 end
 
-function M.getBadgeHidden()  return G_reader_settings:isTrue(SK.badge_hidden)                      end
-function M.setBadgeHidden(v) G_reader_settings:saveSetting(SK.badge_hidden, v)                     end
+function M.getBadgeHidden()  return SUISettings:isTrue(SK.badge_hidden)                      end
+function M.setBadgeHidden(v) SUISettings:saveSetting(SK.badge_hidden, v)                     end
 
 -- "default" = scale-to-fit; "2_3" = force 2:3 aspect ratio.
-function M.getCoverMode()    return G_reader_settings:readSetting(SK.cover_mode) or "default"      end
-function M.setCoverMode(v)   G_reader_settings:saveSetting(SK.cover_mode, v)                       end
+function M.getCoverMode()    return SUISettings:readSetting(SK.cover_mode) or "default"      end
+function M.setCoverMode(v)   SUISettings:saveSetting(SK.cover_mode, v)                       end
 
 -- "overlay" (default) = folder name on cover; "hidden" = no label.
-function M.getLabelMode()    return G_reader_settings:readSetting(SK.label_mode) or "overlay"      end
-function M.setLabelMode(v)   G_reader_settings:saveSetting(SK.label_mode, v)                       end
+function M.getLabelMode()    return SUISettings:readSetting(SK.label_mode) or "overlay"      end
+function M.setLabelMode(v)   SUISettings:saveSetting(SK.label_mode, v)                       end
 
 -- Pages badge on book covers (default on).
-function M.getOverlayPages()  return G_reader_settings:readSetting(SK.overlay_pages) ~= false      end
+function M.getOverlayPages()  return SUISettings:readSetting(SK.overlay_pages) ~= false      end
 function M.setOverlayPages(v) _setFlag(SK.overlay_pages, v)                                        end
 
 -- Series index badge on book covers (default off).
-function M.getOverlaySeries()  return G_reader_settings:isTrue(SK.overlay_series)                  end
+function M.getOverlaySeries()  return SUISettings:isTrue(SK.overlay_series)                  end
 function M.setOverlaySeries(v) _setFlag(SK.overlay_series, v)                                      end
 
+-- Progress pentagon badge on book covers (default on).
+-- Shows: percentage read · checkmark for completed · bare pentagon for unstarted.
+-- When active, native KOReader marks (dog-ear, progress bar, collection star,
+-- description hint) are suppressed to avoid visual overlap.
+function M.getOverlayProgress()  return SUISettings:readSetting(SK.overlay_progress) ~= false end
+function M.setOverlayProgress(v) _setFlag(SK.overlay_progress, v)                                   end
+
+-- Progress display mode: "banner" (default) = pentagon badge overlay;
+-- "native" = suppress badge, show native KOReader progress indicators;
+-- "none"   = suppress badge AND native indicators.
+function M.getProgressMode()
+    return SUISettings:readSetting(SK.progress_mode) or "banner"
+end
+function M.setProgressMode(v)
+    SUISettings:saveSetting(SK.progress_mode, v)
+    -- Keep legacy overlay_progress flag in sync so external code that reads
+    -- it directly still behaves correctly.
+    _setFlag(SK.overlay_progress, v == "banner")
+    -- Manage the native collection mark (collection_show_mark):
+    --   banner/none → disable it (plugin redraws it at bottom-right in banner mode;
+    --                 none mode suppresses all indicators).
+    --   native      → restore it so KOReader draws the star at top-right normally.
+    if v == "banner" or v == "none" then
+        G_reader_settings:saveSetting("collection_show_mark", false)
+    elseif v == "native" then
+        G_reader_settings:saveSetting("collection_show_mark", true)
+    end
+end
+
+-- "New" rounded-rectangle badge on book covers for unread books (default on).
+-- Only shown when percent_finished is nil and status is not "complete" or "abandoned".
+function M.getOverlayNew()  return SUISettings:nilOrTrue(SK.overlay_new)  end
+function M.setOverlayNew(v) _setFlag(SK.overlay_new, v)                      end
+
 -- Virtual series folders in the mosaic (default off).
-function M.getSeriesGrouping()  return G_reader_settings:isTrue(SK.series_grouping)                end
+function M.getSeriesGrouping()  return SUISettings:isTrue(SK.series_grouping)                end
 function M.setSeriesGrouping(v) _setFlag(SK.series_grouping, v)                                    end
 
 -- Placeholder cover for folders with no direct ebooks (default off).
-function M.getSubfolderCover()  return G_reader_settings:isTrue(SK.subfolder_cover)                end
+function M.getSubfolderCover()  return SUISettings:isTrue(SK.subfolder_cover)                end
 function M.setSubfolderCover(v) _setFlag(SK.subfolder_cover, v)                                    end
 
 -- Scan up to 3 subfolder levels for a cached cover (default off).
-function M.getRecursiveCover()  return G_reader_settings:isTrue(SK.recursive_cover)                end
+function M.getRecursiveCover()  return SUISettings:isTrue(SK.recursive_cover)                end
 function M.setRecursiveCover(v) _setFlag(SK.recursive_cover, v)                                    end
 
 -- Folder cover display style: "single" (default, selectable cover), "quad" (2×2 grid),
 -- or "auto" (single when <4 books, quad when ≥4 books).
-function M.getFolderStyle()    return G_reader_settings:readSetting(SK.folder_style) or "single"   end
-function M.setFolderStyle(v)   G_reader_settings:saveSetting(SK.folder_style, v)                   end
+function M.getFolderStyle()    return SUISettings:readSetting(SK.folder_style) or "single"   end
+function M.setFolderStyle(v)   SUISettings:saveSetting(SK.folder_style, v)                   end
 
 -- _resolveStyle is defined further below (after _entriesWithNoFilter and
 -- _collectCoversRecursive are in scope).
 local _resolveStyle
 
 -- Hide the book spine decoration on folder covers (default: spine shown).
-function M.getHideSpine()  return G_reader_settings:isTrue(SK.hide_spine)  end
-function M.setHideSpine(v) G_reader_settings:saveSetting(SK.hide_spine, v) end
+function M.getHideSpine()  return SUISettings:isTrue(SK.hide_spine)  end
+function M.setHideSpine(v) SUISettings:saveSetting(SK.hide_spine, v) end
+
+-- Show book title below covers in mosaic mode (default: off). Requires restart.
+function M.getShowTitleStrip()   return SUISettings:isTrue(SK.show_title_strip)  end
+function M.setShowTitleStrip(v)  SUISettings:saveSetting(SK.show_title_strip, v) end
+
+-- Show book author below covers in mosaic mode (default: off). Requires restart.
+function M.getShowAuthorStrip()  return SUISettings:isTrue(SK.show_author_strip)  end
+function M.setShowAuthorStrip(v) SUISettings:saveSetting(SK.show_author_strip, v) end
+
+-- Per-badge color settings.
+-- "dark"  = black background, white text.
+-- "light" = white background, black text.
+-- Defaults: progress/new/folder -> dark; pages/series -> light.
+function M.getBadgeColorPages()     return SUISettings:readSetting(SK.badge_color_pages)    or "light" end
+function M.setBadgeColorPages(v)    SUISettings:saveSetting(SK.badge_color_pages, v)    end
+
+function M.getBadgeColorSeries()    return SUISettings:readSetting(SK.badge_color_series)   or "light" end
+function M.setBadgeColorSeries(v)   SUISettings:saveSetting(SK.badge_color_series, v)   end
+
+function M.getBadgeColorProgress()  return SUISettings:readSetting(SK.badge_color_progress) or "dark"  end
+function M.setBadgeColorProgress(v) SUISettings:saveSetting(SK.badge_color_progress, v) end
+
+function M.getBadgeColorNew()       return SUISettings:readSetting(SK.badge_color_new)      or "dark"  end
+function M.setBadgeColorNew(v)      SUISettings:saveSetting(SK.badge_color_new, v)      end
+
+function M.getBadgeColorFolder()    return SUISettings:readSetting(SK.badge_color_folder)   or "dark"  end
+function M.setBadgeColorFolder(v)   SUISettings:saveSetting(SK.badge_color_folder, v)   end
 
 -- Folder label text scale: integer %, clamped to [50, 200], default 100.
 local _FC_SCALE_MIN  = 50
@@ -152,12 +224,12 @@ local function _clampFCScale(n)
 end
 
 function M.getLabelScalePct()
-    local n = tonumber(G_reader_settings:readSetting(SK.label_scale))
+    local n = tonumber(SUISettings:readSetting(SK.label_scale))
     if not n then return _FC_SCALE_DEF end
     return _clampFCScale(n)
 end
 function M.getLabelScale()    return M.getLabelScalePct() / 100 end
-function M.setLabelScale(pct) G_reader_settings:saveSetting(SK.label_scale, _clampFCScale(pct)) end
+function M.setLabelScale(pct) SUISettings:saveSetting(SK.label_scale, _clampFCScale(pct)) end
 
 -- ---------------------------------------------------------------------------
 -- Module-level constants — computed once from device DPI.
@@ -180,14 +252,20 @@ local _BADGE_MARGIN_R_BASE = Screen:scaleBySize(4)
 
 local _LABEL_ALPHA = 0.75
 
--- Badge geometry — pre-computed so paintTo() never calls scaleBySize per frame.
-local _BADGE_FONT_SZ  = Screen:scaleBySize(5)
-local _BADGE_PAD_H    = Screen:scaleBySize(2)
-local _BADGE_PAD_V    = Screen:scaleBySize(1)
-local _BADGE_INSET    = Screen:scaleBySize(3)
-local _BADGE_CORNER   = Screen:scaleBySize(2)
-local _BADGE_BAR_H    = Screen:scaleBySize(8)   -- progress-bar height (badge Y anchor)
-local _BADGE_BAR_GAP  = Screen:scaleBySize(4)   -- gap between pages badge and progress bar
+-- Title/author strip height (pixels). Set by M.install() to the exact value
+-- computed for the session; 0 when both options are disabled.
+-- Module-level so _computeCellGeometry (which is module-scope) can read it.
+local _module_strip_h = 0
+
+-- Badge geometry constants.
+-- _BADGE_FONT_SZ is still used by the book-count circle badge (_buildBadge).
+-- Text badges (pages, series, "New") derive all geometry from eff_size instead.
+local _BADGE_FONT_SZ     = Screen:scaleBySize(5)
+local _BADGE_TOP_INSET   = Screen:scaleBySize(0)   -- pentagon Y: flush with cover top edge
+local _BADGE_RIGHT_INSET = Screen:scaleBySize(8)   -- inset from cover edge for all corner badges
+local _BADGE_BAR_H       = Screen:scaleBySize(8)   -- progress-bar height (badge Y anchor)
+local _BADGE_BAR_GAP     = Screen:scaleBySize(4)   -- gap between pages badge and progress bar
+
 
 -- Module-level font-size cache for _getFolderNameWidget.
 -- Key: display_text .. "\0" .. available_w .. "\0" .. max_font_size
@@ -299,7 +377,7 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Cover-override settings
--- Stored in G_reader_settings under "simpleui_fc_covers": { [dir_path] = book_path }
+-- Stored in SUISettings under "simpleui_fc_covers": { [dir_path] = book_path }
 -- ---------------------------------------------------------------------------
 
 local _FC_COVERS_KEY = "simpleui_fc_covers"
@@ -309,7 +387,7 @@ local _overrides_cache = nil
 
 local function _getCoverOverrides()
     if not _overrides_cache then
-        _overrides_cache = G_reader_settings:readSetting(_FC_COVERS_KEY) or {}
+        _overrides_cache = SUISettings:readSetting(_FC_COVERS_KEY) or {}
     end
     return _overrides_cache
 end
@@ -317,13 +395,13 @@ end
 local function _saveCoverOverride(dir_path, book_path)
     local t = _getCoverOverrides()
     t[dir_path] = book_path
-    G_reader_settings:saveSetting(_FC_COVERS_KEY, t)
+    SUISettings:saveSetting(_FC_COVERS_KEY, t)
 end
 
 local function _clearCoverOverride(dir_path)
     local t = _getCoverOverrides()
     t[dir_path] = nil
-    G_reader_settings:saveSetting(_FC_COVERS_KEY, t)
+    SUISettings:saveSetting(_FC_COVERS_KEY, t)
 end
 
 -- ---------------------------------------------------------------------------
@@ -463,6 +541,13 @@ _resolveStyle = function(menu, dir_path, entry)
         end
     end
     return "single"
+end
+
+-- Public wrapper so other modules (e.g. sui_browsemeta) can resolve the
+-- effective folder style without duplicating the auto-count logic.
+-- Returns "single" or "quad".
+function M.resolveStyle(fc, dir_path, entry)
+    return _resolveStyle(fc, dir_path, entry)
 end
 
 -- ---------------------------------------------------------------------------
@@ -617,7 +702,7 @@ local function _openSeriesGroupCoverPicker(vpath, menu, BookInfoManager)
         callback = function() UIManager:close(picker) end,
     }}
 
-    picker = ButtonDialog:new{ title = _("Series cover"), buttons = buttons }
+    picker = ButtonDialog:new{ title = _("Folder cover"), title_align = "center", buttons = buttons }
     UIManager:show(picker)
 end
 
@@ -673,7 +758,7 @@ local function _openFolderCoverPicker(dir_path, menu, BookInfoManager)
         callback = function() UIManager:close(picker) end,
     }}
 
-    picker = ButtonDialog:new{ title = _("Folder cover"), buttons = buttons }
+    picker = ButtonDialog:new{ title = _("Folder cover"), title_align = "center", buttons = buttons }
     UIManager:show(picker)
 end
 
@@ -708,25 +793,10 @@ local function _installFileDialogButton(BookInfoManager)
             local label
             -- Resolve effective style for this folder (handles "auto" mode).
             local effective_style = _resolveStyle(fc, file, item_entry)
-            if is_virtual_series then
-                -- In quad mode, individual cover selection is not available
-                -- for series folders (the quad grid always auto-selects covers).
-                -- In Detailed list with cover view the picker remains available.
-                local in_list_view = fc and fc.display_mode_type == "list"
-                if effective_style == "quad" and not in_list_view then return nil end
-                label = _("Set series cover…")
-            elseif is_virtual_meta then
-                -- Same rule applies to virtual meta folders.
-                local in_list_view = fc and fc.display_mode_type == "list"
-                if effective_style == "quad" and not in_list_view then return nil end
-                label = _("Set virtual folder cover…")
-            else
-                -- In quad mode, cover selection is not available for the mosaic view.
-                -- In Detailed list with cover view the picker is always available.
-                local in_list_view = fc and fc.display_mode_type == "list"
-                if effective_style == "quad" and not in_list_view then return nil end
-                label = _("Set folder cover…")
-            end
+            -- All folder types hide the picker in quad mosaic mode.
+            local in_list_view = fc and fc.display_mode_type == "list"
+            if effective_style == "quad" and not in_list_view then return nil end
+            label = _("Set folder cover")
 
             return {{
                 text = label,
@@ -913,6 +983,46 @@ function M.invalidateCache()
     _itc = nil
 end
 
+-- Returns a sub_items table for the "Progress badge" entry in the settings menu.
+-- The caller is responsible for inserting it into the parent menu table.
+function M.getProgressModeMenuItems()
+    local function _set(mode)
+        M.setProgressMode(mode)
+        -- Force a full redraw so the change is visible immediately.
+        local ok_ui, UIManager = pcall(require, "ui/uimanager")
+        if ok_ui and UIManager then
+            local ok_fm, fm_mod = pcall(require, "apps/filemanager/filemanager")
+            if ok_fm and fm_mod and fm_mod.instance then
+                fm_mod.instance.file_chooser:updateItems()
+            end
+        end
+    end
+
+    return {
+        {
+            text_func = function()
+                return _("Banner")
+            end,
+            checked_func = function() return M.getProgressMode() == "banner" end,
+            callback = function() _set("banner") end,
+        },
+        {
+            text_func = function()
+                return _("Native")
+            end,
+            checked_func = function() return M.getProgressMode() == "native" end,
+            callback = function() _set("native") end,
+        },
+        {
+            text_func = function()
+                return _("None")
+            end,
+            checked_func = function() return M.getProgressMode() == "none" end,
+            callback = function() _set("none") end,
+        },
+    }
+end
+
 -- ---------------------------------------------------------------------------
 -- Series grouping — virtual folders for multi-book series.
 --
@@ -1088,20 +1198,19 @@ end
 local function _sgOpenGroup(file_chooser, group_item)
     if not file_chooser then return end
 
-    local parent_path = file_chooser.path
-    local items       = group_item.series_items
-    local parent_page = file_chooser.page or 1
+    local items = group_item.series_items
 
+    -- _sg_current holds only what cannot be recovered from item_table:
+    --   series_name: to re-find the group item in the parent list on return.
+    --   parent_page: to restore the scroll position in the parent list.
+    -- parent_path is stored on item_table._sg_parent_path (single source of truth).
     _sg_current = {
-        series_name    = group_item.text,
-        parent_path    = parent_path,
-        parent_page    = parent_page,
-        should_restore = false,
+        series_name = group_item.text,
+        parent_page = file_chooser.page or 1,
     }
 
     items._sg_is_series_view = true
-    items._sg_parent_path    = parent_path
-    file_chooser._simpleui_has_go_up = true
+    items._sg_parent_path    = file_chooser.path
     file_chooser:switchItemTable(nil, items, nil, nil, group_item.text)
 
     -- Update the titlebar subtitle to show the series name.
@@ -1142,9 +1251,15 @@ local function _installSeriesGrouping()
 
     -- Process items before KOReader calculates itemmatch so the grouped list
     -- is what the page/focus logic sees.
+    -- Also clears _sg_is_series_view on the OLD table at the last safe moment:
+    -- the new table has arrived, so the titlebar will see the correct state
+    -- immediately. This avoids the timing window where the flag was cleared in
+    -- changeToPath (too early) and made _simpleui_sg_leaving necessary.
     FileChooser.switchItemTable = function(fc, new_title, new_item_table,
                                            itemnumber, itemmatch, new_subtitle)
         if new_item_table and not new_item_table._sg_is_series_view then
+            -- Leaving a series view: clear flag on the outgoing table now.
+            if fc.item_table then fc.item_table._sg_is_series_view = false end
             _sgProcessItemTable(new_item_table, fc)
         end
         return _sg_orig_switchItemTable(fc, new_title, new_item_table,
@@ -1174,7 +1289,7 @@ local function _installSeriesGrouping()
                 _resolveStyle(fc, item.path, item) == "quad" and not in_list_view
             )
 
-            local series_name = item.text
+            local series_name = (item.text or ""):gsub("/$", "")
             local vpath       = item.path
             local dialog
 
@@ -1182,7 +1297,7 @@ local function _installSeriesGrouping()
 
             if cover_available then
                 buttons[#buttons + 1] = {{
-                    text     = _("Series cover"),
+                    text     = _("Set folder cover"),
                     callback = function()
                         UIManager:close(dialog)
                         local ok_bim, BookInfoManager = pcall(require, "bookinfomanager")
@@ -1206,7 +1321,11 @@ local function _installSeriesGrouping()
                 callback = function() UIManager:close(dialog) end,
             }}
 
-            dialog = ButtonDialog:new{ buttons = buttons }
+            dialog = ButtonDialog:new{
+                title       = series_name,
+                title_align = "center",
+                buttons     = buttons,
+            }
             UIManager:show(dialog)
             return true
         end
@@ -1216,7 +1335,6 @@ local function _installSeriesGrouping()
     FileChooser.onFolderUp = function(fc)
         if fc.item_table and fc.item_table._sg_is_series_view then
             local parent = fc.item_table._sg_parent_path
-            if _sg_current then _sg_current.should_restore = true end
             if parent then fc:changeToPath(parent) end
             return true
         end
@@ -1230,10 +1348,13 @@ local function _installSeriesGrouping()
             if parent and path and (path:match("/%.%.") or path:match("^%.%.")) then
                 path = parent
             end
-            fc.item_table._sg_is_series_view = false
+            -- Note: _sg_is_series_view is cleared in the switchItemTable override
+            -- (when the new item_table arrives) rather than here. This avoids the
+            -- timing window between changeToPath and switchItemTable where the
+            -- titlebar could read a stale false value and hide the back button.
             if path == parent then
-                -- Back to real parent: keep _sg_current so updateItems can
-                -- restore focus on the series group item.
+                -- Returning to real parent: mark _sg_current for focus restore
+                -- and pre-set the page so the parent scrolls to the right position.
                 if _sg_current then
                     _sg_current.should_restore = true
                     local saved_page = _sg_current.parent_page
@@ -1242,7 +1363,7 @@ local function _installSeriesGrouping()
                     end
                 end
             else
-                -- Navigating somewhere else entirely: drop series state.
+                -- Navigating somewhere else: drop series state entirely.
                 _sg_current = nil
             end
         else
@@ -1253,15 +1374,14 @@ local function _installSeriesGrouping()
 
     -- After refreshPath (e.g. closing a book) re-enter the virtual folder
     -- if one was active.
-    local _sg_refreshPath_active = false  -- re-entrancy guard
+    local _sg_refreshPath_depth = 0  -- depth counter (survives errors; bool guard would stick)
     FileChooser.refreshPath = function(fc)
         -- Guard against infinite recursion: _sgOpenGroup → switchItemTable
-        -- can trigger another refreshPath call on some KOReader versions,
-        -- causing a stack overflow (sui_foldercovers.lua:1275).
-        if _sg_refreshPath_active then
+        -- can trigger another refreshPath call on some KOReader versions.
+        if _sg_refreshPath_depth > 0 then
             return _sg_orig_refreshPath(fc)
         end
-        _sg_refreshPath_active = true
+        _sg_refreshPath_depth = _sg_refreshPath_depth + 1
 
         -- The item table is stale after closing a book (percent_finished,
         -- bold state, sort position may have changed). Drop the cache so
@@ -1282,27 +1402,21 @@ local function _installSeriesGrouping()
         end
 
         _sg_orig_refreshPath(fc)
-        if not M.getSeriesGrouping() then
-            _sg_refreshPath_active = false
-            return
-        end
-        if not _sg_current then
-            _sg_refreshPath_active = false
-            return
-        end
-
-        local sname      = _sg_current.series_name
-        local saved_page = _sg_current.parent_page
-        for _, item in ipairs(fc.item_table or {}) do
-            if item.is_series_group and item.text == sname then
-                _sgOpenGroup(fc, item)
-                if _sg_current then _sg_current.parent_page = saved_page end
-                _sg_refreshPath_active = false
-                return
+        if M.getSeriesGrouping() and _sg_current then
+            local sname      = _sg_current.series_name
+            local saved_page = _sg_current.parent_page
+            for _, item in ipairs(fc.item_table or {}) do
+                if item.is_series_group and item.text == sname then
+                    _sgOpenGroup(fc, item)
+                    -- Restore parent_page: _sgOpenGroup resets it to fc.page
+                    -- (which is 1 after refreshPath), so we overwrite it here.
+                    if _sg_current then _sg_current.parent_page = saved_page end
+                    break
+                end
             end
         end
-        _sg_current = nil
-        _sg_refreshPath_active = false
+
+        _sg_refreshPath_depth = _sg_refreshPath_depth - 1
     end
 
     -- Restore focus to the series group item when returning from a virtual folder.
@@ -1325,8 +1439,6 @@ local function _installSeriesGrouping()
                     local select_num = ((idx - 1) % fc.perpage) + 1
                     if fc.path_items and fc.path then fc.path_items[fc.path] = idx end
                     _sg_current = nil
-                    fc._simpleui_has_go_up = (fc.item_table[1] and
-                        (fc.item_table[1].is_go_up or false)) or false
                     return _sg_orig_updateItems(fc, select_num)
                 end
             end
@@ -1334,6 +1446,33 @@ local function _installSeriesGrouping()
         end
 
         return _sg_orig_updateItems(fc, ...)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Public API for other modules that need to query or exit the series view
+-- without accessing internal state directly.
+-- ---------------------------------------------------------------------------
+
+--- Returns true when fc is currently showing a virtual series folder.
+function M.isInSeriesView(fc)
+    return fc and fc.item_table and fc.item_table._sg_is_series_view == true
+end
+
+--- Exits the series view and navigates to the real parent folder.
+--- No-ops when not in a series view. Used by sui_bottombar to avoid
+--- direct access to _sg_is_series_view.
+function M.exitSeriesView(fc)
+    if not M.isInSeriesView(fc) then return end
+    local parent = fc.item_table._sg_parent_path
+    -- Clear _sg_current so changeToPath does not try to restore the series.
+    _sg_current = nil
+    -- Clear the flag directly: we are abandoning the series view (not backing
+    -- into the parent), so switchItemTable's auto-clear is sufficient but we
+    -- do it here too for safety in case changeToPath short-circuits.
+    fc.item_table._sg_is_series_view = false
+    if parent then
+        fc:changeToPath(parent)
     end
 end
 
@@ -1356,7 +1495,245 @@ end
 -- Visual build helpers — one per overlay layer.
 -- ---------------------------------------------------------------------------
 
--- Two vertical spine lines on the left of the cover (folder-book aesthetic).
+-- ---------------------------------------------------------------------------
+-- Progress pentagon badge — direct Blitbuffer rendering.
+--
+-- Design: downward-pointing pentagon (rectangle + triangular tip).
+-- Outer shape: COLOR_GRAY (2 px frame).
+-- Inner shape: COLOR_BLACK (fill).
+-- Text/icon:   COLOR_WHITE.
+--
+-- States:
+--   "complete"           → white checkmark
+--   percent_finished set → white "42%" text
+--   neither              → bare pentagon (book not yet started)
+-- ---------------------------------------------------------------------------
+
+local function _pentagonPaintRect(bb, bx, by, bw, bh, color)
+    -- Pentagon: rectangular body (top 30/42 of height) + downward triangular tip.
+    local rect_h = math.floor(bh * 30 / 42)
+    local tip_h  = bh - rect_h
+    bb:paintRect(bx, by, bw, rect_h, color)
+    for row = 0, tip_h - 1 do
+        local frac = (row + 1) / tip_h         -- 0→1 towards tip
+        local rw   = math.max(2, math.floor(bw * (1 - frac)))
+        local rx   = bx + math.floor((bw - rw) / 2)
+        bb:paintRect(rx, by + rect_h + row, rw, 1, color)
+    end
+end
+
+local function _pentagonPaintCheck(bb, bx, by, bw, bh, color)
+    -- Two diagonal line segments forming a checkmark.
+    local tk = math.max(2, math.floor(math.min(bw, bh) / 8))
+    local function drawLine(x0, y0, x1, y1)
+        local steps = math.max(math.abs(x1 - x0), math.abs(y1 - y0))
+        if steps == 0 then steps = 1 end
+        for i = 0, steps do
+            local t = i / steps
+            bb:paintRect(
+                math.floor(x0 + t * (x1 - x0)),
+                math.floor(y0 + t * (y1 - y0)),
+                tk, tk, color)
+        end
+    end
+    -- Short left arm (shallow descent): 8%,62% → 30%,82%
+    local lx0 = bx + math.floor(bw * 0.08); local ly0 = by + math.floor(bh * 0.62)
+    local lx1 = bx + math.floor(bw * 0.30); local ly1 = by + math.floor(bh * 0.82)
+    -- Long right arm: pivot → 82%,18%
+    local rx1  = bx + math.floor(bw * 0.82); local ry1 = by + math.floor(bh * 0.18)
+    drawLine(lx0, ly0, lx1, ly1)
+    drawLine(lx1, ly1, rx1, ry1)
+end
+
+-- Returns a descriptor table for the progress badge, or nil if too small.
+-- No Blitbuffer is allocated here — the badge is drawn directly onto the
+-- cover bb in paintTo(), which avoids the "white rectangle outside the
+-- pentagon tip" artefact that blitFrom() (opaque copy) would produce.
+--   eff_size         — effective badge size in px (drives bw/bh proportions)
+--   status           — "complete" | "abandoned" | "reading" | other/nil
+--   percent_finished — 0.0–1.0 or nil (nil = not started)
+--   border           — frame border thickness (matches cover FrameContainer border)
+local function _buildProgressBadgeDesc(eff_size, status, percent_finished, border, dark)
+    local bw = math.floor(eff_size * 1.2)
+    local bh = math.floor(eff_size * 1.1)
+    if bw < 4 or bh < 4 then return nil end
+    return {
+        bw               = bw,
+        bh               = bh,
+        border           = border or 1,
+        status           = status,
+        percent_finished = percent_finished,
+        eff_size         = eff_size,
+        dark             = dark ~= false,  -- default true
+    }
+end
+
+-- Draws the progress badge described by `desc` directly onto `bb` at (ox, oy).
+-- No intermediate Blitbuffer — pixels outside the pentagon are simply never
+-- written, so the cover image beneath remains intact.
+-- The outer frame uses COLOR_GRAY (original colour) with the same thickness
+-- as the cover FrameContainer border.
+local function _drawProgressBadge(bb, ox, oy, desc)
+    local bw = desc.bw
+    local bh = desc.bh
+    local fr = desc.border   -- frame thickness = same as cover FrameContainer border
+    local fill_color = desc.dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local text_color = desc.dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+
+    -- Outer frame in COLOR_GRAY (original colour).
+    -- Full footprint: bw + 2*fr  ×  bh + 2*fr
+    _pentagonPaintRect(bb, ox,      oy,      bw + 2 * fr, bh + 2 * fr, Blitbuffer.COLOR_GRAY)
+    -- Inner body (inset by fr on each side).
+    _pentagonPaintRect(bb, ox + fr, oy + fr, bw,          bh,          fill_color)
+
+    -- Icon / text area inside the rectangular portion of the body.
+    local rect_h = math.floor(bh * 30 / 42)
+    local pad_x  = math.floor(bw * 0.12)
+    -- pad_y controls the icon bounding box (checkmark / pause bars).
+    -- Text (percent) uses its own vertical offset below to shift it downward
+    -- without shrinking the icon area.
+    local pad_y  = math.floor(rect_h * 0.25)
+    local icon_x = ox + fr + pad_x
+    local icon_y = oy + fr + pad_y
+    local icon_w = bw - 2 * pad_x
+    local icon_h = rect_h - 2 * pad_y
+    -- Vertical offset applied to all content (icons + text): shifts everything
+    -- downward so there is more black space above, balancing the triangular tip below.
+    local text_y_offset = math.floor(rect_h * 0.15)
+
+    if desc.status == "complete" then
+        -- White checkmark: same vertical anchor as the percentage text (rect_h centred + offset).
+        local sq   = math.min(icon_w, icon_h)
+        local sq_x = icon_x + math.floor((icon_w - sq) / 2)
+        local sq_y = oy + fr + math.floor((rect_h - sq) / 2) + text_y_offset
+        _pentagonPaintCheck(bb, sq_x, sq_y, sq, sq, text_color)
+
+    elseif desc.status == "abandoned" then
+        -- Nerd font glyph U+EAE3 (on-hold / pause icon), same colour as the
+        -- complete checkmark (COLOR_WHITE). cfont has nerdfonts/symbols.ttf in
+        -- its fallback chain so the codepoint renders without a separate face.
+        local font_sz = math.max(7, math.floor(desc.eff_size * 0.24))
+        local aw = TextWidget:new{
+            text    = "",
+            face    = Font:getFace("cfont", font_sz),
+            bold    = false,
+            fgcolor = text_color,
+            padding = 0,
+        }
+        local aw_sz = aw:getSize()
+        aw:paintTo(bb,
+            ox + fr + math.floor((bw     - aw_sz.w) / 2),
+            oy + fr + math.floor((rect_h - aw_sz.h) / 2) + text_y_offset)
+        if aw.free then aw:free() end
+
+    elseif desc.percent_finished ~= nil then
+        -- Percentage text: centred horizontally, shifted downward by text_y_offset.
+        local pct     = math.floor(100 * desc.percent_finished)
+        local pct_str = pct .. "%"
+        local font_sz = math.max(7, math.floor(desc.eff_size * 0.24))
+        local tw = TextWidget:new{
+            text    = pct_str,
+            face    = Font:getFace("cfont", font_sz),
+            bold    = true,
+            fgcolor = text_color,
+            padding = 0,
+        }
+        local tw_sz   = tw:getSize()
+        tw:paintTo(bb,
+            ox + fr + math.floor((bw     - tw_sz.w) / 2),
+            oy + fr + math.floor((rect_h - tw_sz.h) / 2) + text_y_offset)
+        if tw.free then tw:free() end
+    end
+    -- "not started" / "reading" with no percent: bare pentagon, no content drawn.
+end
+
+-- ---------------------------------------------------------------------------
+-- Rounded-rectangle badge — shared descriptor + direct-draw pipeline.
+--
+-- Mirrors the progress pentagon architecture exactly:
+--   _buildRectBadgeDesc  — allocates nothing; returns a plain table.
+--   _drawRectBadge       — draws directly onto the cover bb in paintTo().
+--
+-- Sizing is identical to the progress badge:
+--   eff_size = math.max(8,  math.floor(cell_min * 0.14))
+--   font_sz  = math.max(7,  math.floor(eff_size * 0.24))   ← same ratio as pentagon text
+--
+-- Used by: pages badge, series-index badge, "New" badge.
+-- ---------------------------------------------------------------------------
+
+-- Returns a descriptor table (no Blitbuffer allocated) or nil when too small.
+--   text     — label string
+--   bold     — boolean
+--   cell_min — math.min(cell_w, cell_h) at update() time
+--   dark     — true → black bg / white text;  false → white bg / black text
+--   new_badge — true → apply 2× lateral padding (wider pill for short words)
+local function _buildRectBadgeDesc(text, bold, cell_min, dark, new_badge)
+    local eff_size = math.max(8, math.floor((cell_min or 40) * 0.14))
+    -- font_sz uses the same 0.24 ratio as the progress pentagon text/icons.
+    local font_sz  = math.max(7, math.floor(eff_size * 0.24))
+    local pad_h    = math.max(1, math.floor(eff_size * 0.10))
+    local pad_v    = math.max(1, math.floor(eff_size * 0.06))
+    local corner   = math.max(1, math.floor(eff_size * 0.08))
+    local border   = Size.border.thin
+    -- Measure text size with a temporary widget (freed immediately — no alloc kept).
+    local tw = TextWidget:new{
+        text    = text,
+        face    = Font:getFace("cfont", font_sz),
+        bold    = bold or false,
+        padding = 0,
+    }
+    local tsz = tw:getSize()
+    if tw.free then tw:free() end
+    local lateral = pad_h * 4   -- same lateral padding for all badges
+    local inner_h = tsz.h + pad_v * 2
+    -- Enforce a square minimum so short labels like "#1" are not tiny slivers.
+    local inner_w = math.max(tsz.w + lateral, inner_h)
+    local w = inner_w + border * 2
+    local h = inner_h + border * 2
+    if w < 4 or h < 4 then return nil end
+    return {
+        text     = text,
+        bold     = bold or false,
+        font_sz  = font_sz,
+        w        = w,
+        h        = h,
+        inner_w  = inner_w,
+        inner_h  = inner_h,
+        border   = border,
+        corner   = corner,
+        dark     = dark,
+    }
+end
+
+-- Draws the rounded-rectangle badge described by `desc` directly onto `bb`
+-- at pixel position (ox, oy).  No intermediate Blitbuffer is allocated;
+-- the FrameContainer + TextWidget are built, painted, and freed here.
+local function _drawRectBadge(bb, ox, oy, desc)
+    local bg = desc.dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local fg = desc.dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+    local tw = TextWidget:new{
+        text    = desc.text,
+        face    = Font:getFace("cfont", desc.font_sz),
+        bold    = desc.bold,
+        fgcolor = fg,
+        padding = 0,
+    }
+    local bw = FrameContainer:new{
+        dimen      = Geom:new{ w = desc.w, h = desc.h },
+        bordersize = desc.border,
+        color      = Blitbuffer.COLOR_GRAY,
+        background = bg,
+        radius     = desc.corner,
+        padding    = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = desc.inner_w, h = desc.inner_h },
+            tw,
+        },
+    }
+    bw:paintTo(bb, ox, oy)
+    bw:free()
+end
+
 local function _buildSpine(img_h)
     local h1 = math.floor(img_h * 0.97)
     local h2 = math.floor(img_h * 0.94)
@@ -1382,13 +1759,13 @@ local function _buildSpine(img_h)
 end
 
 -- Folder-name label overlaid on the cover image. Returns nil when disabled.
--- label_style, label_position, and show_name are passed in pre-read by the
--- caller (_setFolderCover) so this function makes zero settings reads.
+-- `display` is the pre-read settings table { label_mode, show_name, label_style, label_pos }.
 -- spine_w: actual spine width in pixels (0 when spine is hidden).
-local function _buildLabel(item, available_w, size, border, cv_scale,
-                            label_mode, show_name, label_style, label_pos, spine_w)
-    if label_mode ~= "overlay" then return nil end
-    if not show_name            then return nil end
+local function _buildLabel(item, available_w, size, border, cv_scale, display, spine_w)
+    if display.label_mode ~= "overlay" then return nil end
+    if not display.show_name            then return nil end
+    local label_style = display.label_style
+    local label_pos   = display.label_pos
 
     local dir_max_fs = math.max(8, math.floor(_BASE_DIR_FS * cv_scale * M.getLabelScale()))
     local directory  = item:_getFolderNameWidget(available_w, dir_max_fs)
@@ -1434,31 +1811,50 @@ local function _buildLabel(item, available_w, size, border, cv_scale,
 end
 
 -- Book-count badge (circle, top- or bottom-right). Returns nil when hidden.
-local function _buildBadge(mandatory, cover_dimen, cv_scale)
+-- cell_dimen (optional): full mosaic cell size used for badge sizing; when
+-- omitted, cover_dimen is used instead (smaller, produces a smaller badge).
+local function _buildBadge(mandatory, cover_dimen, cv_scale, cell_dimen)
     if M.getBadgeHidden() then return nil end
     local nb_text = mandatory and mandatory:match("(%d+) \u{F016}") or ""
     if nb_text == "" or nb_text == "0" then return nil end
 
     local nb_count       = tonumber(nb_text)
-    local nb_size        = math.floor(_BASE_NB_SIZE * cv_scale)
-    local nb_font_size   = math.floor(nb_size * (_BASE_NB_FS / _BASE_NB_SIZE))
+    -- Sizing identical to all other badges: eff_size = cell_min * 0.14,
+    -- font_sz = eff_size * 0.24 (same ratio as progress pentagon text).
+    -- Use the full cell dimensions for sizing so the badge matches the scale
+    -- of the pages/series badges on book covers (which use self.width/self.height).
+    local size_dimen     = cell_dimen or cover_dimen
+    local cell_min       = math.min(size_dimen.w, size_dimen.h)
+    local nb_size        = math.max(8, math.floor(cell_min * 0.14))
+    local nb_font_size   = math.max(7, math.floor(nb_size * 0.24))
     local badge_margin   = math.max(1, math.floor(_BADGE_MARGIN_BASE   * cv_scale))
     local badge_margin_r = math.max(1, math.floor(_BADGE_MARGIN_R_BASE * cv_scale))
+    local dark           = M.getBadgeColorFolder() == "dark"
+    local bg_color       = dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local fg_color       = dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
 
     local badge = FrameContainer:new{
         padding    = 0,
-        bordersize = 0,
-        background = Blitbuffer.COLOR_BLACK,
+        bordersize = Size.border.thin,
+        color      = Blitbuffer.COLOR_GRAY,
+        background = bg_color,
         radius     = math.floor(nb_size / 2),
         dimen      = Geom:new{ w = nb_size, h = nb_size },
         CenterContainer:new{
             dimen = Geom:new{ w = nb_size, h = nb_size },
-            TextWidget:new{
-                text    = tostring(math.min(nb_count, 99)),
-                face    = Font:getFace("cfont", nb_font_size),
-                fgcolor = Blitbuffer.COLOR_WHITE,
-                bold    = true,
-            },
+            (function()
+                local tw = TextWidget:new{
+                    text    = tostring(math.min(nb_count, 99)),
+                    face    = Font:getFace("cfont", nb_font_size),
+                    fgcolor = fg_color,
+                    bold    = true,
+                }
+                local _orig_pt = tw.paintTo
+                tw.paintTo = function(self, bb, x, y)
+                    _orig_pt(self, bb, x, y + 1) -- HACK: Change this +1 to the required value
+                end
+                return tw
+            end)(),
         },
     }
 
@@ -1490,16 +1886,85 @@ local function _buildBadge(mandatory, cover_dimen, cv_scale)
 end
 
 -- ---------------------------------------------------------------------------
+-- Shared geometry helper — computes the five values every cover-building
+-- function needs.  Called once per cell; eliminates the five-way duplication
+-- of the border/spine_w/max_img_w/max_img_h block.
+-- ---------------------------------------------------------------------------
+local function _computeCellGeometry(item)
+    local border    = Size.border.thin
+    local spine_w   = not M.getHideSpine() and _SPINE_W or 0
+    -- Note: self.height has already been reduced by _STRIP_H in the update()
+    -- wrapper before _setFolderCover/_setEmptyFolderCover call this function,
+    -- so we must NOT subtract _module_strip_h again here.
+    local max_img_w = item.width  - spine_w - border * 2
+    local max_img_h = item.height - border * 2
+    return border, spine_w, max_img_w, max_img_h
+end
+
+-- ---------------------------------------------------------------------------
+-- Shared assembly helper — wraps any pre-built content_widget (ImageWidget,
+-- empty FrameContainer, or quad grid) with the spine, centres it in the
+-- mosaic cell, and overlays the folder-name label and item-count badge.
+-- Returns the outer OverlapGroup ready for _underline_container[1].
+--
+--   item           — the MosaicMenuItem
+--   content_widget — the framed cover block (already wrapped in FrameContainer)
+--   size           — Geom{w,h} of the content_widget *inside* its border
+--   border         — Size.border.thin (passed in to avoid a redundant call)
+--   spine_w        — precomputed spine width in px (0 when spine hidden)
+--   display        — settings table { label_mode, show_name, label_style, label_pos }
+--
+-- cv_scale is derived here from cover_h (the authoritative value) so callers
+-- never have to compute or pass it — any approximation made before cover_h is
+-- known would produce a different number.
+-- ---------------------------------------------------------------------------
+local function _assembleCoverWidget(item, content_widget, size, border, spine_w, display)
+    local spine       = spine_w > 0 and _buildSpine(size.h) or nil
+    local cover_group = spine
+        and HorizontalGroup:new{ align = "center", spine, content_widget }
+        or  HorizontalGroup:new{ align = "center", content_widget }
+
+    local cover_w     = spine_w + size.w + border * 2
+    local cover_h     = size.h  + border * 2
+    local cover_dimen = Geom:new{ w = cover_w, h = cover_h }
+    local cell_dimen  = Geom:new{ w = item.width, h = item.height }
+    local cv_scale    = math.max(0.1, math.floor((cover_h / _BASE_COVER_H) * 10) / 10)
+
+    local folder_name_widget = _buildLabel(item, size.w - _LATERAL_PAD * 2,
+        size, border, cv_scale, display, spine_w)
+    local nbitems_widget = _buildBadge(item.mandatory, cover_dimen, cv_scale, cell_dimen)
+
+    local overlap = OverlapGroup:new{ dimen = cover_dimen, cover_group }
+    if folder_name_widget then overlap[#overlap + 1] = folder_name_widget end
+    if nbitems_widget     then overlap[#overlap + 1] = nbitems_widget     end
+
+    local x_center = math.floor((item.width  - cover_w) / 2)
+    local y_center = math.floor((item.height - cover_h) / 2)
+    overlap.overlap_offset = { x_center - math.floor(spine_w / 2), y_center }
+
+    return OverlapGroup:new{ dimen = cell_dimen, overlap }
+end
+
+-- ---------------------------------------------------------------------------
+-- Install helper — marks the cell as processed, frees the previous widget,
+-- and assigns the new one.  Extracted to avoid repeating these three lines
+-- in every quad-cover caller inside update().
+-- ---------------------------------------------------------------------------
+local function _installWidget(item, widget)
+    item._foldercover_processed = true
+    if item._underline_container[1] then item._underline_container[1]:free() end
+    item._underline_container[1] = widget
+end
+
+-- ---------------------------------------------------------------------------
 -- Quad-cover builder — 2×2 grid of book covers for a folder cell.
 -- Returns the OverlapGroup widget ready to assign to _underline_container[1],
 -- or nil when no covers are available (caller falls through to empty cover).
 -- img_list: array of up to 4 { data=bb, w=n, h=n } or { file=path, w=n, h=n }
--- max_img_w, max_img_h: usable area for the cover block (excluding spine).
+-- border, spine_w, max_img_w, max_img_h: all come from _computeCellGeometry so
+-- M.getHideSpine() and Size.border.thin are never read twice in the same cell.
 -- ---------------------------------------------------------------------------
-local function _buildQuadCover(item, img_list, max_img_w, max_img_h,
-                                label_mode, show_name, label_style, label_pos,
-                                cv_scale)
-    local border    = Size.border.thin
+local function _buildQuadCover(item, img_list, border, spine_w, max_img_w, max_img_h, display)
     local sep       = math.max(1, Screen:scaleBySize(1))
 
     -- Compute the portrait block dimensions (always 2:3).
@@ -1568,32 +2033,9 @@ local function _buildQuadCover(item, img_list, max_img_w, max_img_h,
         },
     }
 
-    local size        = Geom:new{ w = img_w, h = img_h }
-    local spine       = not M.getHideSpine() and _buildSpine(img_h) or nil
-    local spine_w     = spine and _SPINE_W or 0
-    local cover_group = spine
-        and HorizontalGroup:new{ align = "center", spine, grid }
-        or  HorizontalGroup:new{ align = "center", grid }
+    local size = Geom:new{ w = img_w, h = img_h }
 
-    local cover_w    = spine_w + img_w + border * 2
-    local cover_h    = img_h    + border * 2
-    local cover_dimen = Geom:new{ w = cover_w, h = cover_h }
-    local cell_dimen  = Geom:new{ w = item.width, h = item.height }
-
-    local folder_name_widget = _buildLabel(item, img_w - _LATERAL_PAD * 2,
-        size, border, cv_scale, label_mode, show_name, label_style, label_pos, spine_w)
-    local nbitems_widget = _buildBadge(item.mandatory, cover_dimen, cv_scale)
-
-    local overlap = OverlapGroup:new{ dimen = cover_dimen, cover_group }
-    if folder_name_widget then overlap[#overlap + 1] = folder_name_widget end
-    if nbitems_widget     then overlap[#overlap + 1] = nbitems_widget     end
-
-    local x_center = math.floor((item.width  - cover_w) / 2)
-    local y_center = math.floor((item.height - cover_h) / 2)
-    overlap.overlap_offset = { x_center - math.floor(spine_w / 2), y_center }
-
-    local widget = OverlapGroup:new{ dimen = cell_dimen, overlap }
-    return widget
+    return _assembleCoverWidget(item, grid, size, border, spine_w, display)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1650,6 +2092,14 @@ function M.install()
     local ok_bim, BookInfoManager = pcall(require, "bookinfomanager")
     if not ok_bim or not BookInfoManager then return end
 
+    -- ReadCollection needed to check if a book belongs to a collection.
+    local ok_rc, ReadCollection = pcall(require, "readcollection")
+    if not ok_rc then ReadCollection = nil end
+
+    -- Lazy cache for collection_mark upvalues from orig_paintTo.
+    -- Populated on first banner-mode paint of a book in a collection.
+    local _fc_coll_sz, _fc_coll_widget
+
     -- Capture cell dimensions before each render so the 2:3 StretchingImageWidget
     -- can enforce the correct aspect ratio.
     local max_img_w, max_img_h
@@ -1690,13 +2140,58 @@ function M.install()
 
     local orig_init = MosaicMenuItem.init
     MosaicMenuItem._simpleui_fc_orig_init = orig_init
+
+    -- ── Title/Author strip geometry (fixed for the session; requires restart) ──
+    -- Calculated here so init, update and paintTo all share the same value.
+    local _show_title_strip  = M.getShowTitleStrip()
+    local _show_author_strip = M.getShowAuthorStrip()
+    local _STRIP_H = 0
+
+    if _show_title_strip or _show_author_strip then
+        local Screen_   = require("device").screen
+        local Font_     = require("ui/font")
+        local TextWidget_ = require("ui/widget/textwidget")
+        local _PAD = Screen_:scaleBySize(3)
+        local _GAP = Screen_:scaleBySize(2)
+        local function _mh(fs, bold)
+            local tw = TextWidget_:new{ text="Ag", face=Font_:getFace("cfont",fs),
+                bold=bold, padding=0 }
+            local h = tw:getSize().h; tw:free(); return h
+        end
+        local TITLE_LINE  = _mh(16, true)
+        local AUTHOR_LINE = _mh(13, false)
+        _STRIP_H = _PAD
+        if _show_title_strip  then _STRIP_H = _STRIP_H + TITLE_LINE end
+        if _show_title_strip and _show_author_strip then _STRIP_H = _STRIP_H + _GAP end
+        if _show_author_strip then _STRIP_H = _STRIP_H + AUTHOR_LINE end
+        _STRIP_H = _STRIP_H + _PAD
+    end
+    -- Expose on both the module variable (for _computeCellGeometry) and the
+    -- class table (for bookkeeping / uninstall).
+    _module_strip_h = _STRIP_H
+    MosaicMenuItem._simpleui_strip_h = _STRIP_H
+
+    -- Flag used by update wrapper to avoid double-shrink when init calls update.
+    local _in_strip_init = false
+
     function MosaicMenuItem:init()
+        -- Shrink cell height so the original init (and browser_cover_mosaic_uniform)
+        -- lays out the cover image within the reduced space, leaving the strip area free.
+        if _STRIP_H > 0 and self.height then
+            self.height = self.height - _STRIP_H
+        end
         if self.width and self.height then
             local border_size = Size.border.thin
             max_img_w = self.width  - 2 * border_size
             max_img_h = self.height - 2 * border_size
         end
+        _in_strip_init = true
         if orig_init then orig_init(self) end
+        _in_strip_init = false
+        -- Restore so the cell occupies its full grid slot.
+        if _STRIP_H > 0 and self.height then
+            self.height = self.height + _STRIP_H
+        end
     end
 
     MosaicMenuItem._simpleui_fc_patched     = true
@@ -1705,7 +2200,31 @@ function M.install()
     local original_update = MosaicMenuItem.update
 
     function MosaicMenuItem:update(...)
+        -- Invalidate the title/author strip blitbuffer cache on every cover reload.
+        self._simpleui_strip_data = nil
+        if self._simpleui_strip_bb then
+            self._simpleui_strip_bb:free(); self._simpleui_strip_bb = nil
+        end
+        -- Shrink height so the original update (and other patches) compute the cover
+        -- image within the reduced space.  Skipped when called from within init()
+        -- because init already shrank self.height before calling orig_init.
+        if not _in_strip_init and _STRIP_H > 0 and self.height then
+            self.height = self.height - _STRIP_H
+        end
         original_update(self, ...)
+        if not _in_strip_init and _STRIP_H > 0 and self.height then
+            self.height = self.height + _STRIP_H
+            -- KOReader evaluated show_progress_bar with a reduced self.height and
+            -- may have set it to false (or nil) incorrectly.  Re-apply the exact
+            -- condition from mosaicmenu.lua so the native bar is shown when it
+            -- should be.  We only force it to true — we never force it to false —
+            -- so any explicit "complete" suppression from KOReader is preserved.
+            if not self.show_progress_bar and self.percent_finished
+                    and self.status ~= "complete"
+                    and BookInfoManager:getSetting("show_progress_in_mosaic") then
+                self.show_progress_bar = true
+            end
+        end
 
         -- Capture pages and series index from the BookList cache (no extra I/O).
         -- Stored on self so paintTo() can use them without a redundant getBookInfo call.
@@ -1725,81 +2244,56 @@ function M.install()
             self._fc_underline_color = M.getHideUnderline()
                 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
             -- Pre-read badge visibility flags so paintTo() makes zero settings reads.
-            self._fc_overlay_pages  = M.getOverlayPages()
-            self._fc_overlay_series = M.getOverlaySeries()
+            self._fc_overlay_pages    = M.getOverlayPages()
+            self._fc_overlay_series   = M.getOverlaySeries()
+            self._fc_overlay_progress = M.getProgressMode() == "banner"
+            self._fc_overlay_new      = M.getOverlayNew()
 
-            -- Pre-render badge blitbuffers so paintTo() only calls bb:blitFrom,
-            -- never allocates widgets. Free previous bbs to avoid leaks.
-            if self._fc_pages_bb  then self._fc_pages_bb:free();  self._fc_pages_bb  = nil end
-            if self._fc_series_bb then self._fc_series_bb:free(); self._fc_series_bb = nil end
+            -- Build badge descriptors (plain tables, no Blitbuffer allocated).
+            -- _fc_progress_bb, _fc_pages_desc, _fc_series_desc, _fc_new_desc are
+            -- all plain tables — no :free() needed for any of them.
+            self._fc_progress_bb = nil
+            self._fc_pages_desc  = nil
+            self._fc_series_desc = nil
+            self._fc_new_desc    = nil
 
             if self._fc_overlay_pages and self.status ~= "complete" and self._fc_pages then
-                local ptw = TextWidget:new{
-                    text    = self._fc_pages .. " p.",
-                    face    = Font:getFace("cfont", _BADGE_FONT_SZ),
-                    bold    = false,
-                    fgcolor = Blitbuffer.COLOR_BLACK,
-                }
-                local tsz    = ptw:getSize()
-                local border = Size.border.thin
-                -- inner = text + padding; buf includes border on all four sides
-                local inner_w = tsz.w + _BADGE_PAD_H * 2
-                local inner_h = tsz.h + _BADGE_PAD_V * 2
-                local buf_w   = inner_w + border * 2
-                local buf_h   = inner_h + border * 2
-                local bw = FrameContainer:new{
-                    dimen      = Geom:new{ w = buf_w, h = buf_h },
-                    bordersize = border,
-                    color      = Blitbuffer.COLOR_DARK_GRAY,
-                    background = Blitbuffer.COLOR_WHITE,
-                    radius     = _BADGE_CORNER,
-                    padding    = 0,
-                    CenterContainer:new{
-                        dimen = Geom:new{ w = inner_w, h = inner_h },
-                        ptw,
-                    },
-                }
-                local ok_buf, buf = pcall(Blitbuffer.new, buf_w, buf_h, Blitbuffer.TYPE_BB8A)
-                if ok_buf and buf then
-                    buf:fill(Blitbuffer.COLOR_WHITE)
-                    bw:paintTo(buf, 0, 0)
-                    self._fc_pages_bb = buf
-                end
-                bw:free()
+                local cell_min = math.min(self.width or 40, self.height or 40)
+                local dark = M.getBadgeColorPages() == "dark"
+                self._fc_pages_desc = _buildRectBadgeDesc(self._fc_pages .. " p.", false, cell_min, dark, false)
             end
 
             if self._fc_overlay_series and self._fc_series_index then
-                local stw = TextWidget:new{
-                    text    = "#" .. self._fc_series_index,
-                    face    = Font:getFace("cfont", _BADGE_FONT_SZ),
-                    bold    = false,
-                    fgcolor = Blitbuffer.COLOR_BLACK,
-                }
-                local tsz    = stw:getSize()
-                local border = Size.border.thin
-                local inner_w = tsz.w + _BADGE_PAD_H * 2
-                local inner_h = tsz.h + _BADGE_PAD_V * 2
-                local buf_w   = inner_w + border * 2
-                local buf_h   = inner_h + border * 2
-                local bw = FrameContainer:new{
-                    dimen      = Geom:new{ w = buf_w, h = buf_h },
-                    bordersize = border,
-                    color      = Blitbuffer.COLOR_DARK_GRAY,
-                    background = Blitbuffer.COLOR_WHITE,
-                    radius     = _BADGE_CORNER,
-                    padding    = 0,
-                    CenterContainer:new{
-                        dimen = Geom:new{ w = inner_w, h = inner_h },
-                        stw,
-                    },
-                }
-                local ok_buf, buf = pcall(Blitbuffer.new, buf_w, buf_h, Blitbuffer.TYPE_BB8A)
-                if ok_buf and buf then
-                    buf:fill(Blitbuffer.COLOR_WHITE)
-                    bw:paintTo(buf, 0, 0)
-                    self._fc_series_bb = buf
+                local cell_min = math.min(self.width or 40, self.height or 40)
+                local dark = M.getBadgeColorSeries() == "dark"
+                self._fc_series_desc = _buildRectBadgeDesc("#" .. self._fc_series_index, false, cell_min, dark, false)
+            end
+
+            -- ── Progress pentagon badge ───────────────────────────────────────
+            -- Rendered only when the feature is enabled and the item is a book.
+            -- Only shown for books that have been opened (percent_finished is set
+            -- or status is "complete"); bare-pentagon "not started" state is hidden.
+            if self._fc_overlay_progress then
+                local has_progress = (self.percent_finished ~= nil) or (self.status == "complete") or (self.status == "abandoned")
+                if has_progress then
+                    local eff_size = math.max(8, math.floor(
+                        math.min(self.width or 40, self.height or 40) * 0.14))
+                    local dark = M.getBadgeColorProgress() == "dark"
+                    local prog_desc = _buildProgressBadgeDesc(
+                        eff_size, self.status, self.percent_finished, Size.border.thin, dark)
+                    if prog_desc then self._fc_progress_bb = prog_desc end
                 end
-                bw:free()
+            end
+
+            -- ── "New" badge (top-right) ────────────────────────────────────────────────────────────
+            -- Descriptor pre-built for books that have never been opened.
+            if self._fc_overlay_new then
+                local is_unread = (self.percent_finished == nil) and (self.status ~= "complete") and (self.status ~= "abandoned")
+                if is_unread then
+                    local cell_min = math.min(self.width or 40, self.height or 40)
+                    local dark = M.getBadgeColorNew() == "dark"
+                    self._fc_new_desc = _buildRectBadgeDesc(_("New"), true, cell_min, dark, true)
+                end
             end
         end
 
@@ -1831,12 +2325,19 @@ function M.install()
         local dir_path = self.entry and self.entry.path
         if not dir_path then return end
 
-        -- Read all display settings once here so the build helpers make zero
-        -- individual settings reads per cell.
-        local label_mode   = M.getLabelMode()
-        local show_name    = M.getShowName()
-        local label_style  = M.getLabelStyle()
-        local label_pos    = M.getLabelPosition()
+        -- Read all display settings once into a table so every build helper
+        -- receives them as a single argument (no per-call settings reads).
+        local display = {
+            label_mode  = M.getLabelMode(),
+            show_name   = M.getShowName(),
+            label_style = M.getLabelStyle(),
+            label_pos   = M.getLabelPosition(),
+        }
+        -- When the title/author strip is active it already shows the folder name
+        -- below the cover — suppress the overlay label to avoid redundancy.
+        if _STRIP_H > 0 then
+            display.label_mode = "hidden"
+        end
         local folder_style = _resolveStyle(self.menu, dir_path, self.entry)   -- "single" | "quad" (resolved)
 
         -- ── Series group cover ────────────────────────────────────────────────
@@ -1855,7 +2356,7 @@ function M.install()
                 then
                     self:_setFolderCover(
                         { data = bi.cover_bb, w = bi.cover_w, h = bi.cover_h },
-                        label_mode, show_name, label_style, label_pos)
+                        display)
                     return
                 end
             end
@@ -1878,20 +2379,11 @@ function M.install()
                     end
                 end
                 if #covers > 0 then
-                    local border    = Size.border.thin
-                    local spine_w   = not M.getHideSpine() and _SPINE_W or 0
-                    local max_img_w = self.width  - spine_w - border * 2
-                    local max_img_h = self.height - border * 2
-                    local cv_scale  = math.max(0.1, math.floor(
-                        (max_img_h / _BASE_COVER_H) * 10) / 10)
-                    local widget = _buildQuadCover(self, covers, max_img_w, max_img_h,
-                        label_mode, show_name, label_style, label_pos, cv_scale)
+                    local border, spine_w, max_img_w, max_img_h = _computeCellGeometry(self)
+                    local widget = _buildQuadCover(self, covers,
+                        border, spine_w, max_img_w, max_img_h, display)
                     if widget then
-                        self._foldercover_processed = true
-                        if self._underline_container[1] then
-                            self._underline_container[1]:free()
-                        end
-                        self._underline_container[1] = widget
+                        _installWidget(self, widget)
                         return
                     end
                 end
@@ -1919,7 +2411,7 @@ function M.install()
                         then
                             self:_setFolderCover(
                                 { data = bi.cover_bb, w = bi.cover_w, h = bi.cover_h },
-                                label_mode, show_name, label_style, label_pos)
+                                display)
                             return
                         end
                     end
@@ -1944,27 +2436,18 @@ function M.install()
                 if ok and w and h then
                     self:_setFolderCover(
                         { file = cover_file, w = w, h = h },
-                        label_mode, show_name, label_style, label_pos)
+                        display)
                     return
                 end
             end
 
             local covers = _collectCovers(self.menu, dir_path, 4, BookInfoManager)
             if #covers > 0 then
-                local border    = Size.border.thin
-                local spine_w   = not M.getHideSpine() and _SPINE_W or 0
-                local max_img_w = self.width  - spine_w - border * 2
-                local max_img_h = self.height - border * 2
-                local cv_scale  = math.max(0.1, math.floor(
-                    (max_img_h / _BASE_COVER_H) * 10) / 10)
-                local widget = _buildQuadCover(self, covers, max_img_w, max_img_h,
-                    label_mode, show_name, label_style, label_pos, cv_scale)
+                local border, spine_w, max_img_w, max_img_h = _computeCellGeometry(self)
+                local widget = _buildQuadCover(self, covers,
+                    border, spine_w, max_img_w, max_img_h, display)
                 if widget then
-                    self._foldercover_processed = true
-                    if self._underline_container[1] then
-                        self._underline_container[1]:free()
-                    end
-                    self._underline_container[1] = widget
+                    _installWidget(self, widget)
                     return
                 end
             end
@@ -1993,7 +2476,7 @@ function M.install()
             then
                 self:_setFolderCover(
                     { data = bi.cover_bb, w = bi.cover_w, h = bi.cover_h },
-                    label_mode, show_name, label_style, label_pos)
+                    display)
                 return
             end
         end
@@ -2012,7 +2495,7 @@ function M.install()
             if ok and w and h then
                 self:_setFolderCover(
                     { file = cover_file, w = w, h = h },
-                    label_mode, show_name, label_style, label_pos)
+                    display)
                 return
             end
         end
@@ -2033,7 +2516,7 @@ function M.install()
                     then
                         self:_setFolderCover(
                             { data = bi.cover_bb, w = bi.cover_w, h = bi.cover_h },
-                            label_mode, show_name, label_style, label_pos)
+                            display)
                         return
                     end
                 else
@@ -2047,12 +2530,12 @@ function M.install()
             if has_subfolders and M.getSubfolderCover() and M.getRecursiveCover() then
                 local cover = _findCoverRecursive(self.menu, dir_path, 1, 3, BookInfoManager)
                 if cover then
-                    self:_setFolderCover(cover, label_mode, show_name, label_style, label_pos)
+                    self:_setFolderCover(cover, display)
                     return
                 end
             end
             if M.getSubfolderCover() then
-                self:_setEmptyFolderCover(label_mode, show_name, label_style, label_pos)
+                self:_setEmptyFolderCover(display)
             end
             return
         end
@@ -2070,14 +2553,12 @@ function M.install()
         end
     end
 
-    -- Builds and installs the cover widget into the cell.
-    -- Display settings are passed in to avoid per-call settings reads.
-    function MosaicMenuItem:_setFolderCover(img, label_mode, show_name, label_style, label_pos)
+    -- Builds and installs a single-image cover widget into the mosaic cell.
+    -- `img`     — { file=path } or { data=blitbuffer, w=n, h=n }
+    -- `display` — pre-read settings table { label_mode, show_name, label_style, label_pos }
+    function MosaicMenuItem:_setFolderCover(img, display)
         self._foldercover_processed = true
-        local border    = Size.border.thin
-        local spine_w   = not M.getHideSpine() and _SPINE_W or 0
-        local max_img_w = self.width  - spine_w - border * 2
-        local max_img_h = self.height - border * 2
+        local border, spine_w, max_img_w, max_img_h = _computeCellGeometry(self)
 
         local img_options = {}
         if img.file then img_options.file  = img.file end
@@ -2095,69 +2576,67 @@ function M.install()
 
         local image        = ImageWidget:new(img_options)
         local size         = image:getSize()
-        local image_widget = FrameContainer:new{ padding = 0, bordersize = border, image }
-        local spine        = not M.getHideSpine() and _buildSpine(size.h) or nil
-        local cover_group  = spine
-            and HorizontalGroup:new{ align = "center", spine, image_widget }
-            or  HorizontalGroup:new{ align = "center", image_widget }
-
-        local cover_w    = spine_w + size.w + border * 2
-        local cover_h    = size.h  + border * 2
-        local cover_dimen = Geom:new{ w = cover_w, h = cover_h }
-        local cell_dimen  = Geom:new{ w = self.width, h = self.height }
-        local cv_scale    = math.max(0.1, math.floor((cover_h / _BASE_COVER_H) * 10) / 10)
-
-        local folder_name_widget = _buildLabel(self, size.w - _LATERAL_PAD * 2,
-            size, border, cv_scale, label_mode, show_name, label_style, label_pos, spine_w)
-        local nbitems_widget = _buildBadge(self.mandatory, cover_dimen, cv_scale)
-
-        local overlap = OverlapGroup:new{ dimen = cover_dimen, cover_group }
-        if folder_name_widget then overlap[#overlap + 1] = folder_name_widget end
-        if nbitems_widget     then overlap[#overlap + 1] = nbitems_widget     end
-
-        local x_center    = math.floor((self.width  - cover_w) / 2)
-        local y_center    = math.floor((self.height - cover_h) / 2)
-        overlap.overlap_offset = { x_center - math.floor(spine_w / 2), y_center }
-
-        local widget = OverlapGroup:new{ dimen = cell_dimen, overlap }
-
-        if self._underline_container[1] then self._underline_container[1]:free() end
-        self._underline_container[1] = widget
+        local content      = FrameContainer:new{ padding = 0, bordersize = border, image }
+        _installWidget(self, _assembleCoverWidget(self, content, size, border, spine_w, display))
     end
 
     -- Placeholder cover for bookless folders (only subfolders or empty).
-    -- Layout mirrors _setFolderCover for visual consistency.
-    function MosaicMenuItem:_setEmptyFolderCover(label_mode, show_name, label_style, label_pos)
+    -- `display` — pre-read settings table { label_mode, show_name, label_style, label_pos }
+    function MosaicMenuItem:_setEmptyFolderCover(display)
         self._foldercover_processed = true
-        local border    = Size.border.thin
-        local spine_w   = not M.getHideSpine() and _SPINE_W or 0
-        local max_img_w = self.width  - spine_w - border * 2
-        local max_img_h = self.height - border * 2
+        local border, spine_w, max_img_w, max_img_h = _computeCellGeometry(self)
 
         local ratio = 2 / 3
+        local img_w, img_h
         if max_img_w / max_img_h > ratio then
             img_h = max_img_h; img_w = math.floor(max_img_h * ratio)
         else
             img_w = max_img_w; img_h = math.floor(max_img_w / ratio)
         end
 
-        -- _ICON_PATH and _ICON_EXISTS are module-level constants (computed once at load).
         local icon_size   = math.floor(math.min(img_w, img_h) * 0.5)
         local icon_widget = nil
-        if _ICON_EXISTS then
-            local ok_iw, iw = pcall(function()
+
+        local actual_icon_path = _ICON_PATH
+        pcall(function()
+            local SUIStyle = require("sui_style")
+            local custom = SUIStyle.getIcon("sui_fc_empty")
+            if custom then actual_icon_path = custom end
+        end)
+
+        local Config = require("sui_config")
+        local nerd_char = Config.nerdIconChar(actual_icon_path)
+
+        if nerd_char then
+            local ok_tw, tw = pcall(function()
                 return CenterContainer:new{
                     dimen = Geom:new{ w = img_w, h = img_h },
-                    ImageWidget:new{
-                        file    = _ICON_PATH,
-                        width   = icon_size,
-                        height  = icon_size,
-                        alpha   = true,
-                        is_icon = true,
+                    TextWidget:new{
+                        text    = nerd_char,
+                        face    = Font:getFace("symbols", math.floor(icon_size * 0.85)),
+                        fgcolor = Blitbuffer.COLOR_BLACK,
+                        padding = 0,
                     },
                 }
             end)
-            if ok_iw then icon_widget = iw end
+            if ok_tw then icon_widget = tw end
+        else
+            local actual_icon_exists = lfs.attributes(actual_icon_path, "mode") == "file"
+            if actual_icon_exists then
+                local ok_iw, iw = pcall(function()
+                    return CenterContainer:new{
+                        dimen = Geom:new{ w = img_w, h = img_h },
+                        ImageWidget:new{
+                            file    = actual_icon_path,
+                            width   = icon_size,
+                            height  = icon_size,
+                            alpha   = true,
+                            is_icon = true,
+                        },
+                    }
+                end)
+                if ok_iw then icon_widget = iw end
+            end
         end
 
         local bg_canvas = FrameContainer:new{
@@ -2168,34 +2647,9 @@ function M.install()
             icon_widget,
         }
 
-        local size         = Geom:new{ w = img_w, h = img_h }
-        local image_widget = FrameContainer:new{ padding = 0, bordersize = border, bg_canvas }
-        local spine        = not M.getHideSpine() and _buildSpine(size.h) or nil
-        local cover_group  = spine
-            and HorizontalGroup:new{ align = "center", spine, image_widget }
-            or  HorizontalGroup:new{ align = "center", image_widget }
-
-        local cover_w     = spine_w + size.w + border * 2
-        local cover_h     = size.h  + border * 2
-        local cover_dimen = Geom:new{ w = cover_w, h = cover_h }
-        local cell_dimen  = Geom:new{ w = self.width, h = self.height }
-        local cv_scale    = math.max(0.1, math.floor((cover_h / _BASE_COVER_H) * 10) / 10)
-
-        local folder_name_widget = _buildLabel(self, size.w - _LATERAL_PAD * 2,
-            size, border, cv_scale, label_mode, show_name, label_style, label_pos, spine_w)
-        local nbitems_widget = _buildBadge(self.mandatory, cover_dimen, cv_scale)
-
-        local overlap = OverlapGroup:new{ dimen = cover_dimen, cover_group }
-        if folder_name_widget then overlap[#overlap + 1] = folder_name_widget end
-        if nbitems_widget     then overlap[#overlap + 1] = nbitems_widget     end
-
-        local x_center = math.floor((self.width  - cover_w) / 2)
-        local y_center = math.floor((self.height - cover_h) / 2)
-        overlap.overlap_offset = { x_center - math.floor(spine_w / 2), y_center }
-
-        local widget = OverlapGroup:new{ dimen = cell_dimen, overlap }
-        if self._underline_container[1] then self._underline_container[1]:free() end
-        self._underline_container[1] = widget
+        local size    = Geom:new{ w = img_w, h = img_h }
+        local content = FrameContainer:new{ padding = 0, bordersize = border, bg_canvas }
+        _installWidget(self, _assembleCoverWidget(self, content, size, border, spine_w, display))
     end
 
     -- Binary-search the largest font size that fits the folder name in the
@@ -2307,7 +2761,124 @@ function M.install()
     function MosaicMenuItem:paintTo(bb, x, y)
         x = math.floor(x)
         y = math.floor(y)
+
+        -- Always refresh corner_mark_size from orig_paintTo's upvalue so that
+        -- _fc_coll_sz is current in every progress mode (not just "banner") and
+        -- automatically tracks grid changes (nb_cols/nb_rows, screen rotation).
+        -- This is a cheap integer upvalue read done once per cell per frame.
+        if not self.is_directory then
+            local ni = 1
+            while true do
+                local nm, vl = debug.getupvalue(orig_paintTo, ni)
+                if not nm then break end
+                if nm == "corner_mark_size" then _fc_coll_sz = vl; break end
+                ni = ni + 1
+            end
+        end
+
+        -- When the progress pentagon badge is active ("banner" mode), suppress
+        -- native KOReader marks that would overlap or duplicate it:
+        --   do_hint_opened   → dog-ear corner mark ("reading in progress")
+        --   shortcut_icon    → collection star — suppressed here; redrawn at
+        --                      bottom-right after orig_paintTo when in banner mode
+        --   has_description  → description side bar (right edge)
+        -- NOTE: show_progress_bar (native bottom bar) is intentionally NOT
+        -- suppressed — it remains visible alongside the pentagon badge.
+        -- In "none" mode the same marks are also suppressed (user wants no indicators).
+        -- In "native" mode they are left untouched so KOReader draws them normally.
+        -- Fields are temporarily nil'd before calling orig_paintTo and restored
+        -- immediately after, so all other paintTo logic is unaffected.
+        local _saved_hint, _saved_icon, _saved_desc, _saved_menu_name
+        local _saved_been_opened
+        local _progress_mode = M.getProgressMode()
+        if (_progress_mode == "banner" or _progress_mode == "none") and not self.is_directory then
+            _saved_hint = self.do_hint_opened;   self.do_hint_opened   = false
+            _saved_icon = self.shortcut_icon;    self.shortcut_icon    = nil
+            _saved_desc = self.has_description;  self.has_description  = false
+            -- Spoof menu.name so orig_paintTo skips the native collection mark.
+            -- In banner mode we redraw it at bottom-right below.
+            -- In none mode it stays suppressed entirely.
+            if self.menu then
+                _saved_menu_name = self.menu.name
+                self.menu.name   = "collections"
+            end
+            -- When the collection mark will be redrawn at bottom-right (banner mode,
+            -- book in a collection), make the native progress bar shrink its right edge
+            -- by corner_mark_size pixels — exactly the same behaviour as do_hint_opened.
+            -- We set do_hint_opened = true for orig_paintTo but keep been_opened = false
+            -- so the dog-ear mark (which requires do_hint_opened AND been_opened) is
+            -- never drawn.  The dog-ear was already suppressed above; this is just
+            -- belt-and-suspenders, but it also correctly avoids the dog-ear when
+            -- self.been_opened happens to be true.
+            if _progress_mode == "banner"
+                    and self.show_progress_bar
+                    and self.filepath
+                    and ReadCollection
+                    and ReadCollection:isFileInCollections(self.filepath) then
+                _saved_been_opened    = self.been_opened
+                self.do_hint_opened   = true
+                self.been_opened      = false
+            end
+        end
+
         orig_paintTo(self, bb, x, y)
+
+        if (_progress_mode == "banner" or _progress_mode == "none") and not self.is_directory then
+            self.do_hint_opened   = _saved_hint
+            self.shortcut_icon    = _saved_icon
+            self.has_description  = _saved_desc
+            if self.menu and _saved_menu_name ~= nil then
+                self.menu.name = _saved_menu_name
+            end
+            if _saved_been_opened ~= nil then
+                self.been_opened = _saved_been_opened
+            end
+        end
+
+        -- ── Collection mark repositioned to bottom-right (banner mode only) ────────
+        -- orig_paintTo was prevented from drawing the mark at top-right (menu.name
+        -- spoofed above).  Here we draw it at bottom-right using the same ix as the
+        -- native code but with iy = bottom of cover instead of top.
+        -- corner_mark_size and collection_mark are read lazily from orig_paintTo's
+        -- upvalues; they are nil until mosaicmenu initialises them on first update().
+        if _progress_mode == "banner" and not self.is_directory
+                and self.filepath
+                and self.menu and _saved_menu_name ~= nil and _saved_menu_name ~= "collections"
+                and ReadCollection and ReadCollection:isFileInCollections(self.filepath) then
+            -- Read corner_mark_size / collection_mark from orig_paintTo upvalues.
+            -- Cached in closures; re-read only when the widget is nil (first render)
+            -- or when corner_mark_size changes (screen rotation / zoom change).
+            if not _fc_coll_widget then
+                local ni = 1
+                while true do
+                    local nm, vl = debug.getupvalue(orig_paintTo, ni)
+                    if not nm then break end
+                    if nm == "corner_mark_size" then _fc_coll_sz     = vl end
+                    if nm == "collection_mark"  then _fc_coll_widget = vl end
+                    ni = ni + 1
+                end
+            end
+            local cm_size   = _fc_coll_sz
+            local cm_widget = _fc_coll_widget
+            if cm_size and cm_widget then
+                local tgt = self[1] and self[1][1] and self[1][1][1]
+                if tgt and tgt.dimen then
+                    -- ix mirrors the native top-right calculation
+                    local ix
+                    if BD.mirroredUILayout() then
+                        ix = math.floor((self.width - tgt.dimen.w) / 2)
+                    else
+                        ix = self.width - math.ceil((self.width - tgt.dimen.w) / 2) - cm_size
+                    end
+                    -- iy: bottom of cover minus mark size (mirrors do_hint_opened logic)
+                    local iy = self.height - math.ceil((self.height - tgt.dimen.h) / 2) - cm_size
+                    local rect_size = cm_size - tgt.bordersize
+                    bb:paintRect(x + ix, tgt.dimen.y + iy + tgt.bordersize,
+                                 rect_size, rect_size, Blitbuffer.COLOR_GRAY)
+                    cm_widget:paintTo(bb, x + ix, y + iy)
+                end
+            end
+        end
 
         if self.is_directory or self.file_deleted then return end
 
@@ -2318,103 +2889,325 @@ function M.install()
 
         local fw = target.dimen.w
         local fh = target.dimen.h
-        local fx = x + _round((self.width  - fw) / 2)
-        local fy = y + _round((self.height - fh) / 2)
+        -- Prefer the absolute coordinates stored by orig_paintTo (most accurate).
+        -- Fall back to manual centring when dimen.x/y are not yet populated.
+        local fx, fy
+        if target.dimen.x and target.dimen.x ~= 0 then
+            fx = target.dimen.x
+            fy = target.dimen.y
+        else
+            fx = x + _round((self.width  - fw) / 2)
+            fy = y + _round((self.height - fh) / 2)
+        end
 
-        -- Geometry shared by both badges.
-        local corner_sz  = math.floor(math.min(self.width, self.height) / 8)
-        local bar_margin = math.floor((corner_sz - _BADGE_BAR_H) / 2)
+        -- (fw, fh, fx, fy already set above)
+
+        -- Left margin of the native progress bar, computed the same way KOReader does
+        -- in mosaicmenu.lua paintTo():
+        --   progress_widget_margin = floor((corner_mark_size - progress_widget.height) / 2)
+        --   pos_x = x + ceil((self.width - progress_widget.width) / 2)
+        --         = fx + progress_widget_margin
+        -- _fc_coll_sz holds corner_mark_size (read from orig_paintTo upvalues in banner
+        -- mode); fall back to _BADGE_RIGHT_INSET before it has been populated.
+        local _native_bar_left_margin
+        if _fc_coll_sz then
+            _native_bar_left_margin = math.floor((_fc_coll_sz - _BADGE_BAR_H) / 2)
+        else
+            _native_bar_left_margin = _BADGE_RIGHT_INSET
+        end
 
         -- ── Pages badge (bottom-left) ─────────────────────────────────────────
         if self._fc_overlay_pages and self.status ~= "complete" then
-            local page_bb = self._fc_pages_bb
-            if page_bb then
-                local rect_w = page_bb:getWidth()
-                local rect_h = page_bb:getHeight()
-                local bar_top    = fy + fh - corner_sz + bar_margin
-                local bar_centre = bar_top + math.floor(_BADGE_BAR_H / 2)
-                local badge_x    = fx + math.max(bar_margin, _BADGE_INSET)
+            local desc = self._fc_pages_desc
+            if desc then
+                -- Align the badge left edge with the left edge of the native progress bar.
+                local badge_x
+                if BD.mirroredUILayout() then
+                    badge_x = fx + fw - desc.w - _native_bar_left_margin
+                else
+                    badge_x = fx + _native_bar_left_margin
+                end
+                -- When the native progress bar is visible, lift the badge above it.
                 local badge_y
                 if self.show_progress_bar then
-                    badge_y = bar_top - _BADGE_BAR_GAP - rect_h
+                    local corner_sz = _fc_coll_sz or math.floor(math.min(self.width, self.height) / 8)
+                    local bar_top   = fy + fh - corner_sz + _native_bar_left_margin
+                    badge_y = bar_top - _BADGE_BAR_GAP - desc.h
                 else
-                    badge_y = bar_centre - math.floor(rect_h / 2)
-                            - math.max(bar_margin, _BADGE_INSET)
+                    badge_y = fy + fh - desc.h - _native_bar_left_margin
                 end
-                bb:blitFrom(page_bb, badge_x, badge_y, 0, 0, rect_w, rect_h)
+                _drawRectBadge(bb, badge_x, badge_y, desc)
             end
         end
 
         -- ── Series index badge (top-left) ─────────────────────────────────────
         if self._fc_overlay_series then
-            local series_bb = self._fc_series_bb
-            -- Fallback: if the blitbuffer was not pre-rendered (e.g. series_index
+            local desc = self._fc_series_desc
+            -- Fallback: if the descriptor was not pre-built (e.g. series_index
             -- was not yet in the BookList cache when update() ran), query
             -- BookInfoManager directly — same behaviour as the previous version.
-            if not series_bb and self.filepath then
+            if not desc and self.filepath then
                 local bi = BookInfoManager:getBookInfo(self.filepath, false)
                 if bi and bi.series and bi.series_index then
-                    local stw = TextWidget:new{
-                        text    = "#" .. bi.series_index,
-                        face    = Font:getFace("cfont", _BADGE_FONT_SZ),
-                        bold    = false,
-                        fgcolor = Blitbuffer.COLOR_BLACK,
-                    }
-                    local tsz    = stw:getSize()
-                    local border  = Size.border.thin
-                    local inner_w = tsz.w + _BADGE_PAD_H * 2
-                    local inner_h = tsz.h + _BADGE_PAD_V * 2
-                    local buf_w   = inner_w + border * 2
-                    local buf_h   = inner_h + border * 2
-                    local bw = FrameContainer:new{
-                        dimen      = Geom:new{ w = buf_w, h = buf_h },
-                        bordersize = border,
-                        color      = Blitbuffer.COLOR_DARK_GRAY,
-                        background = Blitbuffer.COLOR_WHITE,
-                        radius     = _BADGE_CORNER,
-                        padding    = 0,
-                        CenterContainer:new{
-                            dimen = Geom:new{ w = inner_w, h = inner_h },
-                            stw,
-                        },
-                    }
-                    local ok_buf, buf = pcall(Blitbuffer.new, buf_w, buf_h, Blitbuffer.TYPE_BB8A)
-                    if ok_buf and buf then
-                        buf:fill(Blitbuffer.COLOR_WHITE)
-                        bw:paintTo(buf, 0, 0)
-                        -- Cache for future paintTo calls and free the widget.
-                        self._fc_series_bb = buf
-                        series_bb = buf
+                    local cell_min = math.min(self.width or fw, self.height or fh)
+                    local dark = M.getBadgeColorSeries() == "dark"
+                    local d = _buildRectBadgeDesc("#" .. bi.series_index, false, cell_min, dark, false)
+                    if d then
+                        -- Cache for future paintTo calls.
+                        self._fc_series_desc = d
+                        desc = d
                     end
-                    bw:free()
                 end
             end
-            if series_bb then
-                local rect_w = series_bb:getWidth()
-                local rect_h = series_bb:getHeight()
+            if desc then
+                -- Align left edge with the native progress bar (same margin as pages badge).
                 local badge_x
                 if BD.mirroredUILayout() then
-                    badge_x = fx + fw - math.max(bar_margin, _BADGE_INSET) - rect_w
+                    badge_x = fx + fw - desc.w - _native_bar_left_margin
                 else
-                    badge_x = fx + math.max(bar_margin, _BADGE_INSET)
+                    badge_x = fx + _native_bar_left_margin
                 end
-                local badge_y = fy + math.max(bar_margin, _BADGE_INSET)
-                bb:blitFrom(series_bb, badge_x, badge_y, 0, 0, rect_w, rect_h)
+                local badge_y = fy + _BADGE_RIGHT_INSET
+                _drawRectBadge(bb, badge_x, badge_y, desc)
             end
         end
+
+        -- ── Progress pentagon badge (top-right) ───────────────────────────────
+        -- Drawn directly onto `bb` (no intermediate Blitbuffer) so pixels
+        -- outside the pentagon shape are never written — the cover art shows
+        -- through the triangular tip without any white artefact.
+        -- Offset upward by `border` so the badge top edge sits exactly on top
+        -- of the cover FrameContainer border — the top line of the pentagon
+        -- merges with the cover frame and becomes invisible.
+        if self._fc_overlay_progress then
+            local prog_desc = self._fc_progress_bb   -- descriptor table, not a BB
+            if prog_desc then
+                local fr     = prog_desc.border
+                local rect_w = prog_desc.bw + 2 * fr
+                local badge_x
+                if BD.mirroredUILayout() then
+                    badge_x = fx + _BADGE_RIGHT_INSET
+                else
+                    badge_x = fx + fw - rect_w - _BADGE_RIGHT_INSET
+                end
+                -- badge_y = fy - fr  →  top edge of pentagon overlaps cover border
+                local badge_y = fy - fr
+                _drawProgressBadge(bb, badge_x, badge_y, prog_desc)
+            end
+        end
+
+        -- ── "New" badge (top-right) ───────────────────────────────────────────────────────────────
+        -- Shown only for truly unread books (percent_finished == nil, status not complete/abandoned).
+        -- Mirrors the pages badge geometry: same inset from top+right as pages has from bottom+left.
+        -- Not shown when the progress pentagon badge is already active for this item.
+        if self._fc_overlay_new then
+            local desc = self._fc_new_desc
+            local has_progress_badge = self._fc_overlay_progress and self._fc_progress_bb
+            if desc and not has_progress_badge then
+                -- Mirror the pages/series inset: same _BADGE_RIGHT_INSET from top-right.
+                local badge_x
+                if BD.mirroredUILayout() then
+                    badge_x = fx + _BADGE_RIGHT_INSET
+                else
+                    badge_x = fx + fw - desc.w - _BADGE_RIGHT_INSET
+                end
+                local badge_y = fy + _BADGE_RIGHT_INSET
+                _drawRectBadge(bb, badge_x, badge_y, desc)
+            end
+        end
+
     end
 
     local orig_free = MosaicMenuItem.free
     MosaicMenuItem._simpleui_fc_orig_free = orig_free
     function MosaicMenuItem:free()
-        if self._fc_pages_bb  then self._fc_pages_bb:free();  self._fc_pages_bb  = nil end
-        if self._fc_series_bb then self._fc_series_bb:free(); self._fc_series_bb = nil end
+        -- All badge state is now plain descriptor tables (no Blitbuffer to free).
+        self._fc_progress_bb = nil
+        self._fc_pages_desc  = nil
+        self._fc_series_desc = nil
+        self._fc_new_desc    = nil
+        self._fc_overlay_new = nil
+        -- Title/author strip blitbuffer cleanup.
+        if self._simpleui_strip_bb then self._simpleui_strip_bb:free(); self._simpleui_strip_bb = nil end
+        self._simpleui_strip_data = nil
         if orig_free then orig_free(self) end
     end
 
     _installItemCache()
     _installSeriesGrouping()
     _installFileDialogButton(BookInfoManager)
+
+    -- -----------------------------------------------------------------------
+    -- Title/Author strip — deferred paintTo patch.
+    -- Must run after the badge paintTo wrap (above) so this wrapper is the
+    -- outermost layer and calls the badge-patched paintTo as orig_paintTo.
+    -- We defer via FileManager.setupLayout so the badge patch has already been
+    -- applied by the time we capture orig_paintTo.
+    -- -----------------------------------------------------------------------
+    if _STRIP_H > 0 then
+        local ok_fm_strip, FileManager_strip = pcall(require, "apps/filemanager/filemanager")
+        if ok_fm_strip and FileManager_strip then
+            local _strip_orig_setupLayout = FileManager_strip.setupLayout
+            local _strip_paintTo_patched  = false
+
+            FileManager_strip.setupLayout = function(fm, ...)
+                _strip_orig_setupLayout(fm, ...)
+                if _strip_paintTo_patched or not fm.coverbrowser then return end
+                _strip_paintTo_patched = true
+
+                local Blitbuffer_s  = require("ffi/blitbuffer")
+                local Font_s        = require("ui/font")
+                local TextWidget_s  = require("ui/widget/textwidget")
+                local BD_s          = require("ui/bidi")
+                local Screen_s      = require("device").screen
+
+                local TITLE_FONT_S  = 16
+                local AUTHOR_FONT_S = 13
+                local PAD_S         = Screen_s:scaleBySize(3)
+                local GAP_S         = Screen_s:scaleBySize(2)
+                local PAD_H_S       = Screen_s:scaleBySize(6)  -- horizontal text margin
+
+                -- Re-measure line heights at paint time for accuracy.
+                local function _mhs(fs, bold)
+                    local tw = TextWidget_s:new{ text="Ag", face=Font_s:getFace("cfont",fs),
+                        bold=bold, padding=0 }
+                    local h = tw:getSize().h; tw:free(); return h
+                end
+                local TITLE_LINE_S  = _mhs(TITLE_FONT_S, true)
+                -- AUTHOR_LINE_S only needed for cur_y offset (already embedded in _STRIP_H).
+
+                local orig_strip_paintTo = MosaicMenuItem.paintTo
+
+                function MosaicMenuItem:paintTo(bb, x, y)
+                    x = math.floor(x); y = math.floor(y)
+                    -- Temporarily shrink self.height by _STRIP_H before calling the
+                    -- badge-patched paintTo chain so that KOReader's own paintTo
+                    -- calculations (native progress bar pos_y, dog-ear iy, etc.) all
+                    -- treat the cover area as ending above the strip.  Without this,
+                    -- the native progress bar is drawn inside the strip zone and
+                    -- immediately covered by it.
+                    if _STRIP_H > 0 and self.height then
+                        self.height = self.height - _STRIP_H
+                    end
+                    orig_strip_paintTo(self, bb, x, y)
+                    if _STRIP_H > 0 and self.height then
+                        self.height = self.height + _STRIP_H
+                    end
+
+                    -- Nothing to do when strip was not requested.
+                    if _STRIP_H <= 0 then return end
+
+                    -- Build/use the cached strip blitbuffer.
+                    if not self._simpleui_strip_bb then
+
+                        -- ── Folders (real and virtual) ──────────────────────────
+                        if self.is_directory then
+                            local name = self.text and self.text:gsub("/$", "") or ""
+                            if name == "" then return end
+
+                            local strip_bb = Blitbuffer_s.new(self.width, _STRIP_H, bb:getType())
+                            strip_bb:fill(Blitbuffer_s.COLOR_WHITE)
+                            local tw = TextWidget_s:new{
+                                text                   = BD_s.auto(name),
+                                face                   = Font_s:getFace("cfont", TITLE_FONT_S),
+                                bold                   = true,
+                                padding                = 0,
+                                fgcolor                = Blitbuffer_s.COLOR_BLACK,
+                                max_width              = self.width - 2 * PAD_H_S,
+                                truncate_with_ellipsis = true,
+                            }
+                            local tsz = tw:getSize()
+                            tw:paintTo(strip_bb,
+                                math.floor((self.width - tsz.w) / 2),
+                                math.floor((_STRIP_H  - tsz.h) / 2))
+                            tw:free()
+                            self._simpleui_strip_bb = strip_bb
+
+                        -- ── Books ───────────────────────────────────────────────
+                        else
+                            -- Populate metadata cache on first paint after an update().
+                            if self._simpleui_strip_data == nil then
+                                if not self.bookinfo_found then
+                                    self._simpleui_strip_data = false
+                                else
+                                    local info = BookInfoManager:getBookInfo(self.filepath, false)
+                                    local title   = info and not info.ignore_meta and info.title   or nil
+                                    local authors = info and not info.ignore_meta and info.authors or nil
+                                    -- Use only the first author when multiple are stored as newline-separated.
+                                    if authors and authors:find("\n") then
+                                        authors = authors:match("^([^\n]+)")
+                                    end
+                                    if title or authors then
+                                        self._simpleui_strip_data = { title = title, authors = authors }
+                                    else
+                                        self._simpleui_strip_data = false
+                                    end
+                                end
+                            end
+                            if not self._simpleui_strip_data then return end
+
+                            local strip_bb = Blitbuffer_s.new(self.width, _STRIP_H, bb:getType())
+                            strip_bb:fill(Blitbuffer_s.COLOR_WHITE)
+                            local text_w = self.width - 2 * PAD_H_S
+                            local cur_y  = PAD_S
+
+                            if _show_title_strip and self._simpleui_strip_data.title then
+                                local tw = TextWidget_s:new{
+                                    text                   = BD_s.auto(self._simpleui_strip_data.title),
+                                    face                   = Font_s:getFace("cfont", TITLE_FONT_S),
+                                    bold                   = true,
+                                    padding                = 0,
+                                    fgcolor                = Blitbuffer_s.COLOR_BLACK,
+                                    max_width              = text_w,
+                                    truncate_with_ellipsis = true,
+                                }
+                                local tsz = tw:getSize()
+                                tw:paintTo(strip_bb, math.floor((self.width - tsz.w) / 2), cur_y)
+                                tw:free()
+                                if _show_author_strip then cur_y = cur_y + TITLE_LINE_S + GAP_S end
+                            end
+
+                            if _show_author_strip and self._simpleui_strip_data.authors then
+                                local aw = TextWidget_s:new{
+                                    text                   = BD_s.auto(self._simpleui_strip_data.authors),
+                                    face                   = Font_s:getFace("cfont", AUTHOR_FONT_S),
+                                    bold                   = false,
+                                    padding                = 0,
+                                    fgcolor                = Blitbuffer_s.COLOR_BLACK,
+                                    max_width              = text_w,
+                                    truncate_with_ellipsis = true,
+                                }
+                                local asz = aw:getSize()
+                                aw:paintTo(strip_bb, math.floor((self.width - asz.w) / 2), cur_y)
+                                aw:free()
+                            end
+
+                            self._simpleui_strip_bb = strip_bb
+                        end
+                    end
+
+                    -- Blit the strip immediately below the cover area.
+                    if self._simpleui_strip_bb then
+                        local ok_hs, HS_s = pcall(require, "sui_homescreen")
+                        local wp_active = ok_hs and HS_s and HS_s.styleGetWallpaperShowInFM() and HS_s.styleGetBgWidget() ~= nil
+
+                        if wp_active then
+                            require("sui_core").paintWithAlphaMask(self, bb,
+                                x, y + self.height - _STRIP_H, self.width, _STRIP_H,
+                                Blitbuffer_s.COLOR_BLACK,
+                                function(w, tmp_bb, tx, ty)
+                                    tmp_bb:blitFrom(w._simpleui_strip_bb, tx, ty, 0, 0, w.width, _STRIP_H)
+                                end)
+                        else
+                            bb:blitFrom(self._simpleui_strip_bb,
+                                x, y + self.height - _STRIP_H,
+                                0, 0, self.width, _STRIP_H)
+                        end
+                    end
+                end -- paintTo
+            end -- setupLayout
+        end -- FileManager available
+    end -- _STRIP_H > 0
 
     -- -----------------------------------------------------------------------
     -- ListMenuItem patch — cover images for virtual folders in list_image_meta.
@@ -2708,6 +3501,8 @@ function M.uninstall()
     MosaicMenuItem._setFolderCover      = nil
     MosaicMenuItem._getFolderNameWidget = nil
     MosaicMenuItem._simpleui_fc_patched = nil
+    MosaicMenuItem._simpleui_strip_h    = nil
+    _module_strip_h = 0
 
     _uninstallItemCache()
     _uninstallSeriesGrouping()

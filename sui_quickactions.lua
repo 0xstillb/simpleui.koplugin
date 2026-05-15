@@ -1,13 +1,34 @@
 -- sui_quickactions.lua — Simple UI
 -- Single source of truth for Quick Actions:
+--   • Action Registry: built-in descriptors + external plugin registrations
 --   • Storage: custom QA CRUD, default-action label/icon overrides
---   • Resolution: getEntry(id) — used by both bottombar and module_quick_actions
+--   • Resolution: getEntry(id), isInPlace(id), execute(id, ctx)
 --   • Menus: icon picker, rename dialog, create/edit/delete flows
 --
--- Both sui_bottombar (buildTabCell) and module_quick_actions (buildQAWidget)
--- call QA.getEntry(id) so every label/icon change propagates everywhere
--- automatically.  sui_menu.lua calls QA.makeMenuItems(plugin) to obtain
--- the Create / Change Icons / Rename sub-menu items.
+-- CONSUMERS:
+--   sui_bottombar      — QA.isInPlace(id), QA.execute(id, ctx)
+--   module_quick_actions / module_action_list — QA.getEntry, QA.isBuiltin,
+--                         QA.iterBuiltin, QA.getCustomQAValid
+--   sui_menu           — QA.makeMenuItems, QA.makeIconsMenuItems
+--
+-- EXTERNAL PLUGIN API:
+--   QA.register(descriptor)   — add an action to the registry
+--   QA.unregister(id)         — remove an action (call on plugin unload)
+--
+--   descriptor = {
+--     id          = "myplugin_action",   -- unique, stable string
+--     label       = _("My Action"),      -- base label (user can override)
+--     icon        = "/path/to/icon.svg", -- base icon (user can override)
+--     -- optional dynamic icon/label (called every render):
+--     get_icon    = function(id) ... end,
+--     get_label   = function(id) ... end,
+--     -- execution:
+--     is_in_place = true,  -- bool OR function(id)->bool
+--     execute     = function(ctx) ... end,
+--     -- ctx = { plugin, fm, show_unavailable }
+--     -- optional metadata:
+--     browsemeta_mode = nil,  -- "author"|"series"|"tags"
+--   }
 
 local UIManager = require("ui/uimanager")
 local Device    = require("device")
@@ -17,46 +38,482 @@ local logger    = require("logger")
 local _ = require("sui_i18n").translate
 local N_ = require("sui_i18n").ngettext
 
-local Config    = require("sui_config")
+local Config      = require("sui_config")
+local SUISettings = require("sui_store")
 
 local QA = {}
 
 -- ---------------------------------------------------------------------------
--- Icon directory (same as before — single definition now)
+-- Icon directory
 -- ---------------------------------------------------------------------------
 
--- Resolve icons/custom directory using an absolute path derived from this
--- file's location so it works on Android (relative paths fail there).
-local _qa_plugin_dir = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
-QA.ICONS_DIR = _qa_plugin_dir .. "icons/custom"
+local _icons_dir_cache
+function QA.getIconsDir()
+    if not _icons_dir_cache then
+        local ok_ds, DataStorage = pcall(require, "datastorage")
+        if ok_ds and DataStorage then
+            _icons_dir_cache = DataStorage:getSettingsDir() .. "/simpleui/sui_icons"
+        else
+            local _qa_plugin_dir = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
+            _icons_dir_cache = _qa_plugin_dir .. "icons/custom"
+        end
+    end
+    return _icons_dir_cache
+end
+setmetatable(QA, {
+    __index = function(t, k)
+        if k == "ICONS_DIR" then
+            local dir = QA.getIconsDir()
+            rawset(t, "ICONS_DIR", dir)
+            return dir
+        end
+    end,
+})
 
 -- ---------------------------------------------------------------------------
--- Custom Quick Actions persistence
--- CRUD for custom QA entries: list management, per-entry config, key cache,
--- collection purge/rename, slot sanitization, id generation.
+-- Action Registry
+-- Built-in descriptors are defined here and mirror Config.ALL_ACTIONS.
+-- External plugins may call QA.register(descriptor) to add their own.
 -- ---------------------------------------------------------------------------
--- Key cache: avoids rebuilding "navbar_cqa_<id>" strings on every call.
--- These keys are stable within a session (IDs never change after creation).
+
+-- The ordered list of built-in action descriptors.
+-- Each entry is self-contained: it knows how to execute itself and whether
+-- it is in-place, so sui_bottombar needs no action-specific knowledge.
+local _builtin_descriptors = {}
+local _registry = {}        -- id → descriptor (built-ins + externals)
+local _registry_order = {}  -- ordered list of all registered ids
+
+-- Lazy references — loaded on first use to avoid circular requires at boot.
+local function _BM()
+    return package.loaded["sui_browsemeta"] or require("sui_browsemeta")
+end
+local function _Bottombar()
+    return package.loaded["sui_bottombar"] or require("sui_bottombar")
+end
+
+-- showUnavailable helper used inside execute closures.
+local function _unavailToast(msg)
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+end
+
+-- Helper: resolve the live FileManager instance.
+local function _liveFM()
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    return FM and FM.instance
+end
+
+-- _goHome: replicates FileChooser:goHome() used in navigate().
+-- Extracted here so the "home" execute closure is self-contained.
+local function _goHome(target_fm)
+    local fc = target_fm and target_fm.file_chooser
+    if not fc then return false end
+    local home = G_reader_settings:readSetting("home_dir")
+    if not home or lfs.attributes(home, "mode") ~= "directory" then
+        home = Device.home_dir
+    end
+    if not home then return false end
+    local ok_fc_mod, FC_mod = pcall(require, "sui_foldercovers")
+    local in_virtual = ok_fc_mod and FC_mod.isInSeriesView and FC_mod.isInSeriesView(fc)
+    if in_virtual then FC_mod.exitSeriesView(fc) end
+    if fc.path == home and not in_virtual then
+        target_fm._navbar_suppress_path_change = true
+        pcall(function() fc:onGotoPage(1) end)
+        target_fm._navbar_suppress_path_change = nil
+    else
+        target_fm._navbar_suppress_path_change = true
+        fc:changeToPath(home)
+        target_fm._navbar_suppress_path_change = nil
+    end
+    if target_fm.updateTitleBarPath then
+        pcall(function() target_fm:updateTitleBarPath(home, true) end)
+    end
+    return true
+end
+
+-- Register a descriptor into the registry.
+-- Safe to call from within this module (built-ins) or from external plugins.
+local function _registerDescriptor(desc)
+    if not desc or not desc.id then
+        logger.warn("simpleui: QA.register: descriptor missing 'id'")
+        return
+    end
+    local id = desc.id
+    if not _registry[id] then
+        _registry_order[#_registry_order + 1] = id
+    end
+    _registry[id] = desc
+end
+
+-- Register all built-in actions.
+-- Called once at module load time (bottom of this file).
+local function _registerBuiltins()
+    local function _simpleui_plugin()
+        -- Resolve the live plugin instance via the FM.
+        local fm = _liveFM()
+        return fm and fm._simpleui_plugin
+    end
+
+    local builtins = {
+        -- ── Navigation actions ──────────────────────────────────────────────
+        {
+            id    = "home",
+            label = _("Library"),
+            icon  = Config.ICON.library,
+            is_in_place = false,
+            execute = function(ctx)
+                local fm = ctx.fm or _liveFM()
+                if not _goHome(fm) then
+                    if fm and fm.file_chooser then
+                        UIManager:setDirty(fm, "partial")
+                    end
+                end
+            end,
+        },
+        {
+            id    = "homescreen",
+            label = _("Home"),
+            icon  = Config.ICON.ko_home,
+            is_in_place = false,
+            execute = function(ctx)
+                local plugin = ctx.plugin or _simpleui_plugin()
+                local ok_hs, HS = pcall(require, "sui_homescreen")
+                if ok_hs and HS and type(HS.show) == "function" then
+                    local saved_page = HS._current_page or 1
+                    if ctx.already_active then
+                        HS._current_page = 1
+                    elseif saved_page <= 1 then
+                        HS._current_page = 1
+                    end
+                    local on_qa_tap = function(aid)
+                        if plugin then
+                            plugin:_navigate(aid, plugin.ui, Config.loadTabConfig(), false)
+                        end
+                    end
+                    local on_goal_tap = plugin and plugin._goalTapCallback or nil
+                    HS.show(on_qa_tap, on_goal_tap)
+                else
+                    local su = ctx.show_unavailable or _unavailToast
+                    su(_("Homescreen not available."))
+                end
+            end,
+        },
+        {
+            id    = "collections",
+            label = _("Collections"),
+            icon  = Config.ICON.collections,
+            is_in_place = false,
+            execute = function(ctx)
+                local fm = ctx.fm or _liveFM()
+                local su = ctx.show_unavailable or _unavailToast
+                if fm and fm.collections then fm.collections:onShowCollList()
+                else su(_("Collections not available.")) end
+            end,
+        },
+        {
+            id    = "history",
+            label = _("History"),
+            icon  = Config.ICON.history,
+            is_in_place = false,
+            execute = function(ctx)
+                local fm = ctx.fm or _liveFM()
+                local su = ctx.show_unavailable or _unavailToast
+                local ok = pcall(function() fm.history:onShowHist() end)
+                if not ok then su(_("History not available.")) end
+            end,
+        },
+        {
+            id    = "continue",
+            label = _("Continue"),
+            icon  = Config.ICON.continue_,
+            is_in_place = false,
+            execute = function(ctx)
+                local su = ctx.show_unavailable or _unavailToast
+                local RH = package.loaded["readhistory"] or require("readhistory")
+                local fp = RH and RH.hist and RH.hist[1] and RH.hist[1].file
+                if fp then
+                    local ReaderUI = package.loaded["apps/reader/readerui"]
+                        or require("apps/reader/readerui")
+                    ReaderUI:showReader(fp)
+                else
+                    su(_("No book in history."))
+                end
+            end,
+        },
+        {
+            id    = "favorites",
+            label = _("Favorites"),
+            icon  = Config.ICON.ko_star,
+            is_in_place = false,
+            execute = function(ctx)
+                local fm = ctx.fm or _liveFM()
+                local su = ctx.show_unavailable or _unavailToast
+                if fm and fm.collections then fm.collections:onShowColl()
+                else su(_("Favorites not available.")) end
+            end,
+        },
+        -- ── Overlay / dialog actions ────────────────────────────────────────
+        {
+            id    = "bookmark_browser",
+            label = _("Bookmarks"),
+            icon  = Config.ICON.ko_bookmark,
+            is_in_place = true,
+            -- needs_stack_sink = false (opens async widgets, skip the HS sink)
+            execute = function(ctx)
+                local fm = ctx.fm or _liveFM()
+                local _bb_ui = fm
+                local ok_rui, ReaderUI = pcall(require, "apps/reader/readerui")
+                if ok_rui and ReaderUI and ReaderUI.instance then
+                    _bb_ui = ReaderUI.instance
+                end
+                _Bottombar().showBookmarkBrowserSourceDialog(_bb_ui)
+            end,
+        },
+        {
+            id    = "wifi_toggle",
+            label = _("Wi-Fi"),
+            icon  = Config.ICON.ko_wifi_on,
+            get_icon = function(_id)
+                return Config.wifiIcon()
+            end,
+            get_label = function(_id)
+                local a = Config.ACTION_BY_ID["wifi_toggle"]
+                return QA.getDefaultActionLabel("wifi_toggle") or (a and a.label)
+            end,
+            is_in_place = true,
+            execute = function(ctx)
+                _Bottombar().doWifiToggle(ctx.plugin or _simpleui_plugin())
+            end,
+        },
+        {
+            id    = "frontlight",
+            label = _("Brightness"),
+            icon  = Config.ICON.frontlight,
+            is_in_place = true,
+            execute = function(_ctx)
+                _Bottombar().showFrontlightDialog()
+            end,
+        },
+        {
+            id    = "stats_calendar",
+            label = _("Stats"),
+            icon  = Config.ICON.stats,
+            is_in_place = true,
+            execute = function(ctx)
+                local su = ctx.show_unavailable or _unavailToast
+                local ok, err = pcall(function()
+                    UIManager:broadcastEvent(require("ui/event"):new("ShowCalendarView"))
+                end)
+                if not ok then su(_("Statistics plugin not available.")) end
+            end,
+        },
+        {
+            id    = "power",
+            label = _("Power"),
+            icon  = Config.ICON.power,
+            is_in_place = true,
+            execute = function(ctx)
+                _Bottombar().showPowerDialog(ctx.plugin or _simpleui_plugin())
+            end,
+        },
+        -- ── Browse meta actions ─────────────────────────────────────────────
+        {
+            id    = "browse_authors",
+            label = _("Authors"),
+            icon  = Config.ICON.author,
+            browsemeta_mode = "author",
+            is_in_place = false,
+            execute = function(ctx)
+                local su = ctx.show_unavailable or _unavailToast
+                local ok_bm, BM = pcall(_BM)
+                if not (ok_bm and BM) then su(_("Browse by Authors/Series/Tags not available.")); return end
+                if not BM.isEnabled() then su(_("Enable 'Browse by Author / Series / Tags' in the library menu first.")); return end
+                local fm = ctx.fm or _liveFM()
+                local fc = fm and fm.file_chooser
+                if not fc then return end
+                if ctx.already_active then BM.navigateToRoot(fc, fm, "author")
+                else BM.navigateTo(fm, "author") end
+            end,
+        },
+        {
+            id    = "browse_series",
+            label = _("Series"),
+            icon  = Config.ICON.series,
+            browsemeta_mode = "series",
+            is_in_place = false,
+            execute = function(ctx)
+                local su = ctx.show_unavailable or _unavailToast
+                local ok_bm, BM = pcall(_BM)
+                if not (ok_bm and BM) then su(_("Browse by Authors/Series/Tags not available.")); return end
+                if not BM.isEnabled() then su(_("Enable 'Browse by Author / Series / Tags' in the library menu first.")); return end
+                local fm = ctx.fm or _liveFM()
+                local fc = fm and fm.file_chooser
+                if not fc then return end
+                if ctx.already_active then BM.navigateToRoot(fc, fm, "series")
+                else BM.navigateTo(fm, "series") end
+            end,
+        },
+        {
+            id    = "browse_tags",
+            label = _("Tags"),
+            icon  = Config.ICON.tags,
+            browsemeta_mode = "tags",
+            is_in_place = false,
+            execute = function(ctx)
+                local su = ctx.show_unavailable or _unavailToast
+                local ok_bm, BM = pcall(_BM)
+                if not (ok_bm and BM) then su(_("Browse by Authors/Series/Tags not available.")); return end
+                if not BM.isEnabled() then su(_("Enable 'Browse by Author / Series / Tags' in the library menu first.")); return end
+                local fm = ctx.fm or _liveFM()
+                local fc = fm and fm.file_chooser
+                if not fc then return end
+                if ctx.already_active then BM.navigateToRoot(fc, fm, "tags")
+                else BM.navigateTo(fm, "tags") end
+            end,
+        },
+    }
+
+    for _, desc in ipairs(builtins) do
+        _builtin_descriptors[#_builtin_descriptors + 1] = desc
+        _registerDescriptor(desc)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Public registry API
+-- ---------------------------------------------------------------------------
+
+-- Register an external action descriptor.
+-- Safe to call multiple times with the same id (replaces previous entry).
+function QA.register(descriptor)
+    if not descriptor or not descriptor.id then
+        logger.warn("simpleui: QA.register: descriptor missing 'id'")
+        return
+    end
+    if not descriptor.execute then
+        logger.warn("simpleui: QA.register: descriptor missing 'execute' for id=" .. tostring(descriptor.id))
+        return
+    end
+    _registerDescriptor(descriptor)
+    logger.dbg("simpleui: QA.register: registered external action", descriptor.id)
+end
+
+-- Remove a registered external action.
+-- Built-in actions cannot be unregistered.
+function QA.unregister(id)
+    if not _registry[id] then return end
+    -- Prevent removal of built-ins.
+    for _, desc in ipairs(_builtin_descriptors) do
+        if desc.id == id then
+            logger.warn("simpleui: QA.unregister: cannot unregister built-in action", id)
+            return
+        end
+    end
+    _registry[id] = nil
+    local new_order = {}
+    for _, oid in ipairs(_registry_order) do
+        if oid ~= id then new_order[#new_order + 1] = oid end
+    end
+    _registry_order = new_order
+    logger.dbg("simpleui: QA.unregister: removed", id)
+end
+
+-- Returns true when `id` is a registered built-in action.
+function QA.isBuiltin(id)
+    if not id then return false end
+    for _, desc in ipairs(_builtin_descriptors) do
+        if desc.id == id then return true end
+    end
+    return false
+end
+
+-- Returns an ordered iterator over built-in descriptors.
+-- Usage: for desc in QA.iterBuiltin() do ... end
+function QA.iterBuiltin()
+    local i = 0
+    return function()
+        i = i + 1
+        return _builtin_descriptors[i]
+    end
+end
+
+-- Returns an ordered list of all registered action ids (built-ins + externals).
+-- Custom QAs (custom_qa_N) are NOT included — use QA.getCustomQAList() for those.
+function QA.allIds()
+    return _registry_order
+end
+
+-- ---------------------------------------------------------------------------
+-- QA.isInPlace(id) — single authority replacing _isInPlaceAction in bottombar
+-- ---------------------------------------------------------------------------
+
+function QA.isInPlace(id)
+    if not id then return false end
+    -- Custom QA: delegate to config.
+    if id:match("^custom_qa_%d+$") then
+        return QA.isInPlaceCustomQA(id)
+    end
+    -- Registered built-in or external.
+    local desc = _registry[id]
+    if not desc then return false end
+    local iip = desc.is_in_place
+    if type(iip) == "function" then return iip(id) end
+    return iip == true
+end
+
+-- ---------------------------------------------------------------------------
+-- QA.execute(id, ctx) — single authority replacing all if/elseif in bottombar
+-- ctx = { plugin, fm, show_unavailable, already_active }
+-- ---------------------------------------------------------------------------
+
+function QA.execute(id, ctx)
+    ctx = ctx or {}
+    local su = ctx.show_unavailable or _unavailToast
+
+    -- Custom QA: delegate to existing executor.
+    if id and id:match("^custom_qa_%d+$") then
+        QA.executeCustomQA(id, ctx.fm, su)
+        return
+    end
+
+    local desc = _registry[id]
+    if not desc then
+        logger.warn("simpleui: QA.execute: unknown action id=" .. tostring(id))
+        su(string.format(_("Action not available: %s"), tostring(id)))
+        return
+    end
+
+    local ok, err = pcall(desc.execute, ctx)
+    if not ok then
+        logger.warn("simpleui: QA.execute: error in", id, tostring(err))
+        su(string.format(_("Action error: %s"), tostring(err)))
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Custom Quick Actions persistence (unchanged from original)
+-- ---------------------------------------------------------------------------
+
 local _qa_key_cache = {}
 local function getQASettingsKey(qa_id)
     local k = _qa_key_cache[qa_id]
     if not k then
-        k = "navbar_cqa_" .. qa_id
+        k = "simpleui_cqa_" .. qa_id
         _qa_key_cache[qa_id] = k
     end
     return k
 end
 
 function QA.getCustomQAList()
-    return G_reader_settings:readSetting("navbar_custom_qa_list") or {}
+    return SUISettings:get("simpleui_cqa_list") or {}
 end
 
 function QA.saveCustomQAList(list)
-    G_reader_settings:saveSetting("navbar_custom_qa_list", list)
+    SUISettings:set("simpleui_cqa_list", list)
 end
 
 function QA.getCustomQAConfig(qa_id)
-    local cfg = G_reader_settings:readSetting(getQASettingsKey(qa_id)) or {}
+    local cfg = SUISettings:get(getQASettingsKey(qa_id)) or {}
     return {
         label             = cfg.label or qa_id,
         path              = cfg.path,
@@ -69,7 +526,7 @@ function QA.getCustomQAConfig(qa_id)
 end
 
 function QA.saveCustomQAConfig(qa_id, label, path, collection, icon, plugin_key, plugin_method, dispatcher_action)
-    G_reader_settings:saveSetting(getQASettingsKey(qa_id), {
+    SUISettings:set(getQASettingsKey(qa_id), {
         label             = label,
         path              = path,
         collection        = collection,
@@ -81,52 +538,45 @@ function QA.saveCustomQAConfig(qa_id, label, path, collection, icon, plugin_key,
 end
 
 function QA.deleteCustomQA(qa_id)
-    G_reader_settings:delSetting(getQASettingsKey(qa_id))
-    _qa_key_cache[qa_id] = nil  -- remove from key cache
+    SUISettings:del(getQASettingsKey(qa_id))
+    _qa_key_cache[qa_id] = nil
     local list = QA.getCustomQAList()
     local new_list = {}
     for _i, id in ipairs(list) do
         if id ~= qa_id then new_list[#new_list + 1] = id end
     end
     QA.saveCustomQAList(new_list)
-    -- Invalidate the module-level QA validity cache so the next render does
-    -- not show a deleted action.
     local mqa = package.loaded["desktop_modules/module_quick_actions"]
     if mqa and mqa.invalidateCustomQACache then mqa.invalidateCustomQACache() end
-    local tabs = G_reader_settings:readSetting("navbar_tabs")
+    local tabs = SUISettings:get("simpleui_bar_tabs")
     if type(tabs) == "table" then
         local new_tabs = {}
         for _i, id in ipairs(tabs) do
             if id ~= qa_id then new_tabs[#new_tabs + 1] = id end
         end
-        G_reader_settings:saveSetting("navbar_tabs", new_tabs)
+        SUISettings:set("simpleui_bar_tabs", new_tabs)
     end
-    -- Remove from all page QA slots
-    for _i, pfx in ipairs({ "navbar_homescreen_quick_actions_" }) do
+    for _i, pfx in ipairs({ "simpleui_hs_qa_" }) do
         for slot = 1, 3 do
             local key = pfx .. slot .. "_items"
-            local dqa = G_reader_settings:readSetting(key)
+            local dqa = SUISettings:get(key)
             if type(dqa) == "table" then
                 local new_dqa = {}
                 for _i, id in ipairs(dqa) do
                     if id ~= qa_id then new_dqa[#new_dqa + 1] = id end
                 end
-                G_reader_settings:saveSetting(key, new_dqa)
+                SUISettings:set(key, new_dqa)
             end
         end
     end
 end
 
--- Removes all custom QA entries that reference a deleted collection name.
--- Called by patches.lua when removeCollection fires.
 function QA.purgeQACollection(coll_name)
     local list    = QA.getCustomQAList()
     local changed = false
     for _i, qa_id in ipairs(list) do
         local cfg = QA.getCustomQAConfig(qa_id)
         if cfg.collection == coll_name then
-            -- Wipe the collection field so the QA becomes unconfigured
-            -- (keeps the entry visible so the user knows to reconfigure).
             QA.saveCustomQAConfig(qa_id, cfg.label, cfg.path, nil,
                 cfg.icon, cfg.plugin_key, cfg.plugin_method, cfg.dispatcher_action)
             changed = true
@@ -135,7 +585,6 @@ function QA.purgeQACollection(coll_name)
     return changed
 end
 
--- Updates collection references in all custom QAs after a rename.
 function QA.renameQACollection(old_name, new_name)
     local list    = QA.getCustomQAList()
     local changed = false
@@ -150,28 +599,22 @@ function QA.renameQACollection(old_name, new_name)
     return changed
 end
 
--- Removes orphaned custom QA ids from all QA slots.
--- An id is orphaned when it is referenced in a slot but not in the master list.
--- Safe to call at startup and after any QA deletion.
 function QA.sanitizeQASlots()
     local Config = require("sui_config")
 
-    -- 0. Clean the master list itself: remove any ID whose config record is
-    --    missing or empty (orphaned entry with no label/path/etc.).
-    --    This is the root cause of "invalid items that can't be removed".
     local list = QA.getCustomQAList()
     local clean_list = {}
     local list_changed = false
     for _i, id in ipairs(list) do
         if id:match("^custom_qa_%d+$") then
-            local cfg = G_reader_settings:readSetting(getQASettingsKey(id))
+            local cfg = SUISettings:get(getQASettingsKey(id))
             if type(cfg) == "table" and next(cfg) then
                 clean_list[#clean_list + 1] = id
             else
-                list_changed = true  -- orphan: no config record
+                list_changed = true
             end
         else
-            list_changed = true  -- malformed ID
+            list_changed = true
         end
     end
     if list_changed then
@@ -183,11 +626,10 @@ function QA.sanitizeQASlots()
     for _i, id in ipairs(list) do valid_custom[id] = true end
     local changed = list_changed
 
-    -- 1. Clean navbar_homescreen_quick_actions_N_items (HS quick-action slots).
-    for _, pfx in ipairs({ "navbar_homescreen_quick_actions_" }) do
+    for _, pfx in ipairs({ "simpleui_hs_qa_" }) do
         for slot = 1, 3 do
             local key  = pfx .. slot .. "_items"
-            local items = G_reader_settings:readSetting(key)
+            local items = SUISettings:get(key)
             if type(items) == "table" then
                 local clean = {}
                 local slot_changed = false
@@ -199,15 +641,12 @@ function QA.sanitizeQASlots()
                         changed = true
                     end
                 end
-                if slot_changed then G_reader_settings:saveSetting(key, clean) end
+                if slot_changed then SUISettings:set(key, clean) end
             end
         end
     end
 
-    -- 2. Clean navbar_tabs — remove IDs that are neither a known built-in nor
-    --    a live custom QA.  loadTabConfig already silently skips unknowns but
-    --    never writes them back, so stale IDs persist across restarts.
-    local tabs = G_reader_settings:readSetting("navbar_tabs")
+    local tabs = SUISettings:get("simpleui_bar_tabs")
     if type(tabs) == "table" then
         local clean_tabs = {}
         local tabs_changed = false
@@ -221,7 +660,7 @@ function QA.sanitizeQASlots()
             end
         end
         if tabs_changed then
-            G_reader_settings:saveSetting("navbar_tabs", clean_tabs)
+            SUISettings:set("simpleui_bar_tabs", clean_tabs)
             Config.invalidateTabsCache()
         end
     end
@@ -241,7 +680,7 @@ function QA.nextCustomQAId()
         if n and n > max_n then max_n = n end
     end
     local n = max_n + 1
-    while G_reader_settings:readSetting("navbar_cqa_custom_qa_" .. n) do n = n + 1 end
+    while SUISettings:get("simpleui_cqa_custom_qa_" .. n) do n = n + 1 end
     return "custom_qa_" .. n
 end
 
@@ -251,98 +690,101 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Default-action label / icon overrides
--- Setting keys: navbar_action_<id>_label  /  navbar_action_<id>_icon
--- These are the authoritative get/set functions; sui_config.lua delegates
--- to here for any external callers that still use Config.get/setDefaultAction*.
 -- ---------------------------------------------------------------------------
 
-local function _defaultLabelKey(id) return "navbar_action_" .. id .. "_label" end
-local function _defaultIconKey(id)  return "navbar_action_" .. id .. "_icon"  end
+local function _defaultLabelKey(id) return "simpleui_action_" .. id .. "_label" end
+local function _defaultIconKey(id)  return "simpleui_action_" .. id .. "_icon"  end
 
 function QA.getDefaultActionLabel(id)
-    return G_reader_settings:readSetting(_defaultLabelKey(id))
+    return SUISettings:get(_defaultLabelKey(id))
 end
 
 function QA.getDefaultActionIcon(id)
-    return G_reader_settings:readSetting(_defaultIconKey(id))
+    return SUISettings:get(_defaultIconKey(id))
 end
 
 function QA.setDefaultActionLabel(id, label)
     if label and label ~= "" then
-        G_reader_settings:saveSetting(_defaultLabelKey(id), label)
+        SUISettings:set(_defaultLabelKey(id), label)
     else
-        G_reader_settings:delSetting(_defaultLabelKey(id))
+        SUISettings:del(_defaultLabelKey(id))
     end
 end
 
 function QA.setDefaultActionIcon(id, icon)
     if icon then
-        G_reader_settings:saveSetting(_defaultIconKey(id), icon)
+        SUISettings:set(_defaultIconKey(id), icon)
     else
-        G_reader_settings:delSetting(_defaultIconKey(id))
+        SUISettings:del(_defaultIconKey(id))
     end
 end
 
 -- ---------------------------------------------------------------------------
 -- getEntry(id) — canonical resolver used by ALL rendering code
---
--- Returns { icon = path, label = string } for any action id.
--- Applies label/icon overrides for default actions.
--- For custom QAs: reads from settings directly (same key as sui_config).
--- Never returns nil.
 -- ---------------------------------------------------------------------------
 
--- Module-level sentinel reused for wifi_toggle to avoid per-call allocation.
 local _wifi_entry = { icon = "", label = "" }
 
 function QA.getEntry(id)
     -- Custom QA
     if id and id:match("^custom_qa_%d+$") then
-        local cfg = G_reader_settings:readSetting("navbar_cqa_" .. id) or {}
+        local cfg = SUISettings:get("simpleui_cqa_" .. id) or {}
         local default_icon
+        local ok_ss, SUIStyle = pcall(require, "sui_style")
         if cfg.dispatcher_action and cfg.dispatcher_action ~= "" then
-            default_icon = Config.CUSTOM_DISPATCHER_ICON
+            default_icon = (ok_ss and SUIStyle and SUIStyle.getIcon("sui_qa_system")) or Config.CUSTOM_DISPATCHER_ICON
         elseif cfg.plugin_key and cfg.plugin_key ~= "" then
-            default_icon = Config.CUSTOM_PLUGIN_ICON
+            default_icon = (ok_ss and SUIStyle and SUIStyle.getIcon("sui_qa_plugin")) or Config.CUSTOM_PLUGIN_ICON
         else
-            default_icon = Config.CUSTOM_ICON
+            default_icon = (ok_ss and SUIStyle and SUIStyle.getIcon("sui_qa_folder")) or Config.CUSTOM_ICON
         end
+
+        local icon = cfg.icon or default_icon
+        if cfg.icon == Config.CUSTOM_ICON or cfg.icon == Config.CUSTOM_PLUGIN_ICON or cfg.icon == Config.CUSTOM_DISPATCHER_ICON then
+            icon = default_icon
+        end
+
         return {
-            icon  = cfg.icon or default_icon,
+            icon  = icon,
             label = cfg.label or id,
         }
     end
 
-    -- Default action: look up catalogue
-    local a = Config.ACTION_BY_ID[id]
-    if not a then
-        logger.warn("simpleui: QA.getEntry: unknown id " .. tostring(id))
-        return { icon = Config.ICON.library, label = tostring(id) }
+    -- Registered action: check for dynamic get_icon / get_label first.
+    local desc = _registry[id]
+    if not desc then
+        -- Try Config.ACTION_BY_ID for backwards compatibility with external
+        -- code that still calls getEntry() for actions not yet registered.
+        local a = Config.ACTION_BY_ID[id]
+        if not a then
+            logger.warn("simpleui: QA.getEntry: unknown id " .. tostring(id))
+            return { icon = Config.ICON.library, label = tostring(id) }
+        end
+        desc = a
     end
 
-    -- wifi_toggle: icon is dynamic (on/off state)
+    -- Dynamic icon/label (e.g. wifi_toggle).
+    local has_dynamic = desc.get_icon or desc.get_label
+    local icon_ov  = QA.getDefaultActionIcon(id)
+    local label_ov = QA.getDefaultActionLabel(id)
+
     if id == "wifi_toggle" then
-        _wifi_entry.icon  = QA.getDefaultActionIcon(id) or Config.wifiIcon()
-        _wifi_entry.label = QA.getDefaultActionLabel(id) or a.label
+        _wifi_entry.icon  = (desc.get_icon and desc.get_icon(id)) or desc.icon
+        _wifi_entry.label = label_ov or (desc.get_label and desc.get_label(id)) or desc.label
         return _wifi_entry
     end
 
-    -- All other defaults: apply overrides if present
-    local lbl_ov  = QA.getDefaultActionLabel(id)
-    local icon_ov = QA.getDefaultActionIcon(id)
-    if not lbl_ov and not icon_ov then
-        return a  -- fast path: catalogue entry, no allocation
+    if not icon_ov and not label_ov and not has_dynamic then
+        return desc  -- fast path: no overrides, no dynamic fields
     end
     return {
-        icon  = icon_ov  or a.icon,
-        label = lbl_ov   or a.label,
+        icon  = icon_ov or (desc.get_icon and desc.get_icon(id)) or desc.icon,
+        label = label_ov or (desc.get_label and desc.get_label(id)) or desc.label,
     }
 end
 
 -- ---------------------------------------------------------------------------
 -- Custom QA validity cache
--- Shared between module_quick_actions slots so it is built at most once per
--- render cycle. Invalidate after any create/delete.
 -- ---------------------------------------------------------------------------
 
 local _cqa_valid_cache = nil
@@ -380,17 +822,10 @@ local function _loadCustomIconList()
     return icons
 end
 
--- Shows a preview dialog for a validated Nerd Font icon.
--- on_confirm(sentinel) applies the icon; on_back() reopens the input dialog.
 local function _showNerdIconPreview(sentinel, on_confirm, on_back)
     local ConfirmBox = require("ui/widget/confirmbox")
     local nerd_char  = Config.nerdIconChar(sentinel)
     local hex        = sentinel:match("nerd:(.+)")
-
-    -- ConfirmBox is a proper FocusManager subclass: Left/Right/Press/Back all
-    -- work out of the box and it correctly resets the device text-input state
-    -- that InputDialog left behind (which was preventing key events from reaching
-    -- our previous custom FocusManager overlay).
     UIManager:show(ConfirmBox:new{
         text        = ("U+%s  %s"):format(hex, nerd_char) .. "\n\n" ..
                       _("Use this Nerd Font icon?"),
@@ -401,18 +836,13 @@ local function _showNerdIconPreview(sentinel, on_confirm, on_back)
     })
 end
 
--- Opens an InputDialog for entering a Nerd Font hex codepoint.
--- on_select is called with "nerd:XXXX" on success, or nothing on cancel.
 local function _showNerdIconInput(current_icon, on_select, on_cancel)
     local InputDialog = require("ui/widget/inputdialog")
     local InfoMessage = require("ui/widget/infomessage")
-
-    -- Pre-fill with the current hex code if the icon is already a Nerd Font.
     local current_hex = ""
     if current_icon then
         current_hex = current_icon:match("^nerd:([0-9A-Fa-f]+)$") or ""
     end
-
     local dlg
     local function _openInputDlg()
         dlg = InputDialog:new{
@@ -433,7 +863,6 @@ local function _showNerdIconInput(current_icon, on_select, on_cancel)
                     is_enter_default = true,
                     callback         = function()
                         local raw = dlg:getInputText()
-                        -- Empty input â clear the nerd icon (caller gets nil).
                         if raw:match("^%s*$") then
                             UIManager:close(dlg)
                             on_select(nil)
@@ -441,14 +870,8 @@ local function _showNerdIconInput(current_icon, on_select, on_cancel)
                         end
                         local hex = raw:match("^%s*([0-9A-Fa-f]+)%s*$")
                         if hex and #hex >= 1 and #hex <= 6 then
-                            -- Validate that Config can convert it (range check).
                             local sentinel = "nerd:" .. hex:upper()
                             if Config.nerdIconChar(sentinel) then
-                                -- Close dlg first, then show preview on top.
-                                -- Cancel in preview reopens the InputDialog via nextTick
-                                -- so the tap that closed the preview is fully consumed
-                                -- before the new dialog appears (otherwise the same tap
-                                -- event lands on the freshly-opened dialog and closes it).
                                 UIManager:close(dlg)
                                 _showNerdIconPreview(sentinel,
                                     on_select,
@@ -474,18 +897,12 @@ local function _showNerdIconInput(current_icon, on_select, on_cancel)
     _openInputDlg()
 end
 
--- on_select(path_or_nil) is called with the chosen icon path, or nil for "reset".
--- _picker_handle: table where the open dialog will be stored (e.g. plugin table).
--- picker_key: key on that table (e.g. "_qa_icon_picker").
 function QA.showIconPicker(current_icon, on_select, default_label, _picker_handle, picker_key)
     _picker_handle = _picker_handle or QA
     picker_key     = picker_key     or "_icon_picker"
-
     local ButtonDialog = require("ui/widget/buttondialog")
     local icons   = _loadCustomIconList()
     local buttons = {}
-
-    -- "Default" row — marked when no custom icon is active.
     local is_nerd    = Config.isNerdIcon(current_icon)
     local is_svg     = current_icon and not is_nerd
     local default_marker = (not current_icon) and "  ✓" or ""
@@ -496,8 +913,6 @@ function QA.showIconPicker(current_icon, on_select, default_label, _picker_handl
             on_select(nil)
         end,
     }}
-
-    -- "Nerd Font…" row — opens the hex input dialog.
     local nerd_char   = Config.nerdIconChar(current_icon)
     local nerd_marker = is_nerd and ("  " .. nerd_char .. "  ✓") or ""
     buttons[#buttons + 1] = {{
@@ -511,7 +926,6 @@ function QA.showIconPicker(current_icon, on_select, default_label, _picker_handl
             end)
         end,
     }}
-
     if #icons == 0 then
         buttons[#buttons + 1] = {{
             text    = _("No icons found in:") .. "\n" .. QA.ICONS_DIR,
@@ -589,10 +1003,6 @@ local function _scanFMPlugins()
             local cap = "on" .. fm_key:sub(1,1):upper() .. fm_key:sub(2)
             if type(val[cap]) == "function" then method = cap end
         end
-        -- Fallback: extract the callback from addToMainMenu and wrap it as a
-        -- synthetic method (_sui_launch). This covers plugins that only expose
-        -- their entry point as an inline callback in addToMainMenu (e.g.
-        -- solitaire, audiobookshelf, killersudoku, rakuyomi).
         if not method then
             local probe = {}
             local ok = pcall(function() val:addToMainMenu(probe) end)
@@ -608,8 +1018,6 @@ local function _scanFMPlugins()
         if method then
             local raw     = (val.name or fm_key):gsub("^filemanager", "")
             local display = raw:sub(1,1):upper() .. raw:sub(2)
-            -- Prefer the menu text provided by addToMainMenu when available,
-            -- as it is already localised and more descriptive than the key.
             local probe2 = {}
             local ok2 = pcall(function() val:addToMainMenu(probe2) end)
             if ok2 then
@@ -663,9 +1071,6 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Create / Edit dialog
--- plugin: the SimpleUI plugin instance (for _rebuildAllNavbars)
--- qa_id:  existing id to edit, or nil to create new
--- on_done: optional zero-arg callback after save
 -- ---------------------------------------------------------------------------
 
 function QA.showQuickActionDialog(plugin, qa_id, on_done)
@@ -687,7 +1092,6 @@ function QA.showQuickActionDialog(plugin, qa_id, on_done)
         if not chosen_icon then return default_lbl or _("Icon: Default") end
         local nerd_char = Config.nerdIconChar(chosen_icon)
         if nerd_char then
-            -- Show the rendered glyph plus the hex code as confirmation.
             local hex = chosen_icon:match("nerd:(.+)")
             return _("Icon") .. ": " .. nerd_char .. " (" .. hex .. ")"
         end
@@ -757,7 +1161,6 @@ function QA.showQuickActionDialog(plugin, qa_id, on_done)
 
     local sanitize = Config.sanitizeLabel
 
-
     local function openFolderPicker()
         local ok_pc, PathChooser = pcall(require, "ui/widget/pathchooser")
         if not ok_pc or not PathChooser then
@@ -770,12 +1173,8 @@ function QA.showQuickActionDialog(plugin, qa_id, on_done)
             show_files       = false,
             path             = start_path,
             onConfirm        = function(chosen_path)
-                -- Strip trailing slash for consistency with the rest of the plugin.
                 chosen_path = chosen_path:gsub("/$", "")
                 local default_label = chosen_path:match("([^/]+)$") or chosen_path
-                -- Defer until the PathChooser has fully closed and all pending
-                -- input events (tap/hold_release) have been consumed, otherwise
-                -- the dialog opens and is immediately closed by the lingering event.
                 UIManager:scheduleIn(0.3, function()
                     _buildSaveDialog({
                         fields = { { description = _("Name"), text = cfg.label or default_label, hint = _("e.g. Comics…") } },
@@ -884,8 +1283,154 @@ function QA.showQuickActionDialog(plugin, qa_id, on_done)
 end
 
 -- ---------------------------------------------------------------------------
--- makeMenuItems(plugin) — returns the items table for the Quick Actions menu
--- Called from sui_menu.lua; replaces the old makeQuickActionsMenu closure.
+-- makeIconsMenuItems(plugin) — sub_item_table for Style → Icons
+-- ---------------------------------------------------------------------------
+
+function QA.makeIconsMenuItems(plugin)
+    local items = {}
+
+    items[#items + 1] = {
+        text           = _("Reset All Quick Action Icons"),
+        keep_menu_open = true,
+        callback       = function()
+            for _k, a in ipairs(Config.ALL_ACTIONS) do
+                SUISettings:del("simpleui_action_" .. a.id .. "_icon")
+            end
+            SUISettings:del("simpleui_action_wifi_toggle_off_icon")
+            for _i, qa_id in ipairs(QA.getCustomQAList()) do
+                local cfg = SUISettings:get("simpleui_cqa_" .. qa_id)
+                if type(cfg) == "table" then
+                    cfg.icon = nil
+                    SUISettings:set("simpleui_cqa_" .. qa_id, cfg)
+                end
+            end
+            local ok_ss, SUIStyle = pcall(require, "sui_style")
+            if ok_ss and SUIStyle then
+                for _, s in ipairs(SUIStyle.SLOTS) do
+                    if s.group == "sui_qa_defaults" then
+                        SUIStyle.setIcon(s.id, nil)
+                    end
+                end
+            end
+            QA.invalidateCustomQACache()
+            plugin:_rebuildAllNavbars()
+            local ok, HS = pcall(require, "sui_homescreen")
+            if ok and HS and HS._instance then HS._instance:_refreshImmediate(false) end
+        end,
+        separator = true,
+    }
+
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    if ok_ss and SUIStyle then
+        for _, slot in ipairs(SUIStyle.SLOTS) do
+            if slot.group == "sui_qa_defaults" then
+                items[#items + 1] = {
+                    text_func = function()
+                        local path = SUIStyle.getIcon(slot.id)
+                        local label = type(slot.label) == "function" and slot.label() or slot.label
+                        if path then
+                            return label .. "  \u{270E}"
+                        end
+                        return label
+                    end,
+                    keep_menu_open = true,
+                    callback = function()
+                        QA.showIconPicker(
+                            SUIStyle.getIcon(slot.id),
+                            function(new_path)
+                                SUIStyle.setIcon(slot.id, new_path)
+                                QA.invalidateCustomQACache()
+                                plugin:_rebuildAllNavbars()
+                                local ok, HS = pcall(require, "sui_homescreen")
+                                if ok and HS and HS._instance then HS._instance:_refreshImmediate(false) end
+                            end,
+                            type(slot.label) == "function" and slot.label() or slot.label,
+                            plugin,
+                            "_sysicon_picker_" .. slot.id
+                        )
+                    end,
+                }
+            end
+        end
+        if #items > 1 then
+            items[#items].separator = true
+        end
+    end
+
+    local pool = {}
+    for _k, a in ipairs(Config.ALL_ACTIONS) do
+        local lbl = QA.getEntry(a.id).label
+        if a.id == "wifi_toggle" then
+            pool[#pool + 1] = { id = a.id, is_default = true, title = lbl .. "  (" .. _("On") .. ")" }
+            pool[#pool + 1] = { id = "wifi_toggle_off", is_default = true, title = lbl .. "  (" .. _("Off") .. ")" }
+        else
+            pool[#pool + 1] = { id = a.id, is_default = true, title = lbl }
+        end
+    end
+    for _i, qa_id in ipairs(Config.getCustomQAList()) do
+        local c = Config.getCustomQAConfig(qa_id)
+        pool[#pool + 1] = { id = qa_id, is_default = false, title = c.label or qa_id }
+    end
+    table.sort(pool, function(a, b)
+        return a.title:lower() < b.title:lower()
+    end)
+
+    for _k, entry in ipairs(pool) do
+        local _id         = entry.id
+        local _is_default = entry.is_default
+        local _title      = entry.title
+        items[#items + 1] = {
+            text_func = function()
+                local has_custom = _is_default
+                    and QA.getDefaultActionIcon(_id) ~= nil
+                    or (not _is_default and (function()
+                            local c = Config.getCustomQAConfig(_id)
+                            return c.icon ~= nil
+                                and c.icon ~= Config.CUSTOM_ICON
+                                and c.icon ~= Config.CUSTOM_PLUGIN_ICON
+                                and c.icon ~= Config.CUSTOM_DISPATCHER_ICON
+                        end)())
+                return _title .. (has_custom and "  \u{270E}" or "")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local current_icon
+                if _is_default then
+                    current_icon = QA.getDefaultActionIcon(_id)
+                else
+                    current_icon = Config.getCustomQAConfig(_id).icon
+                end
+                local default_label = _title .. " (" .. _("default") .. ")"
+                QA.showIconPicker(current_icon, function(new_icon)
+                    if _is_default then
+                        QA.setDefaultActionIcon(_id, new_icon)
+                    else
+                        local c = Config.getCustomQAConfig(_id)
+                        local type_default
+                        if c.dispatcher_action and c.dispatcher_action ~= "" then
+                            type_default = Config.CUSTOM_DISPATCHER_ICON
+                        elseif c.plugin_key and c.plugin_key ~= "" then
+                            type_default = Config.CUSTOM_PLUGIN_ICON
+                        else
+                            type_default = Config.CUSTOM_ICON
+                        end
+                        Config.saveCustomQAConfig(_id, c.label, c.path, c.collection,
+                            new_icon or type_default,
+                            c.plugin_key, c.plugin_method, c.dispatcher_action)
+                    end
+                    QA.invalidateCustomQACache()
+                    plugin:_rebuildAllNavbars()
+                    local ok, HS = pcall(require, "sui_homescreen")
+                    if ok and HS and HS._instance then HS._instance:_refreshImmediate(false) end
+                end, default_label, plugin, "_qa_icon_picker_style")
+            end,
+        }
+    end
+    return items
+end
+
+-- ---------------------------------------------------------------------------
+-- makeMenuItems(plugin) — Quick Actions menu items
 -- ---------------------------------------------------------------------------
 
 function QA.makeMenuItems(plugin)
@@ -895,7 +1440,6 @@ function QA.makeMenuItems(plugin)
 
     local MAX_CUSTOM_QA = Config.MAX_CUSTOM_QA
 
-    -- All overridable actions (default built-ins + custom QAs), sorted by label.
     local function allActions()
         local pool = {}
         for _, a in ipairs(Config.ALL_ACTIONS) do
@@ -909,65 +1453,6 @@ function QA.makeMenuItems(plugin)
         end)
         return pool
     end
-
-    -- ── Change Icons ─────────────────────────────────────────────────────────
-
-    local function makeChangeIconsMenu()
-        local items = {}
-        for _i, entry in ipairs(allActions()) do
-            local _id         = entry.id
-            local _is_default = entry.is_default
-            items[#items + 1] = {
-                text_func = function()
-                    local lbl        = QA.getEntry(_id).label
-                    local has_custom = _is_default
-                        and QA.getDefaultActionIcon(_id) ~= nil
-                        or (not _is_default and (function()
-                                local c = Config.getCustomQAConfig(_id)
-                                return c.icon ~= nil
-                                    and c.icon ~= Config.CUSTOM_ICON
-                                    and c.icon ~= Config.CUSTOM_PLUGIN_ICON
-                                    and c.icon ~= Config.CUSTOM_DISPATCHER_ICON
-                            end)())
-                    return lbl .. (has_custom and "  ✎" or "")
-                end,
-                callback = function()
-                    local current_icon
-                    if _is_default then
-                        current_icon = QA.getDefaultActionIcon(_id)
-                    else
-                        current_icon = Config.getCustomQAConfig(_id).icon
-                    end
-                    local default_label = QA.getEntry(_id).label .. " (" .. _("default") .. ")"
-                    QA.showIconPicker(current_icon, function(new_icon)
-                        if _is_default then
-                            QA.setDefaultActionIcon(_id, new_icon)
-                        else
-                            local c = Config.getCustomQAConfig(_id)
-                            local type_default
-                            if c.dispatcher_action and c.dispatcher_action ~= "" then
-                                type_default = Config.CUSTOM_DISPATCHER_ICON
-                            elseif c.plugin_key and c.plugin_key ~= "" then
-                                type_default = Config.CUSTOM_PLUGIN_ICON
-                            else
-                                type_default = Config.CUSTOM_ICON
-                            end
-                            Config.saveCustomQAConfig(_id, c.label, c.path, c.collection,
-                                new_icon or type_default,
-                                c.plugin_key, c.plugin_method, c.dispatcher_action)
-                        end
-                        QA.invalidateCustomQACache()
-                        plugin:_rebuildAllNavbars()
-                        local ok, HS = pcall(require, "sui_homescreen")
-                        if ok and HS and HS._instance then HS._instance:_refreshImmediate(false) end
-                    end, default_label, plugin, "_qa_icon_picker")
-                end,
-            }
-        end
-        return items
-    end
-
-    -- ── Rename ───────────────────────────────────────────────────────────────
 
     local function makeRenameMenu()
         local items = {}
@@ -1033,14 +1518,8 @@ function QA.makeMenuItems(plugin)
         return items
     end
 
-    -- ── Top-level menu ───────────────────────────────────────────────────────
-
     local items = {}
 
-    items[#items + 1] = {
-        text               = _("Change Icons"),
-        sub_item_table_func = makeChangeIconsMenu,
-    }
     items[#items + 1] = {
         text               = _("Rename"),
         sub_item_table_func = makeRenameMenu,
@@ -1070,7 +1549,6 @@ function QA.makeMenuItems(plugin)
     if #qa_list == 0 then return items end
     items[#items].separator = true
 
-    -- Pre-read + sort custom QAs by label.
     local sorted_qa = {}
     for _i, qa_id in ipairs(qa_list) do
         local cfg = Config.getCustomQAConfig(qa_id)
@@ -1150,17 +1628,9 @@ function QA.makeMenuItems(plugin)
 end
 
 -- ---------------------------------------------------------------------------
--- executeCustomQA(action_id, fm, show_unavailable_fn)
---
--- Single source of truth for running a custom QA action.
--- Called by sui_bottombar from both _executeInPlace and navigate so that
--- execution logic lives here rather than being duplicated across two call sites.
---
---   action_id           — e.g. "custom_qa_1"
---   fm                  — the live FileManager (or ReaderUI) instance
---   show_unavailable_fn — optional function(msg) for surfacing errors;
---                         defaults to an InfoMessage toast
+-- executeCustomQA — single source of truth for custom QA execution
 -- ---------------------------------------------------------------------------
+
 function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
     local function _unavail(msg)
         if show_unavailable_fn then
@@ -1171,7 +1641,7 @@ function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
         end
     end
 
-    local cfg = G_reader_settings:readSetting("navbar_cqa_" .. action_id) or {}
+    local cfg = SUISettings:get("simpleui_cqa_" .. action_id) or {}
 
     if cfg.dispatcher_action and cfg.dispatcher_action ~= "" then
         local ok_disp, Dispatcher = pcall(require, "dispatcher")
@@ -1188,10 +1658,6 @@ function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
         end
 
     elseif cfg.plugin_key and cfg.plugin_method and cfg.plugin_key ~= "" then
-        -- Always resolve the live FileManager instance so that a stale `fm`
-        -- reference (e.g. captured before a FM recreate) does not cause false
-        -- "Plugin not available" errors on the second and subsequent calls
-        -- while the homescreen is open (_executeInPlace path).
         local live_fm = package.loaded["apps/filemanager/filemanager"]
         live_fm = live_fm and live_fm.instance
         local effective_fm = (live_fm and live_fm[cfg.plugin_key]) and live_fm or fm
@@ -1199,9 +1665,6 @@ function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
 
         local method = cfg.plugin_method
         if plugin_inst and not plugin_inst[method] and method == "_sui_launch" then
-            -- Re-probe for synthetic _sui_launch if missing from the current instance.
-            -- This happens after a restart or FM recreate for plugins that only
-            -- expose their entry point via addToMainMenu (e.g. solitaire).
             local probe = {}
             local ok = pcall(function() plugin_inst:addToMainMenu(probe) end)
             if ok then
@@ -1230,22 +1693,24 @@ function QA.executeCustomQA(action_id, fm, show_unavailable_fn)
         if fm and fm.file_chooser then fm.file_chooser:changeToPath(cfg.path) end
 
     else
-        _unavail(_("No folder, collection or plugin configured.\nGo to Simple UI \xe2\x86\x92 Settings \xe2\x86\x92 Quick Actions to set one."))
+        _unavail(_("No folder, collection or plugin configured.\nGo to Simple UI → Settings → Quick Actions to set one."))
     end
 end
 
 -- ---------------------------------------------------------------------------
--- isInPlaceCustomQA(action_id)
---
--- Returns true when the custom QA executes without opening a new fullscreen
--- view (dispatcher_action or plugin_method).  Used by sui_bottombar's
--- _isInPlaceAction so the homescreen is not closed for in-place actions.
+-- isInPlaceCustomQA — kept for backwards compatibility
 -- ---------------------------------------------------------------------------
+
 function QA.isInPlaceCustomQA(action_id)
-    local cfg = G_reader_settings:readSetting("navbar_cqa_" .. action_id) or {}
+    local cfg = SUISettings:get("simpleui_cqa_" .. action_id) or {}
     if cfg.dispatcher_action and cfg.dispatcher_action ~= "" then return true end
     if cfg.plugin_key and cfg.plugin_method and cfg.plugin_key ~= "" then return true end
     return false
 end
+
+-- ---------------------------------------------------------------------------
+-- Bootstrap: register all built-in actions at module load time.
+-- ---------------------------------------------------------------------------
+_registerBuiltins()
 
 return QA

@@ -1391,7 +1391,7 @@ msgid "Today"
 msgstr "Hôm nay"
 #: desktop_modules/module_reading_stats.lua:62
 msgid "Today — Pages"
-msgstr "Hôm nay — Trang"
+msgstr ""
 #: desktop_modules/module_reading_stats.lua:61
 msgid "Today — Time"
 msgstr "Hôm nay — Giờ"
@@ -1496,7 +1496,7 @@ msgid "WiFi not available on this device."
 msgstr "WiFi không có sẵn trên thiết bị này."
 #: sui_quickactions.lua:625
 msgid "Wikipedia Lookup"
-msgstr "Tra cứu Wikipedia"
+msgstr ""
 #: desktop_modules/module_currently.lua:936
 msgid "With percentage"
 msgstr "Với tỷ lệ phần trăm"

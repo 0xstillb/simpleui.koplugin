@@ -4,7 +4,7 @@
 --
 -- Persistence: the TBR list is mirrored as a KOReader collection named
 -- TBR_COLL_NAME ("To Be Read").  ReadCollection is the source of truth;
--- G_reader_settings["sui_tbr_list"] is kept in sync as a legacy fallback
+-- G_reader_settings["simpleui_tbr_list"] is kept in sync as a legacy fallback
 -- and for modules that read it directly.  On first run the old
 -- G_reader_settings list is migrated into the collection automatically.
 --
@@ -50,6 +50,7 @@ end
 
 local Config = require("sui_config")
 local UI     = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD    = UI.PAD
 local Screen = require("device").screen
 
@@ -57,7 +58,7 @@ local CLR_TEXT_SUB    = UI.CLR_TEXT_SUB
 local _BASE_RB_PCT_FS = Screen:scaleBySize(8)  -- "XX% Read" label font size — base value
 
 local TBR_MAX       = 5
-local TBR_SETTING   = "sui_tbr_list"    -- G_reader_settings key (kept in sync)
+local TBR_SETTING   = "simpleui_tbr_list"    -- G_reader_settings key (kept in sync)
 local TBR_COLL_NAME = "To Be Read"      -- KOReader collection name for the TBR list
 
 -- Settings keys (prefixed with ctx.pfx at runtime)
@@ -66,13 +67,13 @@ local SETTING_TEXT     = "tbr_show_text"       -- default OFF
 local SETTING_OVERLAY  = "tbr_show_overlay"    -- default OFF
 
 local function showProgress(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_PROGRESS) == true
+    return SUISettings:readSetting(pfx .. SETTING_PROGRESS) == true
 end
 local function showText(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_TEXT) == true
+    return SUISettings:readSetting(pfx .. SETTING_TEXT) == true
 end
 local function showOverlay(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_OVERLAY) == true
+    return SUISettings:readSetting(pfx .. SETTING_OVERLAY) == true
 end
 
 -- ---------------------------------------------------------------------------
@@ -98,7 +99,7 @@ local function _migrate()
     end
     -- If already populated, nothing to migrate.
     if next(RC.coll[TBR_COLL_NAME]) then return end
-    local raw = G_reader_settings:readSetting(TBR_SETTING)
+    local raw = SUISettings:readSetting(TBR_SETTING)
     if type(raw) ~= "table" or #raw == 0 then return end
     local added = 0
     for _, fp in ipairs(raw) do
@@ -139,7 +140,7 @@ local function getTBRList()
         return fps
     end
     -- Fallback
-    local raw = G_reader_settings:readSetting(TBR_SETTING)
+    local raw = SUISettings:readSetting(TBR_SETTING)
     if type(raw) ~= "table" then return {} end
     local clean = {}
     for _, fp in ipairs(raw) do
@@ -152,7 +153,7 @@ end
 
 -- Sync the canonical list into G_reader_settings for other modules.
 local function _syncSettings(list)
-    G_reader_settings:saveSetting(TBR_SETTING, list)
+    SUISettings:saveSetting(TBR_SETTING, list)
 end
 
 local function getTBRCount()
@@ -255,6 +256,7 @@ M.name        = _("To Be Read")
 M.label       = _("To Be Read")
 M.enabled_key = "tbr"
 M.default_on  = false
+M.has_covers  = true   -- activates e-ink dithering and cover poll
 
 function M.reset() _SH = nil end
 
@@ -312,6 +314,12 @@ function M.build(w, ctx)
 
     if #tbr_fps == 0 then return nil end
 
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    local _theme_fg       = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _clr_blk        = _theme_fg or Blitbuffer.COLOR_BLACK
+    local _clr_sub        = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+
     local SH          = getSH()
     local scale       = Config.getModuleScale("tbr", ctx.pfx)
     local thumb_scale = Config.getThumbScale("tbr", ctx.pfx)
@@ -355,11 +363,11 @@ function M.build(w, ctx)
                 radius      = badge_r,
                 CenterContainer:new{
                     dimen = Geom:new{ w = badge_d, h = badge_d },
-                    TextWidget:new{
+                    UI.makeColoredText{
                         text    = string.format(_("%d%%"), pct_int),
                         face    = pct_face,
                         bold    = true,
-                        fgcolor = Blitbuffer.COLOR_BLACK,
+                        fgcolor = _clr_blk,
                     },
                 },
             }
@@ -385,11 +393,11 @@ function M.build(w, ctx)
 
         if draw_text then
             cell[#cell+1] = SH.vspan(draw_progress and D.RB_GAP2 or D.RB_GAP1, ctx.vspan_pool)
-            cell[#cell+1] = TextWidget:new{
+            cell[#cell+1] = UI.makeColoredText{
                 text      = string.format(_("%d%% Read"), math.floor((bd.percent or 0) * 100 + 0.5)),
                 face      = pct_face,
                 bold      = true,
-                fgcolor   = CLR_TEXT_SUB,
+                fgcolor   = _clr_sub,
                 width     = cw,
                 alignment = "center",
             }
@@ -557,7 +565,7 @@ function M.getMenuItems(ctx_menu)
         enabled_func   = function() return not showOverlay(pfx) end,
         keep_menu_open = true,
         callback       = function()
-            G_reader_settings:saveSetting(pfx .. SETTING_PROGRESS, not showProgress(pfx))
+            SUISettings:saveSetting(pfx .. SETTING_PROGRESS, not showProgress(pfx))
             refresh()
         end,
     }
@@ -567,7 +575,7 @@ function M.getMenuItems(ctx_menu)
         enabled_func   = function() return not showOverlay(pfx) end,
         keep_menu_open = true,
         callback       = function()
-            G_reader_settings:saveSetting(pfx .. SETTING_TEXT, not showText(pfx))
+            SUISettings:saveSetting(pfx .. SETTING_TEXT, not showText(pfx))
             refresh()
         end,
     }
@@ -576,7 +584,7 @@ function M.getMenuItems(ctx_menu)
         checked_func   = function() return showOverlay(pfx) end,
         keep_menu_open = true,
         callback       = function()
-            G_reader_settings:saveSetting(pfx .. SETTING_OVERLAY, not showOverlay(pfx))
+            SUISettings:saveSetting(pfx .. SETTING_OVERLAY, not showOverlay(pfx))
             refresh()
         end,
     }
