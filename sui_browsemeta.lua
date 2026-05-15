@@ -44,6 +44,8 @@
 --   M.getSavedMode()          — read persisted mode setting
 --   M.setSavedMode(mode)      — persist mode setting
 --   M.openVirtualCoverPicker(vpath, fc) — open cover-picker for a dim_list leaf
+--   M.getAuthorBookCount(fc, author)    — count books by author in current base_dir (cached)
+--   M.navigateToAuthorLeaf(fm, author)  — navigate FM directly to author virtual leaf
 
 local lfs     = require("libs/libkoreader-lfs")
 local util    = require("util")
@@ -86,6 +88,7 @@ local _FC_COVERS_KEY = "simpleui_fc_covers"
 local _meta_values_cache    = {}
 local _matching_files_cache = {}
 local _repr_file_cache      = {}
+local _author_count_cache   = {}  -- { [base_dir] = { [author_name] = count } }
 local _cache_base_dir       = nil
 
 -- Lazy module references — cached on first use, cleared on uninstall.
@@ -106,6 +109,7 @@ local function _clearCaches()
     for k in pairs(_meta_values_cache)    do _meta_values_cache[k]    = nil end
     for k in pairs(_matching_files_cache) do _matching_files_cache[k] = nil end
     for k in pairs(_repr_file_cache)      do _repr_file_cache[k]      = nil end
+    for k in pairs(_author_count_cache)   do _author_count_cache[k]   = nil end
 end
 
 local function _ensureCacheBaseDir(base_dir)
@@ -724,6 +728,74 @@ function M.isAtVirtualRoot(fc, mode)
     local base   = _baseDir(fc.path)
     local target = _dimPath(base, mode)
     return fc.path == target
+end
+
+-- ---------------------------------------------------------------------------
+-- Author-dialog helpers
+-- ---------------------------------------------------------------------------
+
+-- Returns the number of books by *author_name* under the current FM base_dir.
+-- Result is cached for the lifetime of the session / until M.reset().
+-- Returns 0 when BM is unavailable or author is empty.
+function M.getAuthorBookCount(fc, author_name)
+    if not fc or not author_name or author_name == "" then return 0 end
+    local base = _baseDir(fc.path)
+    if not base then return 0 end
+
+    -- Check session cache first to avoid repeated SQL on every dialog open.
+    _author_count_cache[base] = _author_count_cache[base] or {}
+    local cached = _author_count_cache[base][author_name]
+    if cached ~= nil then return cached end
+
+    local files = _getMatchingFiles(base, { { "authors", author_name } })
+    local count = #files
+    _author_count_cache[base][author_name] = count
+    return count
+end
+
+-- Navigates the FM directly to the virtual leaf for *author_name*, bypassing
+-- the top-level Authors list.  The up-button / back-button will land on the
+-- Authors root (not the real filesystem), matching the expected UX.
+--
+-- origin_file (optional): the book file that triggered this navigation.
+--   When provided, pressing back from the virtual leaf returns directly to the
+--   real folder where the book lives, with the list scrolled to that book.
+--   Without it, back lands on the Authors root (normal BrowseMeta behaviour).
+--
+-- Preconditions: BM must be installed (M.install() called).
+function M.navigateToAuthorLeaf(fm, author_name, origin_file)
+    if not fm or not author_name or author_name == "" then return end
+    local fc = fm.file_chooser
+    if not fc then return end
+
+    local base   = _baseDir(fc.path)
+    local target = _leafPath(base, "author", author_name)
+
+    -- Save the origin so onFolderUp can return to exactly the right place.
+    -- Stored on fc (not a module upvalue) so it survives across module reloads.
+    if origin_file then
+        -- real_path is the actual folder the file lives in.
+        local real_path = fc.path
+        if _isVirtual(real_path) then real_path = base end
+        fc._sui_author_dialog_origin = { path = real_path, file = origin_file }
+    else
+        fc._sui_author_dialog_origin = nil
+    end
+
+    -- Set the entry path to the Authors root so the up-button hierarchy is
+    -- correct when the user did NOT come from the dialog (normal BM flow).
+    fc._browse_by_meta_entry_path = _dimPath(base, "author")
+    fm._navbar_suppress_path_change = true
+    fc:changeToPath(target)
+    fm._navbar_suppress_path_change = nil
+    if fm.updateTitleBarPath then
+        pcall(function() fm:updateTitleBarPath(target) end)
+    end
+    if fc.onGotoPage then
+        pcall(function() fc:onGotoPage(1) end)
+    end
+    -- Persist "author" mode so the next session restores the virtual tree.
+    M.setSavedMode("author")
 end
 
 -- ---------------------------------------------------------------------------

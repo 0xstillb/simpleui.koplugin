@@ -1565,7 +1565,7 @@ function HomescreenWidget:_buildCtx()
     -- The "recent" module (mod_r) shows no DB-backed stats, so it is excluded.
     local wants_db = show_c or coverdeck_needs_db or wants_stats or ext_needs_db
 
-    if wants_db and not self._db_conn then
+    if wants_db and not self._db_conn and not self._db_sync_guard then
         self._db_conn = Config.openStatsDB()
     end
 
@@ -2539,12 +2539,36 @@ end
 -- invisible to the merge query, so they are incorrectly treated as "deleted
 -- on this device" and stripped from the income_db before upload.  The result
 -- is permanent, silent data loss on all synced devices.
+--
+-- Closing the connection here (synchronously, before returning false) is
+-- necessary but not sufficient: ReaderStatistics:onSyncBookStats defers the
+-- actual sync to UIManager:nextTick, so any repaint scheduled between this
+-- handler and that tick could call _buildCtx and reopen _db_conn with a new
+-- WAL snapshot that again hides the just-written rows.
+--
+-- _db_sync_guard prevents _buildCtx from reopening the connection during
+-- that window.  tickAfterNext schedules the guard clear for two ticks after
+-- this one — the sync runs in tick N+1 (nextTick) and is fully blocking, so
+-- tick N+2 is guaranteed to run only after SyncService.sync has returned.
+-- The guard clear also invalidates _ctx_cache so the next render fetches
+-- fresh data from the updated DB.
+--
 -- Returning false lets the event propagate to ReaderStatistics as normal.
 function HomescreenWidget:onSyncBookStats()
     if self._db_conn then
         pcall(function() self._db_conn:close() end)
         self._db_conn = nil
     end
+    self._db_sync_guard = true
+    local self_ref = self
+    UIManager:tickAfterNext(function()
+        UIManager:nextTick(function()
+            if Homescreen._instance ~= self_ref then return end
+            self_ref._db_sync_guard = false
+            self_ref._ctx_cache     = nil
+            self_ref:_refresh(false)
+        end)
+    end)
     return false  -- do not consume; Statistics plugin must still handle this
 end
 

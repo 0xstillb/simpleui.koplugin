@@ -2625,9 +2625,6 @@ msgstr "Eliminar a predefinição "%s"?"
 msgid "A preset named \"%s\" already exists.\nOverwrite it?"
 msgstr "Já existe uma predefinição com o nome \"%s\".\nSubstituir?"
 
-msgid "Also search system fonts"
-msgstr "Incluir tipos de letra do sistema"
-
 msgid "Back Button"
 msgstr "Botão de retroceder"
 
@@ -2657,9 +2654,6 @@ msgstr "Predefinições de ícones  [%s]"
 
 msgid "Menu Button"
 msgstr "Botão de menu"
-
-msgid "No fonts found — place .ttf/.otf files in sui_fonts/"
-msgstr "Nenhum tipo de letra encontrado — coloque ficheiros .ttf/.otf em sui_fonts/"
 
 msgid "Overwrite preset \"%s\" with the current icon settings?"
 msgstr "Substituir a predefinição \"%s\" pelas definições de ícones atuais?"

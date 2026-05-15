@@ -796,8 +796,29 @@ function M.apply(fm_self)
                     local FileChooser_cls = require("ui/widget/filechooser")
                     fm_self._titlebar_orig_fc_onFolderUp = fc.onFolderUp  -- may be nil
                     fc.onFolderUp = function(fc_self, ...)
-                        -- At the dim_list level of a virtual browse tree, exit to normal FS.
+                        -- When the user navigated here from the book dialog ("More by X"),
+                        -- a single back press should return to the real folder they came
+                        -- from, scrolled to the book — not to the Authors root.
                         local BM = _BrowseMeta()
+                        if BM then
+                            local origin = fc_self._sui_author_dialog_origin
+                            if origin and origin.path then
+                                local path = fc_self.path or ""
+                                local ok_pl, level = pcall(BM.getPathLevel, path)
+                                if ok_pl and level == "file_list" then
+                                    -- Clear origin so subsequent back presses behave normally.
+                                    fc_self._sui_author_dialog_origin = nil
+                                    BM.exitToNormal(fc_self, fm_self)
+                                    -- Navigate to the saved real folder with the book focused
+                                    -- so the list scrolls to the right page automatically.
+                                    fc_self:changeToPath(origin.path, origin.file)
+                                    local is_sub_after = _resolveIsSub(fc_self)
+                                    _applyBackButtonState(fc_self, is_sub_after, 1)
+                                    return true
+                                end
+                            end
+                        end
+                        -- At the dim_list level of a virtual browse tree, exit to normal FS.
                         if BM and BM.exitToNormal then
                             local path = fc_self.path or ""
                             if path:find("/", 1, true) then

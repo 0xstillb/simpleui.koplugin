@@ -763,6 +763,76 @@ function SimpleUIPlugin:init()
                     end
                 end
             end)
+
+            -- Register the "More by <Author>" button in the Library hold dialog.
+            -- Shown only when:
+            --   • the item is a book file
+            --   • Browse by Author/Series/Tags (BM) is enabled
+            --   • the book has author metadata
+            --   • there are ≥ 2 books by that author in the current folder tree
+            -- Tapping the button closes the dialog and navigates the FM directly
+            -- to the virtual author leaf, skipping the top-level Authors list.
+            UIManager:scheduleIn(0, function()
+                local ok_fm2, FM2 = pcall(require, "apps/filemanager/filemanager")
+                if not (ok_fm2 and FM2 and FM2.instance) then return end
+                local ok_bm, BM = pcall(require, "sui_browsemeta")
+                if not (ok_bm and BM) then return end
+
+                -- Shared factory: returns a button row or nil.
+                -- close_cb is injected by the caller (FM dialog or FS patch).
+                local function _makeAuthorRow(file, is_file, book_props, close_cb)
+                    if not is_file then return nil end
+                    if not BM.isEnabled() then return nil end
+
+                    local authors_raw = book_props and book_props.authors
+                    if not authors_raw or authors_raw == "" then return nil end
+                    -- Multi-author: newline-delimited.  Navigate to the first
+                    -- author only; a picker would be over-engineering for v1.
+                    local author = authors_raw:match("^([^\n]+)") or authors_raw
+                    author = author:match("^%s*(.-)%s*$") -- trim whitespace
+
+                    local fc2 = FM2.instance and FM2.instance.file_chooser
+                    local count = BM.getAuthorBookCount(fc2, author)
+                    if count < 2 then return nil end
+
+                    return {{
+                        text = string.format(_("More by %s (%d)"), author, count),
+                        callback = function()
+                            if close_cb then close_cb() end
+                            local fm2 = FM2.instance
+                            if fm2 then BM.navigateToAuthorLeaf(fm2, author, file) end
+                        end,
+                    }}
+                end
+
+                -- 1. Library browser (FileManager.showFileDialog).
+                FM2.instance:addFileDialogButtons("sui_browse_author", function(file, is_file, book_props)
+                    local close_nav = function()
+                        local fc2 = FM2.instance and FM2.instance.file_chooser
+                        local dlg = fc2 and fc2.file_dialog
+                        if dlg then UIManager:close(dlg) end
+                    end
+                    return _makeAuthorRow(file, is_file, book_props, close_nav)
+                end)
+
+                -- 2. Search results (FileSearcher.onMenuHold).
+                -- The existing TBR monkey-patch on FS.onMenuHold already wraps
+                -- every row_func with a close_cb as the 4th argument, so our
+                -- factory receives it without any further patching needed.
+                local ok_fs2, FS2 = pcall(require, "apps/filemanager/filemanagerfilesearcher")
+                if ok_fs2 and FS2 then
+                    FS2.file_dialog_added_buttons = FS2.file_dialog_added_buttons or { index = {} }
+                    if FS2.file_dialog_added_buttons.index["sui_browse_author"] == nil then
+                        local row_func = function(file, is_file, book_props, close_cb)
+                            return _makeAuthorRow(file, is_file, book_props, close_cb)
+                        end
+                        table.insert(FS2.file_dialog_added_buttons, row_func)
+                        FS2.file_dialog_added_buttons.index["sui_browse_author"] =
+                            #FS2.file_dialog_added_buttons
+                    end
+                end
+            end)
+
             if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
                 Topbar.scheduleRefresh(self, 0)
             end
@@ -783,6 +853,52 @@ function SimpleUIPlugin:init()
                 local ok, Updater = pcall(require, "sui_updater")
                 if ok and Updater then Updater.scheduleAutoCheck() end
             end)
+            -- Patch ReaderStatistics:onSyncBookStats to close the SimpleUI
+            -- stats connection before every sync, including syncs triggered
+            -- from inside the Reader (where HomescreenWidget is not on the
+            -- UIManager stack and therefore cannot handle the event itself).
+            -- The HomescreenWidget:onSyncBookStats handler covers the common
+            -- case; this patch is the safety net for the remaining paths
+            -- (Reader menu → "Synchronize now", interval-based auto-sync).
+            -- We apply it unconditionally at init time — no scheduleIn needed
+            -- because PluginLoader has already initialised all plugins before
+            -- SimpleUI:init() runs, so the RS class table is already in
+            -- package.loaded.
+            do
+                local ok_rs, RS = pcall(require, "plugins/statistics.koplugin/main")
+                if ok_rs and RS and RS.onSyncBookStats and not RS._sui_sync_patched then
+                    local orig_onSyncBookStats = RS.onSyncBookStats
+                    RS._sui_orig_onSyncBookStats = orig_onSyncBookStats
+                    RS._sui_sync_patched         = true
+                    RS.onSyncBookStats = function(self_rs, ...)
+                        -- Close the HomescreenWidget DB connection synchronously,
+                        -- before ReaderStatistics defers the actual sync to nextTick.
+                        -- Homescreen._instance is the singleton ref used everywhere
+                        -- in sui_homescreen.lua — no UIManager stack walk needed.
+                        local hs = Homescreen and Homescreen._instance
+                        if hs then
+                            if hs._db_conn then
+                                pcall(function() hs._db_conn:close() end)
+                                hs._db_conn = nil
+                            end
+                            -- Guard prevents _buildCtx from reopening the connection
+                            -- during the window between this call and the nextTick
+                            -- sync.  Cleared two ticks later (after sync completes).
+                            hs._db_sync_guard = true
+                            local hs_ref = hs
+                            UIManager:tickAfterNext(function()
+                                UIManager:nextTick(function()
+                                    if Homescreen._instance ~= hs_ref then return end
+                                    hs_ref._db_sync_guard = false
+                                    hs_ref._ctx_cache     = nil
+                                    hs_ref:_refresh(false)
+                                end)
+                            end)
+                        end
+                        return orig_onSyncBookStats(self_rs, ...)
+                    end
+                end
+            end
         end
     end)
     if not ok then logger.err("simpleui: init failed:", tostring(err)) end
@@ -928,6 +1044,28 @@ function SimpleUIPlugin:onTeardown()
             end
         end
     end
+    -- Remove the "More by <Author>" button from the Library browser and FileSearcher.
+    if FM and FM.instance and FM.instance.removeFileDialogButtons then
+        pcall(function() FM.instance:removeFileDialogButtons("sui_browse_author") end)
+    end
+    if FS and FS.file_dialog_added_buttons then
+        local idx2 = FS.file_dialog_added_buttons.index
+            and FS.file_dialog_added_buttons.index["sui_browse_author"]
+        if idx2 then
+            pcall(function()
+                table.remove(FS.file_dialog_added_buttons, idx2)
+                FS.file_dialog_added_buttons.index["sui_browse_author"] = nil
+                for id, i in pairs(FS.file_dialog_added_buttons.index) do
+                    if i > idx2 then
+                        FS.file_dialog_added_buttons.index[id] = i - 1
+                    end
+                end
+                if #FS.file_dialog_added_buttons == 0 then
+                    FS.file_dialog_added_buttons = nil
+                end
+            end)
+        end
+    end
     local mod_rg = package.loaded["desktop_modules/module_reading_goals"]
     if mod_rg and type(mod_rg.reset) == "function" then
         pcall(mod_rg.reset)
@@ -947,6 +1085,15 @@ function SimpleUIPlugin:onTeardown()
     -- plugin is reloaded within the same KOReader session.
     local fm_menu = package.loaded["apps/filemanager/filemanagermenu"]
     if fm_menu then fm_menu.__sui_tab_patched = nil end
+    -- Restore the ReaderStatistics:onSyncBookStats patch.
+    local RS = package.loaded["plugins/statistics.koplugin/main"]
+    if RS and RS._sui_sync_patched then
+        if RS._sui_orig_onSyncBookStats then
+            RS.onSyncBookStats = RS._sui_orig_onSyncBookStats
+            RS._sui_orig_onSyncBookStats = nil
+        end
+        RS._sui_sync_patched = nil
+    end
     for _, mod in ipairs(_PLUGIN_MODULES) do
         package.loaded[mod] = nil
     end

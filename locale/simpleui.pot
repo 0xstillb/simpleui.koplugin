@@ -2406,10 +2406,6 @@ msgstr ""
 msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
 msgstr ""
 
-#: sui_style.lua:612
-msgid "Also search system fonts"
-msgstr ""
-
 #: sui_style.lua:71
 msgid "Back Button"
 msgstr ""
@@ -2500,10 +2496,6 @@ msgstr ""
 
 #: sui_menu.lua:460
 msgid "Navpager enabled.\n\nRestart now?"
-msgstr ""
-
-#: sui_style.lua:634
-msgid "No fonts found — place .ttf/.otf files in sui_fonts/"
 msgstr ""
 
 #: sui_menu.lua:2054

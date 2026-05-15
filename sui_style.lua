@@ -646,13 +646,11 @@ end
 -- UI Font face picker
 -- ---------------------------------------------------------------------------
 -- Allows the user to replace KOReader's built-in UI font with any font
--- installed in the dedicated sui_fonts/ user folder (default source) or,
--- optionally, from the full system font list.
+-- installed on the system.
 --
 -- Settings keys (all via SUISettings):
 --   simpleui_ui_font_name     string   — selected font family name
 --   simpleui_ui_font_enabled  bool     — true = custom font active
---   simpleui_ui_font_system   bool     — true = also scan system fonts
 --
 -- The font path is resolved at apply-time via cre.getFontFaceFilenameAndFaceIndex
 -- so the setting stores the human-readable family name, not a raw file path.
