@@ -1043,9 +1043,9 @@ function M.build(w, ctx)
 
 
 
-    local face_quote = Font:getFace("cfont", quote_fs)
+    local face_quote = UI.thaiFace(quote_fs, "cfont")
 
-    local face_attr  = Font:getFace("cfont", attr_fs)
+    local face_attr  = UI.thaiFace(attr_fs, "cfont")
 
     local vspan_gap  = VerticalSpan:new{ width = quote_gap }
 

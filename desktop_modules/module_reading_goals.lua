@@ -67,8 +67,8 @@ local function _compactDims(scale)
     return {
         row_fs   = row_fs,
         sub_fs   = sub_fs,
-        face_row = Font:getFace("smallinfofont", row_fs),
-        face_sub = Font:getFace("cfont",         sub_fs),
+        face_row = UI.getFaceForText(_("Daily"), row_fs, "smallinfofont"),
+        face_sub = UI.getFaceForText(_("Daily"), sub_fs, "cfont"),
         row_h    = math.max(8, math.floor(_BASE_ROW_H   * scale)),
         row_gap  = math.max(4, math.floor(_BASE_ROW_GAP * scale)),
         bar_h    = math.max(1, math.floor(_BASE_BAR_H   * scale)),
@@ -133,8 +133,8 @@ local function _scaledDims(scale)
     return {
         row_fs     = row_fs,
         sub_fs     = sub_fs,
-        face_row   = Font:getFace("smallinfofont", row_fs),
-        face_sub   = Font:getFace("cfont",         sub_fs),
+        face_row   = UI.getFaceForText(_("Daily"), row_fs, "smallinfofont"),
+        face_sub   = UI.getFaceForText(_("Daily"), sub_fs, "cfont"),
         row_h      = row_h,
         sub_h      = sub_h,
         sub_gap    = sub_gap,
