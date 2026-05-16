@@ -44,12 +44,15 @@
 --   M.getSavedMode()          — read persisted mode setting
 --   M.setSavedMode(mode)      — persist mode setting
 --   M.openVirtualCoverPicker(vpath, fc) — open cover-picker for a dim_list leaf
+--   M.getAuthorBookCount(fc, author)    — count books by author in current base_dir (cached)
+--   M.navigateToAuthorLeaf(fm, author)  — navigate FM directly to author virtual leaf
 
 local lfs     = require("libs/libkoreader-lfs")
 local util    = require("util")
 local ffiUtil = require("ffi/util")
 local logger  = require("logger")
 local _ = require("sui_i18n").translate
+local SUISettings = require("sui_store")
 
 -- ---------------------------------------------------------------------------
 -- Virtual path constants
@@ -85,6 +88,7 @@ local _FC_COVERS_KEY = "simpleui_fc_covers"
 local _meta_values_cache    = {}
 local _matching_files_cache = {}
 local _repr_file_cache      = {}
+local _author_count_cache   = {}  -- { [base_dir] = { [author_name] = count } }
 local _cache_base_dir       = nil
 
 -- Lazy module references — cached on first use, cleared on uninstall.
@@ -105,6 +109,7 @@ local function _clearCaches()
     for k in pairs(_meta_values_cache)    do _meta_values_cache[k]    = nil end
     for k in pairs(_matching_files_cache) do _matching_files_cache[k] = nil end
     for k in pairs(_repr_file_cache)      do _repr_file_cache[k]      = nil end
+    for k in pairs(_author_count_cache)   do _author_count_cache[k]   = nil end
 end
 
 local function _ensureCacheBaseDir(base_dir)
@@ -385,7 +390,7 @@ end
 local function _getRepresentativeFile(base_dir, dim_key, filter_value)
     local leaf_path = _leafPath(base_dir, dim_key, filter_value)
 
-    local overrides   = G_reader_settings:readSetting(_FC_COVERS_KEY) or {}
+    local overrides   = SUISettings:readSetting(_FC_COVERS_KEY) or {}
     local override_fp = overrides[leaf_path]
     if override_fp and lfs.attributes(override_fp, "mode") == "file" then
         _repr_file_cache[leaf_path] = override_fp
@@ -456,7 +461,7 @@ local function _getVirtualList(fc, path, collate)
             values = _getMetadataValues(base_dir, dim_key)
             _meta_values_cache[path] = values
         end
-        local overrides = G_reader_settings:readSetting(_FC_COVERS_KEY) or {}
+        local overrides = SUISettings:readSetting(_FC_COVERS_KEY) or {}
         for i, v in ipairs(values) do
             local val   = v[1]
             local label = (val == false or val == nil) and NULL_MARKER or val
@@ -596,11 +601,11 @@ end
 local _BM_KEY = "simpleui_browsemeta_enabled"
 
 function M.isEnabled()
-    return G_reader_settings:nilOrTrue(_BM_KEY)
+    return SUISettings:nilOrTrue(_BM_KEY)
 end
 
 function M.setEnabled(v)
-    G_reader_settings:saveSetting(_BM_KEY, v)
+    SUISettings:saveSetting(_BM_KEY, v)
 end
 
 -- ---------------------------------------------------------------------------
@@ -625,11 +630,11 @@ end
 local _MODE_KEY = "simpleui_browsemeta_mode"
 
 function M.getSavedMode()
-    return G_reader_settings:readSetting(_MODE_KEY) or "normal"
+    return SUISettings:readSetting(_MODE_KEY) or "normal"
 end
 
 function M.setSavedMode(mode)
-    G_reader_settings:saveSetting(_MODE_KEY, mode)
+    SUISettings:saveSetting(_MODE_KEY, mode)
 end
 
 -- ---------------------------------------------------------------------------
@@ -674,9 +679,8 @@ function M.navigateTo(fm, mode)
         pcall(function() fm:updateTitleBarPath(target) end)
     end
     -- Force the titlebar to re-evaluate the back-button state for page 1.
-    -- genItemTable has already set _simpleui_has_go_up, but the titlebar
-    -- onGotoPage handler must run once more to pick it up when
-    -- lock_home_folder is active (same pattern as series grouping).
+    -- onGotoPage triggers _resolveIsSub which re-checks the path-based state,
+    -- ensuring the back button is correct when lock_home_folder is active.
     if fc.onGotoPage then
         pcall(function() fc:onGotoPage(1) end)
     end
@@ -727,6 +731,74 @@ function M.isAtVirtualRoot(fc, mode)
 end
 
 -- ---------------------------------------------------------------------------
+-- Author-dialog helpers
+-- ---------------------------------------------------------------------------
+
+-- Returns the number of books by *author_name* under the current FM base_dir.
+-- Result is cached for the lifetime of the session / until M.reset().
+-- Returns 0 when BM is unavailable or author is empty.
+function M.getAuthorBookCount(fc, author_name)
+    if not fc or not author_name or author_name == "" then return 0 end
+    local base = _baseDir(fc.path)
+    if not base then return 0 end
+
+    -- Check session cache first to avoid repeated SQL on every dialog open.
+    _author_count_cache[base] = _author_count_cache[base] or {}
+    local cached = _author_count_cache[base][author_name]
+    if cached ~= nil then return cached end
+
+    local files = _getMatchingFiles(base, { { "authors", author_name } })
+    local count = #files
+    _author_count_cache[base][author_name] = count
+    return count
+end
+
+-- Navigates the FM directly to the virtual leaf for *author_name*, bypassing
+-- the top-level Authors list.  The up-button / back-button will land on the
+-- Authors root (not the real filesystem), matching the expected UX.
+--
+-- origin_file (optional): the book file that triggered this navigation.
+--   When provided, pressing back from the virtual leaf returns directly to the
+--   real folder where the book lives, with the list scrolled to that book.
+--   Without it, back lands on the Authors root (normal BrowseMeta behaviour).
+--
+-- Preconditions: BM must be installed (M.install() called).
+function M.navigateToAuthorLeaf(fm, author_name, origin_file)
+    if not fm or not author_name or author_name == "" then return end
+    local fc = fm.file_chooser
+    if not fc then return end
+
+    local base   = _baseDir(fc.path)
+    local target = _leafPath(base, "author", author_name)
+
+    -- Save the origin so onFolderUp can return to exactly the right place.
+    -- Stored on fc (not a module upvalue) so it survives across module reloads.
+    if origin_file then
+        -- real_path is the actual folder the file lives in.
+        local real_path = fc.path
+        if _isVirtual(real_path) then real_path = base end
+        fc._sui_author_dialog_origin = { path = real_path, file = origin_file }
+    else
+        fc._sui_author_dialog_origin = nil
+    end
+
+    -- Set the entry path to the Authors root so the up-button hierarchy is
+    -- correct when the user did NOT come from the dialog (normal BM flow).
+    fc._browse_by_meta_entry_path = _dimPath(base, "author")
+    fm._navbar_suppress_path_change = true
+    fc:changeToPath(target)
+    fm._navbar_suppress_path_change = nil
+    if fm.updateTitleBarPath then
+        pcall(function() fm:updateTitleBarPath(target) end)
+    end
+    if fc.onGotoPage then
+        pcall(function() fc:onGotoPage(1) end)
+    end
+    -- Persist "author" mode so the next session restores the virtual tree.
+    M.setSavedMode("author")
+end
+
+-- ---------------------------------------------------------------------------
 -- FileChooser patches
 -- ---------------------------------------------------------------------------
 
@@ -749,19 +821,19 @@ local _orig_realpath             = nil
 local _orig_showFileDialog       = nil
 
 local function _getCoverOverrides()
-    return G_reader_settings:readSetting(_FC_COVERS_KEY) or {}
+    return SUISettings:readSetting(_FC_COVERS_KEY) or {}
 end
 
 local function _saveCoverOverride(vpath, book_path)
     local t = _getCoverOverrides()
     t[vpath] = book_path
-    G_reader_settings:saveSetting(_FC_COVERS_KEY, t)
+    SUISettings:saveSetting(_FC_COVERS_KEY, t)
 end
 
 local function _clearCoverOverride(vpath)
     local t = _getCoverOverrides()
     t[vpath] = nil
-    G_reader_settings:saveSetting(_FC_COVERS_KEY, t)
+    SUISettings:saveSetting(_FC_COVERS_KEY, t)
 end
 
 local function _invalidateVirtualItem(menu, vpath)
@@ -800,6 +872,9 @@ local function _createCollectionFromVirtualFolder(vpath, fc)  -- luacheck: ignor
 
     local base_dir, dim_key, filter_value = _parseVirtualPath(vpath)
     if not base_dir or not dim_key or filter_value == nil then return end
+    -- "No value" virtual folders (filter_value == false) have no meaningful
+    -- name and produce a collection without a clear identity.
+    if filter_value == false then return end
 
     local suggested = (filter_value ~= false) and filter_value or ""
 
@@ -923,7 +998,7 @@ local function _openVirtualCoverPicker(vpath, fc)
         callback = function() UIManager:close(picker) end,
     }}
 
-    picker = ButtonDialog:new{ title = _("Virtual folder cover"), buttons = buttons }
+    picker = ButtonDialog:new{ title = _("Folder cover"), title_align = "center", buttons = buttons }
     UIManager:show(picker)
 end
 
@@ -977,10 +1052,6 @@ local function _installPatches()
                     is_go_up = true,
                 })
             end
-            -- Notify the SimpleUI titlebar system whether a go-up exists,
-            -- so the back button is shown even when lock_home_folder is active
-            -- (mirrors the same pattern used by the series-grouping feature).
-            fc._simpleui_has_go_up = not hide_up and path ~= "/"
 
             if _is_windows then
                 for _, v in ipairs(item_table) do
@@ -1071,6 +1142,9 @@ local function _installPatches()
                 -- (_patched_menuhold) fires first and showFileDialog is never
                 -- reached for leaf items; this branch handles the mosaic path.
                 if item.is_virtual_meta_leaf then
+                    -- NULL_MARKER leaf (∅ / no metadata): long-press disabled.
+                    local _bd, _dk, fv = _parseVirtualPath(item.path)
+                    if fv == false then return true end
                     _createCollectionFromVirtualFolder(item.path, fc)
                 end
                 -- Non-leaf virtual items (dim-root folders such as "Authors")
@@ -1093,28 +1167,48 @@ local function _installPatches()
             if item and item.path and item.is_virtual_meta_leaf then
                 local UIManager    = require("ui/uimanager")
                 local ButtonDialog = require("ui/widget/buttondialog")
+                local BD           = require("ui/bidi")
                 local dialog
+                local folder_name  = (item.text or item.path:match("([^/]+)$") or ""):gsub("/$", "")
+                local _bd, _dk, fv = _parseVirtualPath(item.path)
+                -- NULL_MARKER leaf (∅ / no metadata): long-press disabled.
+                if fv == false then return true end
                 dialog = ButtonDialog:new{
-                    buttons = {
-                        {{
-                            text     = _("Folder cover"),
-                            callback = function()
-                                UIManager:close(dialog)
-                                _openVirtualCoverPicker(item.path, fc)
-                            end,
-                        }},
-                        {{
-                            text     = _("Create collection"),
-                            callback = function()
-                                UIManager:close(dialog)
-                                _createCollectionFromVirtualFolder(item.path, fc)
-                            end,
-                        }},
-                        {{
+                    title       = folder_name,
+                    title_align = "center",
+                    buttons = (function()
+                        local btns = {}
+                        -- Hide the cover picker in quad mosaic mode (the quad
+                        -- grid always auto-selects covers; single-cover override
+                        -- is not applicable in that mode).
+                        local in_list_view = fc and fc.display_mode_type == "list"
+                        local ok_fc_mod, FC = pcall(require, "sui_foldercovers")
+                        local effective_style = (ok_fc_mod and FC and FC.resolveStyle)
+                            and FC.resolveStyle(fc, item.path, item) or "single"
+                        if effective_style ~= "quad" or in_list_view then
+                            btns[#btns + 1] = {{
+                                text     = _("Set folder cover"),
+                                callback = function()
+                                    UIManager:close(dialog)
+                                    _openVirtualCoverPicker(item.path, fc)
+                                end,
+                            }}
+                        end
+                        if fv ~= false then
+                            btns[#btns + 1] = {{
+                                text     = _("Create collection"),
+                                callback = function()
+                                    UIManager:close(dialog)
+                                    _createCollectionFromVirtualFolder(item.path, fc)
+                                end,
+                            }}
+                        end
+                        btns[#btns + 1] = {{
                             text     = _("Cancel"),
                             callback = function() UIManager:close(dialog) end,
-                        }},
-                    },
+                        }}
+                        return btns
+                    end)(),
                 }
                 UIManager:show(dialog)
                 return true

@@ -10,6 +10,7 @@ local lfs       = require("libs/libkoreader-lfs")
 local logger    = require("logger")
 local _ = require("sui_i18n").translate
 local N_ = require("sui_i18n").ngettext
+local T = require("ffi/util").template
 
 -- Heavy UI widgets — lazy-loaded on first use so that require("menu") at boot
 -- does not pull them into memory before the user ever opens the settings menu.
@@ -25,6 +26,7 @@ local function SortWidget()       return require("ui/widget/sortwidget")        
 local Config    = require("sui_config")
 local UI        = require("sui_core")
 local Bottombar = require("sui_bottombar")
+local SUISettings = require("sui_store")
 
 -- ---------------------------------------------------------------------------
 -- Installer function
@@ -386,9 +388,9 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         --   Navpager    : navpager=true             (pagination_visible ignored)
         --   Oculto      : pagination_visible=false, navpager=false
         local function getGeral()
-            if G_reader_settings:isTrue("navbar_navpager_enabled") then
+            if SUISettings:isTrue("simpleui_bar_navpager_enabled") then
                 return "navpager"
-            elseif G_reader_settings:nilOrTrue("navbar_pagination_visible") then
+            elseif SUISettings:nilOrTrue("simpleui_bar_pagination_visible") then
                 return "predefinido"
             else
                 return "oculto"
@@ -397,11 +399,11 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
 
         local function setGeral(mode)
             if mode == "navpager" then
-                G_reader_settings:saveSetting("navbar_navpager_enabled", true)
-                G_reader_settings:saveSetting("navbar_pagination_visible", false)
+                SUISettings:saveSetting("simpleui_bar_navpager_enabled", true)
+                SUISettings:saveSetting("simpleui_bar_pagination_visible", false)
                 -- Navpager requires dot pager on homescreen (koreader style not allowed).
-                if not G_reader_settings:nilOrTrue("navbar_dotpager_always") then
-                    G_reader_settings:saveSetting("navbar_dotpager_always", true)
+                if not SUISettings:nilOrTrue("simpleui_bar_dotpager_always") then
+                    SUISettings:saveSetting("simpleui_bar_dotpager_always", true)
                 end
                 -- Trim tabs to navpager limit if needed.
                 local tabs = Config.loadTabConfig()
@@ -412,11 +414,11 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     Config.saveTabConfig(tabs)
                 end
             elseif mode == "predefinido" then
-                G_reader_settings:saveSetting("navbar_navpager_enabled", false)
-                G_reader_settings:saveSetting("navbar_pagination_visible", true)
+                SUISettings:saveSetting("simpleui_bar_navpager_enabled", false)
+                SUISettings:saveSetting("simpleui_bar_pagination_visible", true)
             else -- "oculto"
-                G_reader_settings:saveSetting("navbar_navpager_enabled", false)
-                G_reader_settings:saveSetting("navbar_pagination_visible", false)
+                SUISettings:saveSetting("simpleui_bar_navpager_enabled", false)
+                SUISettings:saveSetting("simpleui_bar_pagination_visible", false)
             end
         end
 
@@ -425,7 +427,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 text        = text,
                 ok_text     = _("Restart"), cancel_text = _("Later"),
                 ok_callback = function()
-                    G_reader_settings:flush()
+                    SUISettings:flush()
                     UIManager:restartKOReader()
                 end,
             })
@@ -433,7 +435,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
 
         -- ── menu ─────────────────────────────────────────────────────────────
         return {
-            -- ── Subpasta: Geral ───────────────────────────────────────────────
+                -- ── Subfolder: General ────────────────────────────────────────────
             {
                 text           = _("General"),
                 sub_item_table = {
@@ -470,7 +472,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     },
                 },
             },
-            -- ── Subpasta: Home Screen ─────────────────────────────────────────
+                -- ── Subfolder: Home Screen ────────────────────────────────────────
             {
                 text           = _("Home Screen"),
                 sub_item_table = {
@@ -479,15 +481,15 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         radio        = true,
                         checked_func = function()
                             -- Dot Pager is always forced when Navpager is active.
-                            return not G_reader_settings:isTrue("navbar_homescreen_pagination_hidden")
-                                and (G_reader_settings:nilOrTrue("navbar_dotpager_always")
+                            return not SUISettings:isTrue("simpleui_hs_pagination_hidden")
+                                and (SUISettings:nilOrTrue("simpleui_bar_dotpager_always")
                                     or getGeral() == "navpager")
                         end,
                         help_text    = _("Shows a row of dots at the bottom of the homescreen.\nThe active page dot is filled; the others are dimmed.\nAlways active when Navpager is selected."),
                         callback     = function()
-                            G_reader_settings:saveSetting("navbar_homescreen_pagination_hidden", false)
-                            if not G_reader_settings:nilOrTrue("navbar_dotpager_always") then
-                                G_reader_settings:saveSetting("navbar_dotpager_always", true)
+                            SUISettings:saveSetting("simpleui_hs_pagination_hidden", false)
+                            if not SUISettings:nilOrTrue("simpleui_bar_dotpager_always") then
+                                SUISettings:saveSetting("simpleui_bar_dotpager_always", true)
                             end
                             plugin:_scheduleRebuild()
                             local ok_hs, HS = pcall(require, "sui_homescreen")
@@ -501,15 +503,15 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         -- Not selectable when Navpager is active.
                         enabled_func = function() return getGeral() ~= "navpager" end,
                         checked_func = function()
-                            return not G_reader_settings:isTrue("navbar_homescreen_pagination_hidden")
-                                and not G_reader_settings:nilOrTrue("navbar_dotpager_always")
+                            return not SUISettings:isTrue("simpleui_hs_pagination_hidden")
+                                and not SUISettings:nilOrTrue("simpleui_bar_dotpager_always")
                                 and getGeral() ~= "navpager"
                         end,
                         help_text    = _("Uses the standard KOReader pagination bar on the homescreen.\nNot available when Navpager is active."),
                         callback     = function()
-                            G_reader_settings:saveSetting("navbar_homescreen_pagination_hidden", false)
-                            if G_reader_settings:nilOrTrue("navbar_dotpager_always") then
-                                G_reader_settings:saveSetting("navbar_dotpager_always", false)
+                            SUISettings:saveSetting("simpleui_hs_pagination_hidden", false)
+                            if SUISettings:nilOrTrue("simpleui_bar_dotpager_always") then
+                                SUISettings:saveSetting("simpleui_bar_dotpager_always", false)
                             end
                             plugin:_scheduleRebuild()
                             local ok_hs, HS = pcall(require, "sui_homescreen")
@@ -523,13 +525,13 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         -- Not selectable when Navpager is active (navpager needs dot pager).
                         enabled_func = function() return getGeral() ~= "navpager" end,
                         checked_func = function()
-                            return G_reader_settings:isTrue("navbar_homescreen_pagination_hidden")
+                            return SUISettings:isTrue("simpleui_hs_pagination_hidden")
                                 and getGeral() ~= "navpager"
                         end,
                         help_text    = _("Hides the pagination bar on the homescreen.\nNot available when Navpager is active."),
                         callback     = function()
-                            if G_reader_settings:isTrue("navbar_homescreen_pagination_hidden") then return end
-                            G_reader_settings:saveSetting("navbar_homescreen_pagination_hidden", true)
+                            if SUISettings:isTrue("simpleui_hs_pagination_hidden") then return end
+                            SUISettings:saveSetting("simpleui_hs_pagination_hidden", true)
                             local ok_hs, HS = pcall(require, "sui_homescreen")
                             if ok_hs and HS then HS.refresh(true) end
                         end,
@@ -537,7 +539,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     },
                 },
             },
-            -- ── Subpasta: Tamanho (só quando geral não é oculto) ──────────────
+                -- ── Subfolder: Size (only when general is not hidden) ─────────────
             {
                 text           = _("Size"),
                 enabled_func   = function() return getGeral() ~= "oculto" end,
@@ -547,10 +549,10 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         radio          = true,
                         enabled_func   = function() return getGeral() ~= "oculto" end,
                         checked_func   = function()
-                            return (G_reader_settings:readSetting("navbar_pagination_size") or "s") == "xs"
+                            return (SUISettings:readSetting("simpleui_bar_pagination_size") or "s") == "xs"
                         end,
                         callback       = function()
-                            G_reader_settings:saveSetting("navbar_pagination_size", "xs")
+                            SUISettings:saveSetting("simpleui_bar_pagination_size", "xs")
                             restartPrompt(_("Pagination bar size will change after restart.\n\nRestart now?"))
                         end,
                     },
@@ -559,10 +561,10 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         radio          = true,
                         enabled_func   = function() return getGeral() ~= "oculto" end,
                         checked_func   = function()
-                            return (G_reader_settings:readSetting("navbar_pagination_size") or "s") == "s"
+                            return (SUISettings:readSetting("simpleui_bar_pagination_size") or "s") == "s"
                         end,
                         callback       = function()
-                            G_reader_settings:saveSetting("navbar_pagination_size", "s")
+                            SUISettings:saveSetting("simpleui_bar_pagination_size", "s")
                             restartPrompt(_("Pagination bar size will change after restart.\n\nRestart now?"))
                         end,
                     },
@@ -571,25 +573,25 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         radio          = true,
                         enabled_func   = function() return getGeral() ~= "oculto" end,
                         checked_func   = function()
-                            return (G_reader_settings:readSetting("navbar_pagination_size") or "s") == "m"
+                            return (SUISettings:readSetting("simpleui_bar_pagination_size") or "s") == "m"
                         end,
                         callback       = function()
-                            G_reader_settings:saveSetting("navbar_pagination_size", "m")
+                            SUISettings:saveSetting("simpleui_bar_pagination_size", "m")
                             restartPrompt(_("Pagination bar size will change after restart.\n\nRestart now?"))
                         end,
                     },
                 },
             },
-            -- ── Número de páginas na barra de título ─────────────────────────
+                -- ── Number of pages in the title bar ──────────────────────────────
             {
                 text         = _("Number of Pages in Title Bar Always"),
                 checked_func = function()
-                    return G_reader_settings:isTrue("navbar_pagination_show_subtitle")
+                    return SUISettings:isTrue("simpleui_bar_pagination_show_subtitle")
                 end,
                 help_text    = _("Shows \"Page X of Y\" in the title bar subtitle when browsing the library, history or collections.\nNavpager enables this automatically.\nNot available when Navpager is active."),
                 callback     = function()
-                    local on = G_reader_settings:isTrue("navbar_pagination_show_subtitle")
-                    G_reader_settings:saveSetting("navbar_pagination_show_subtitle", not on)
+                    local on = SUISettings:isTrue("simpleui_bar_pagination_show_subtitle")
+                    SUISettings:saveSetting("simpleui_bar_pagination_show_subtitle", not on)
                     plugin:_scheduleRebuild()
                 end,
                 keep_menu_open = true,
@@ -606,10 +608,10 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         items[#items + 1] = {
             text           = _("Swipe Indicator"),
             keep_menu_open = true,
-            checked_func   = function() return G_reader_settings:nilOrTrue("navbar_topbar_swipe_indicator") end,
+            checked_func   = function() return SUISettings:nilOrTrue("simpleui_topbar_swipe_indicator") end,
             callback = function()
-                G_reader_settings:saveSetting("navbar_topbar_swipe_indicator",
-                    not G_reader_settings:nilOrTrue("navbar_topbar_swipe_indicator"))
+                SUISettings:saveSetting("simpleui_topbar_swipe_indicator",
+                    not SUISettings:nilOrTrue("simpleui_topbar_swipe_indicator"))
                 plugin:_scheduleRebuild()
             end,
         }
@@ -819,18 +821,18 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         return {
             {
                 text_func    = function()
-                    return _("Top Bar") .. " — " .. (G_reader_settings:nilOrTrue("navbar_topbar_enabled") and _("On") or _("Off"))
+                    return _("Top Bar") .. " — " .. (SUISettings:nilOrTrue("simpleui_topbar_enabled") and _("On") or _("Off"))
                 end,
-                checked_func = function() return G_reader_settings:nilOrTrue("navbar_topbar_enabled") end,
+                checked_func = function() return SUISettings:nilOrTrue("simpleui_topbar_enabled") end,
                 keep_menu_open = true,
                 callback     = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
-                    G_reader_settings:saveSetting("navbar_topbar_enabled", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
+                    SUISettings:saveSetting("simpleui_topbar_enabled", not on)
                     UIManager:show(ConfirmBox():new{
                         text = string.format(_("Top Bar will be %s after restart.\n\nRestart now?"), on and _("disabled") or _("enabled")),
                         ok_text = _("Restart"), cancel_text = _("Later"),
                         ok_callback = function()
-                            G_reader_settings:flush()
+                            SUISettings:flush()
                             UIManager:restartKOReader()
                         end,
                     })
@@ -869,12 +871,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 text         = _("Settings on Long Tap"),
                 help_text    = _("When enabled, long-pressing the top bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."),
                 checked_func = function()
-                    return G_reader_settings:nilOrTrue("navbar_topbar_settings_on_hold")
+                    return SUISettings:nilOrTrue("simpleui_topbar_settings_on_hold")
                 end,
                 keep_menu_open = true,
                 callback = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_topbar_settings_on_hold")
-                    G_reader_settings:saveSetting("navbar_topbar_settings_on_hold", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_topbar_settings_on_hold")
+                    SUISettings:saveSetting("simpleui_topbar_settings_on_hold", not on)
                 end,
             },
         }
@@ -888,18 +890,18 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         return {
             {
                 text_func    = function()
-                    return _("Bottom Bar") .. " — " .. (G_reader_settings:nilOrTrue("navbar_enabled") and _("On") or _("Off"))
+                    return _("Bottom Bar") .. " — " .. (SUISettings:nilOrTrue("simpleui_bar_enabled") and _("On") or _("Off"))
                 end,
-                checked_func = function() return G_reader_settings:nilOrTrue("navbar_enabled") end,
+                checked_func = function() return SUISettings:nilOrTrue("simpleui_bar_enabled") end,
                 keep_menu_open = true,
                 callback     = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_enabled")
-                    G_reader_settings:saveSetting("navbar_enabled", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_bar_enabled")
+                    SUISettings:saveSetting("simpleui_bar_enabled", not on)
                     UIManager:show(ConfirmBox():new{
                         text = string.format(_("Bottom Bar will be %s after restart.\n\nRestart now?"), on and _("disabled") or _("enabled")),
                         ok_text = _("Restart"), cancel_text = _("Later"),
                         ok_callback = function()
-                            G_reader_settings:flush()
+                            SUISettings:flush()
                             UIManager:restartKOReader()
                         end,
                     })
@@ -935,7 +937,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                 ok_text    = _("Restart"),
                                 cancel_text = _("Later"),
                                 ok_callback = function()
-                                    G_reader_settings:flush()
+                                    SUISettings:flush()
                                     UIManager:restartKOReader()
                                 end,
                             })
@@ -987,33 +989,33 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
             }),
             Config.makeScaleItem({
                 text_func     = function()
-                    local pct = Config.getLabelScalePct()
-                    return pct == Config.LABEL_SCALE_DEF
+                    local pct = Config.getNavbarLabelScalePct()
+                    return pct == Config.NAVBAR_LABEL_SCALE_DEF
                         and _("Label Size")
                         or  string.format(_("Label Size — %d%%"), pct)
                 end,
                 title         = _("Label Size"),
                 info          = _("Size of the tab label text.\n100% is the default size."),
-                get           = function() return Config.getLabelScalePct() end,
-                set           = function(pct) Config.setLabelScalePct(pct) end,
+                get           = function() return Config.getNavbarLabelScalePct() end,
+                set           = function(pct) Config.setNavbarLabelScalePct(pct) end,
                 refresh       = function()
                     UI.invalidateDimCache()
                     plugin:_rebuildAllNavbars()
                 end,
-                value_min     = Config.LABEL_SCALE_MIN,
-                value_max     = Config.LABEL_SCALE_MAX,
-                value_step    = Config.LABEL_SCALE_STEP,
-                default_value = Config.LABEL_SCALE_DEF,
+                value_min     = Config.NAVBAR_LABEL_SCALE_MIN,
+                value_max     = Config.NAVBAR_LABEL_SCALE_MAX,
+                value_step    = Config.NAVBAR_LABEL_SCALE_STEP,
+                default_value = Config.NAVBAR_LABEL_SCALE_DEF,
             }),
             {
                 text_func    = function()
-                    return _("Top separator") .. " — " .. (G_reader_settings:isTrue("navbar_hide_separator") and _("Hidden") or _("Visible"))
+                    return _("Top separator") .. " — " .. (SUISettings:isTrue("simpleui_bar_hide_separator") and _("Hidden") or _("Visible"))
                 end,
-                checked_func = function() return not G_reader_settings:isTrue("navbar_hide_separator") end,
+                checked_func = function() return not SUISettings:isTrue("simpleui_bar_hide_separator") end,
                 keep_menu_open = true,
                 callback     = function()
-                    local hidden = G_reader_settings:isTrue("navbar_hide_separator")
-                    G_reader_settings:saveSetting("navbar_hide_separator", not hidden)
+                    local hidden = SUISettings:isTrue("simpleui_bar_hide_separator")
+                    SUISettings:saveSetting("simpleui_bar_hide_separator", not hidden)
                     plugin:_rebuildAllNavbars()
                     local ok_hs, HS = pcall(require, "sui_homescreen")
                     if ok_hs and HS then HS.refresh(true) end
@@ -1039,12 +1041,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 text         = _("Settings on Long Tap"),
                 help_text    = _("When enabled, long-pressing the bottom bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."),
                 checked_func = function()
-                    return G_reader_settings:nilOrTrue("navbar_bottombar_settings_on_hold")
+                    return SUISettings:nilOrTrue("simpleui_bar_settings_on_hold")
                 end,
                 keep_menu_open = true,
                 callback = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_bottombar_settings_on_hold")
-                    G_reader_settings:saveSetting("navbar_bottombar_settings_on_hold", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_bar_settings_on_hold")
+                    SUISettings:saveSetting("simpleui_bar_settings_on_hold", not on)
                 end,
             },
         }
@@ -1232,7 +1234,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     local Titlebar = require("sui_titlebar")
                     local on = Titlebar.isEnabled()
                     Titlebar.setEnabled(not on)
-                    G_reader_settings:flush()
+                    SUISettings:flush()
                     UIManager:show(ConfirmBox():new{
                         text = string.format(
                             _("Custom Title Bar will be %s after restart.\n\nRestart now?"),
@@ -1311,8 +1313,8 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
     -- _goalTapCallback: shown when the user taps the Reading Goals widget on
     -- the Homescreen. Lets them set annual/physical goals.
     self._goalTapCallback = function()
-        local goal     = G_reader_settings:readSetting("navbar_reading_goal") or 0
-        local physical = G_reader_settings:readSetting("navbar_reading_goal_physical") or 0
+        local goal     = SUISettings:readSetting("simpleui_reading_goal") or 0
+        local physical = SUISettings:readSetting("simpleui_reading_goal_physical") or 0
         local ButtonDialog = require("ui/widget/buttondialog")
         local dlg
         dlg = ButtonDialog:new{ title = _("Annual Reading Goal"), buttons = {
@@ -1335,16 +1337,16 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
     -- -----------------------------------------------------------------------
     -- Shared parametric helpers
     -- All menu-building functions below accept a `ctx` table:
-    --   ctx.pfx       — settings key prefix, e.g. "navbar_homescreen_"
-    --   ctx.pfx_qa    — QA settings prefix, e.g. "navbar_homescreen_quick_actions_"
+    --   ctx.pfx       — settings key prefix, e.g. "simpleui_hs_"
+    --   ctx.pfx_qa    — QA settings prefix, e.g. "simpleui_hs_qa_"
     --   ctx.refresh   — zero-arg function to refresh the page after a change
     -- -----------------------------------------------------------------------
 
     local MAX_QA_ITEMS = 6  -- max actions per QA slot (used by makeQAMenu)
 
     local HOMESCREEN_CTX = {
-        pfx     = "navbar_homescreen_",
-        pfx_qa  = "navbar_homescreen_quick_actions_",
+        pfx     = "simpleui_hs_",
+        pfx_qa  = "simpleui_hs_qa_",
         refresh = refreshHomescreen,
     }
 
@@ -1376,7 +1378,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         local items_key  = ctx.pfx_qa .. slot_n .. "_items"
         local labels_key = ctx.pfx_qa .. slot_n .. "_labels"
         local slot_label = string.format(_("Quick Actions %d"), slot_n)
-        local function getItems() return G_reader_settings:readSetting(items_key) or {} end
+        local function getItems() return SUISettings:readSetting(items_key) or {} end
         local function isSelected(id)
             for _i, v in ipairs(getItems()) do if v == id then return true end end
             return false
@@ -1392,7 +1394,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 end
                 new_items[#new_items+1] = id
             end
-            G_reader_settings:saveSetting(items_key, new_items); ctx.refresh()
+            SUISettings:saveSetting(items_key, new_items); ctx.refresh()
         end
         local items_sub = {}
         local sorted_pool = {}
@@ -1412,7 +1414,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
               UIManager:show(SortWidget():new{ title = string.format(_("Arrange %s"), slot_label), covers_fullscreen = true, item_table = sort_items,
                   callback = function()
                       local new_order = {}; for _i, item in ipairs(sort_items) do new_order[#new_order+1] = item.orig_item end
-                      G_reader_settings:saveSetting(items_key, new_order); ctx.refresh()
+                      SUISettings:saveSetting(items_key, new_order); ctx.refresh()
                   end })
           end,
         }
@@ -1433,11 +1435,11 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         return {
             {
                 text           = _("Hide Text"),
-                checked_func   = function() return not G_reader_settings:nilOrTrue(labels_key) end,
+                checked_func   = function() return not SUISettings:nilOrTrue(labels_key) end,
                 keep_menu_open = true,
                 separator      = true,
                 callback       = function()
-                    G_reader_settings:saveSetting(labels_key, not G_reader_settings:nilOrTrue(labels_key))
+                    SUISettings:saveSetting(labels_key, not SUISettings:nilOrTrue(labels_key))
                     ctx.refresh()
                 end,
             },
@@ -1477,7 +1479,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         })
 
         local function loadOrder()
-            local saved   = G_reader_settings:readSetting(ctx.pfx .. "module_order")
+            local saved   = SUISettings:readSetting(ctx.pfx .. "module_order")
             local default = Registry.defaultOrder()
             if type(saved) ~= "table" or #saved == 0 then return default end
             local seen = {}; local result = {}
@@ -1501,7 +1503,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     if type(_mod.setEnabled) == "function" then
                         _mod.setEnabled(ctx.pfx, not on)
                     elseif _mod.enabled_key then
-                        G_reader_settings:saveSetting(ctx.pfx .. _mod.enabled_key, not on)
+                        SUISettings:saveSetting(ctx.pfx .. _mod.enabled_key, not on)
                     end
                     ctx.refresh()
                 end,
@@ -1571,12 +1573,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                 local SpinWidget = require("ui/widget/spinwidget")
                                 local HS         = require("sui_homescreen")
                                 local PAGE_BREAK = HS.PAGE_BREAK_ID
-                                local order = G_reader_settings:readSetting(ctx.pfx .. "module_order") or {}
+                                local order = SUISettings:readSetting(ctx.pfx .. "module_order") or {}
                                 local saved_breaks = 0
                                 for _i, key in ipairs(order) do
                                     if key == PAGE_BREAK then saved_breaks = saved_breaks + 1 end
                                 end
-                                local current_pages = G_reader_settings:readSetting(ctx.pfx .. "homescreen_num_pages")
+                                local current_pages = SUISettings:readSetting(ctx.pfx .. "homescreen_num_pages")
                                     or math.max(1, saved_breaks + 1)
                                 UIManager:show(SpinWidget:new{
                                     title_text    = _("Number of Pages"),
@@ -1590,11 +1592,11 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                     default_value = 1,
                                     callback = function(spin)
                                         local new_pages = spin.value
-                                        G_reader_settings:saveSetting(ctx.pfx .. "homescreen_num_pages", new_pages)
+                                        SUISettings:saveSetting(ctx.pfx .. "homescreen_num_pages", new_pages)
 
                                         -- Re-read the current order (captured above may be stale if
                                         -- another operation ran before the SpinWidget closed).
-                                        local cur_order = G_reader_settings:readSetting(ctx.pfx .. "module_order") or {}
+                                        local cur_order = SUISettings:readSetting(ctx.pfx .. "module_order") or {}
 
                                         -- Split cur_order into pages so we know which modules live
                                         -- on pages that are being removed.
@@ -1619,7 +1621,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                                     if type(mod.setEnabled) == "function" then
                                                         mod.setEnabled(ctx.pfx, false)
                                                     elseif mod.enabled_key then
-                                                        G_reader_settings:saveSetting(ctx.pfx .. mod.enabled_key, false)
+                                                        SUISettings:saveSetting(ctx.pfx .. mod.enabled_key, false)
                                                     end
                                                 end
                                             end
@@ -1649,7 +1651,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                         for _i2, k in ipairs(tail) do
                                             new_order[#new_order + 1] = k
                                         end
-                                        G_reader_settings:saveSetting(ctx.pfx .. "module_order", new_order)
+                                        SUISettings:saveSetting(ctx.pfx .. "module_order", new_order)
 
                                         -- Reset to page 1 if the current page no longer exists.
                                         local HS2 = package.loaded["sui_homescreen"]
@@ -1692,7 +1694,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                 for _i, key in ipairs(order) do
                                     if key == PAGE_BREAK then saved_breaks = saved_breaks + 1 end
                                 end
-                                local n_pages = G_reader_settings:readSetting(ctx.pfx .. "homescreen_num_pages")
+                                local n_pages = SUISettings:readSetting(ctx.pfx .. "homescreen_num_pages")
                                     or math.max(1, saved_breaks + 1)
                                 n_pages = math.max(1, math.min(10, n_pages))
 
@@ -1772,7 +1774,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                             new_order[#new_order + 1] = k
                                         end
                                     end
-                                    G_reader_settings:saveSetting(ctx.pfx .. "module_order", new_order)
+                                    SUISettings:saveSetting(ctx.pfx .. "module_order", new_order)
                                     local HS2 = package.loaded["sui_homescreen"]
                                     if HS2 and HS2._instance then HS2._instance._current_page = 1 end
                                     ctx.refresh()
@@ -1904,19 +1906,255 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
     local function makeHomescreenMenu()
         local ctx = HOMESCREEN_CTX
         local modules_items = makeModulesMenu(ctx)
-        return {
-            {
-                text_func    = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_homescreen_enabled")
-                    return _("Home Screen") .. " — " .. (on and _("On") or _("Off"))
-                end,
-                checked_func = function() return G_reader_settings:nilOrTrue("navbar_homescreen_enabled") end,
-                callback     = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_homescreen_enabled")
-                    G_reader_settings:saveSetting("navbar_homescreen_enabled", not on)
-                    plugin:_scheduleRebuild()
-                end,
-            },
+
+        -- Helper to cleanly apply layout-affecting changes (transparency, wallpaper, preset).
+        local function _applyFullLayoutRefresh()
+            plugin:_rewrapAllWidgets()
+            local Patches = package.loaded["sui_patches"]
+            if Patches and Patches.injectWallpaperIntoFullscreenWidget then
+                local stack = require("sui_core").getWindowStack()
+                for _, entry in ipairs(stack) do
+                    if entry.widget and entry.widget._navbar_injected then
+                        pcall(Patches.injectWallpaperIntoFullscreenWidget, entry.widget)
+                    end
+                end
+            end
+            local HS = package.loaded["sui_homescreen"]
+            if HS and HS.rebuildLayout then
+                HS.rebuildLayout()
+            end
+            local FM = package.loaded["apps/filemanager/filemanager"]
+            if FM and FM.instance then
+                FM.instance._navbar_inner = nil
+                pcall(function() FM.instance:setupLayout() end)
+                UIManager:setDirty(FM.instance, "ui")
+            end
+        end
+
+        -- ── Wallpapers sub-menu (delegates to Homescreen style API) ─────
+        local function _HS()
+            local ok, hs = pcall(require, "sui_homescreen")
+            return ok and hs or nil
+        end
+
+        local function makeWallpapersMenu()
+            local function makeWallpaperSubItems()
+                local hs    = _HS()
+                local items = {}
+                -- Master on/off switch — when disabled all other options are greyed out
+                items[#items + 1] = {
+                    text         = _("Enable wallpaper"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled()
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then
+                            local was_on = h.styleGetWallpaperEnabled()
+                            h.styleSetWallpaperEnabled(not was_on)
+                            _applyFullLayoutRefresh()
+                        end
+                    end,
+                    keep_menu_open = true,
+                    separator      = true,
+                }
+                -- Transparent status bar (enabled only when a wallpaper is active)
+                items[#items + 1] = {
+                    text         = _("Transparent status bar"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleStatusbarTransparent()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetStatusbarTransparent(not h.styleStatusbarTransparent()) end
+
+                        _applyFullLayoutRefresh()
+                    end,
+                    keep_menu_open = true,
+                }
+                -- Transparent navigation bar (enabled only when a wallpaper is active)
+                items[#items + 1] = {
+                    text         = _("Transparent navigation bar"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleNavbarTransparent()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetNavbarTransparent(not h.styleNavbarTransparent()) end
+
+                        _applyFullLayoutRefresh()
+                    end,
+                    keep_menu_open = true,
+                }
+                -- Stretch to fill screen
+                items[#items + 1] = {
+                    text         = _("Stretch to fill screen"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperStretch()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetWallpaperStretch(not h.styleGetWallpaperStretch()) end
+                    end,
+                    keep_menu_open = true,
+                }
+                -- Auto-rotate image to match screen orientation
+                items[#items + 1] = {
+                    text         = _("Rotate image"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperAutoRotate()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetWallpaperAutoRotate(not h.styleGetWallpaperAutoRotate()) end
+                    end,
+                    keep_menu_open = true,
+                }
+                -- Invert image in night mode
+                items[#items + 1] = {
+                    text         = _("Invert image colours in night mode"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperInvertNight()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetWallpaperInvertNight(not h.styleGetWallpaperInvertNight()) end
+                    end,
+                    keep_menu_open = true,
+                }
+                -- Opacity / fade-toward-white level
+                items[#items + 1] = {
+                    text_func    = function()
+                        local h   = _HS()
+                        local val = h and h.styleGetWallpaperOpacity() or 0
+                        return T(_("Image opacity: %1%"), 100 - val)
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function(touchmenu_instance)
+                        local SpinWidget = require("ui/widget/spinwidget")
+                        local h          = _HS()
+                        if not h then return end
+                        local spin = SpinWidget:new{
+                            title_text    = _("Image opacity"),
+                            info_text     = _("Lower the opacity to improve readability."),
+                            value         = 100 - (h.styleGetWallpaperOpacity() or 0),
+                            default_value = 100,
+                            value_min     = 1,
+                            value_max     = 100,
+                            value_step    = 1,
+                            value_hold_step = 10,
+                            unit          = "%",
+                            callback      = function(widget)
+                                h.styleSetWallpaperOpacity(100 - widget.value)
+                                if touchmenu_instance then
+                                    touchmenu_instance:updateItems()
+                                end
+                            end,
+                        }
+                        UIManager:show(spin)
+                    end,
+                    keep_menu_open = true,
+                    separator = true,
+                }
+                -- Show wallpaper on all screens (FM, overlays, Collections, History)
+                items[#items + 1] = {
+                    text         = _("Show wallpaper on all screens"),
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperShowInFM()
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled() and h.styleGetWallpaper() ~= nil
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then h.styleSetWallpaperShowInFM(not h.styleGetWallpaperShowInFM()) end
+                        _applyFullLayoutRefresh()
+                    end,
+                    keep_menu_open = true,
+                    separator      = true,
+                }
+                -- Image list (None + scanned files)
+                items[#items + 1] = {
+                    text         = _("None"),
+                    radio        = true,
+                    checked_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaper() == nil
+                    end,
+                    enabled_func = function()
+                        local h = _HS(); return h and h.styleGetWallpaperEnabled()
+                    end,
+                    callback = function()
+                        local h = _HS()
+                        if h then
+                            local was_set = h.styleGetWallpaper() ~= nil
+                            h.styleSetWallpaper(nil)
+                            if was_set then
+                                _applyFullLayoutRefresh()
+                            end
+                        end
+                    end,
+                }
+                if hs then
+                    local list = hs.styleScanWallpapers()
+                    if #list == 0 then
+                        items[#items + 1] = {
+                            text         = T(_("No images found.\nDrop files into:\n%1"),
+                                            hs.styleGetWallpapersDir()),
+                            enabled_func = function() return false end,
+                            callback     = function() end,
+                        }
+                    else
+                        for _, item in ipairs(list) do
+                            local p, l = item.path, item.label
+                            items[#items + 1] = {
+                                text         = l,
+                                radio        = true,
+                                checked_func = function()
+                                    local h = _HS(); return h and h.styleGetWallpaper() == p
+                                end,
+                                enabled_func = function()
+                                    local h = _HS(); return h and h.styleGetWallpaperEnabled()
+                                end,
+                                callback = function()
+                                    local h = _HS()
+                                    if h then h.styleSetWallpaper(p) end
+                                    _applyFullLayoutRefresh()
+                                end,
+                            }
+                        end
+                    end
+                end
+                return items
+            end
+
+            return {
+                text = _("Wallpaper"),
+                sub_item_table_func = makeWallpaperSubItems,
+            }
+        end
+
+        -- ── Behaviour sub-menu (items previously flat in HS menu) ────────
+        local function makeBehaviourMenu()
+            return {
+                text = _("Behaviour"),
+                sub_item_table = {
             {
                 text         = _("Start with Home Screen"),
                 checked_func = function()
@@ -1931,12 +2169,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 text         = _("Return to Book Folder"),
                 help_text    = _("When enabled, opening the file browser after finishing or closing a book navigates to the folder the book is in, matching native KOReader behaviour.\nWhen disabled (default), SimpleUI always returns to the library root.\nThis option works independently of \"Start with Home Screen\"."),
                 checked_func = function()
-                    return G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
+                    return SUISettings:isTrue("simpleui_hs_return_to_book_folder")
                 end,
                 keep_menu_open = true,
                 callback = function()
-                    local on = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
-                    G_reader_settings:saveSetting("navbar_hs_return_to_book_folder", not on)
+                    local on = SUISettings:isTrue("simpleui_hs_return_to_book_folder")
+                    SUISettings:saveSetting("simpleui_hs_return_to_book_folder", not on)
                 end,
             },
             {
@@ -1947,39 +2185,39 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         text         = _("Always"),
                         radio        = true,
                         checked_func = function()
-                            local mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+                            local mode = SUISettings:readSetting("simpleui_hs_closing_notice_mode")
                             if mode then return mode == "always" end
                             -- Migrate from old boolean: nil/true → "always"
-                            return G_reader_settings:nilOrTrue("simpleui_hs_closing_notice")
+                            return SUISettings:nilOrTrue("simpleui_hs_closing_notice")
                         end,
                         keep_menu_open = true,
                         callback = function()
-                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "always")
+                            SUISettings:saveSetting("simpleui_hs_closing_notice_mode", "always")
                         end,
                     },
                     {
                         text         = _("Gesture Only"),
                         radio        = true,
                         checked_func = function()
-                            return G_reader_settings:readSetting("simpleui_hs_closing_notice_mode") == "gesture_only"
+                            return SUISettings:readSetting("simpleui_hs_closing_notice_mode") == "gesture_only"
                         end,
                         keep_menu_open = true,
                         callback = function()
-                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "gesture_only")
+                            SUISettings:saveSetting("simpleui_hs_closing_notice_mode", "gesture_only")
                         end,
                     },
                     {
                         text         = _("Never"),
                         radio        = true,
                         checked_func = function()
-                            local mode = G_reader_settings:readSetting("simpleui_hs_closing_notice_mode")
+                            local mode = SUISettings:readSetting("simpleui_hs_closing_notice_mode")
                             if mode then return mode == "never" end
                             -- Migrate from old boolean: explicit false → "never"
-                            return G_reader_settings:isFalse("simpleui_hs_closing_notice")
+                            return SUISettings:get("simpleui_hs_closing_notice") == false
                         end,
                         keep_menu_open = true,
                         callback = function()
-                            G_reader_settings:saveSetting("simpleui_hs_closing_notice_mode", "never")
+                            SUISettings:saveSetting("simpleui_hs_closing_notice_mode", "never")
                         end,
                     },
                 },
@@ -1988,24 +2226,24 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 text         = _("Settings on Long Tap"),
                 help_text    = _("When enabled, long-pressing a section opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."),
                 checked_func = function()
-                    return G_reader_settings:nilOrTrue("navbar_homescreen_settings_on_hold")
+                    return SUISettings:nilOrTrue("simpleui_hs_settings_on_hold")
                 end,
                 keep_menu_open = true,
                 callback = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_homescreen_settings_on_hold")
-                    G_reader_settings:saveSetting("navbar_homescreen_settings_on_hold", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_hs_settings_on_hold")
+                    SUISettings:saveSetting("simpleui_hs_settings_on_hold", not on)
                 end,
             },
             {
                 text         = _("Warn When Modules Overflow"),
                 help_text    = _("When enabled, a notice is shown if the modules on a page are taller than the visible area.\nDisable this to silence the warning."),
                 checked_func = function()
-                    return G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn")
+                    return SUISettings:nilOrTrue("simpleui_hs_overflow_warn")
                 end,
                 keep_menu_open = true,
                 callback = function()
-                    local on = G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn")
-                    G_reader_settings:saveSetting("navbar_homescreen_overflow_warn", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_hs_overflow_warn")
+                    SUISettings:saveSetting("simpleui_hs_overflow_warn", not on)
                     -- Reset the per-session dedup key so the warning fires
                     -- immediately if overflow is still present and was re-enabled.
                     local ok_hs, HS = pcall(require, "sui_homescreen")
@@ -2015,6 +2253,379 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                 end,
                 separator = true,
             },
+                },  -- end Behaviour.sub_item_table
+            }       -- end Behaviour item
+        end         -- end makeBehaviourMenu
+
+        -- ── Presets sub-menu ────────────────────────────────────────────
+        -- Lazy-require so that sui_presets.lua is only loaded when the user
+        -- actually opens the Homescreen menu (never at boot).
+        local function _Presets()
+            local ok, p = pcall(require, "sui_presets")
+            return ok and p or nil
+        end
+
+        local function makePresetsMenu()
+            local items = {}
+
+            -- ── Apply ──────────────────────────────────────────────────
+            -- One radio-style entry per saved preset.  Appears first so it is
+            -- the primary action when the user opens the sub-menu.
+            local P     = _Presets()
+            local names = P and P.listNames() or {}
+
+            if #names > 0 then
+                for _i, name in ipairs(names) do
+                    local _name = name
+                    items[#items + 1] = {
+                        text_func = function()
+                            -- Show a checkmark next to the preset whose name
+                            -- matches the value stored in "simpleui_hs_active_preset".
+                            local active = SUISettings:get("simpleui_hs_active_preset")
+                            if active == _name then
+                                return "✓  " .. _name
+                            end
+                            return "    " .. _name
+                        end,
+                        callback = function()
+                            local p = _Presets()
+                            if not p then return end
+                            if p.apply(_name) then
+                                SUISettings:set("simpleui_hs_active_preset", _name)
+                                UIManager:nextTick(function()
+                                    _applyFullLayoutRefresh()
+                                end)
+                            else
+                                UIManager:show(InfoMessage():new{
+                                    text    = string.format(_("Preset \"%s\" not found."), _name),
+                                    timeout = 2,
+                                })
+                            end
+                        end,
+                    }
+                end
+                -- Visual separator between apply list and management actions.
+                items[#items].separator = true
+            end
+
+            -- ── Save current as new preset ─────────────────────────────
+            items[#items + 1] = {
+                text     = _("Save as new preset…"),
+                callback = function()
+                    local p = _Presets()
+                    if not p then return end
+                    local dialog
+                    dialog = InputDialog():new{
+                        title    = _("Save preset"),
+                        input    = "",
+                        input_hint = _("Preset name"),
+                        buttons  = {{
+                            {
+                                text     = _("Cancel"),
+                                id       = "close",
+                                callback = function()
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                            {
+                                text             = _("Save"),
+                                is_enter_default = true,
+                                callback         = function()
+                                    local name = dialog:getInputText()
+                                    name = name and name:match("^%s*(.-)%s*$") or ""
+                                    if name == "" then
+                                        UIManager:show(InfoMessage():new{
+                                            text    = _("Please enter a name for the preset."),
+                                            timeout = 2,
+                                        })
+                                        return
+                                    end
+                                    local overwrite = p.exists(name)
+                                    local function _doSave()
+                                        p.save(name)
+                                        SUISettings:set("simpleui_hs_active_preset", name)
+                                        UIManager:close(dialog)
+                                        UIManager:show(InfoMessage():new{
+                                            text    = string.format(_("Preset \"%s\" saved."), name),
+                                            timeout = 2,
+                                        })
+                                    end
+                                    if overwrite then
+                                        UIManager:show(ConfirmBox():new{
+                                            text        = string.format(
+                                                _("A preset named \"%s\" already exists.\nOverwrite it?"),
+                                                name
+                                            ),
+                                            ok_text     = _("Overwrite"),
+                                            cancel_text = _("Cancel"),
+                                            ok_callback = _doSave,
+                                        })
+                                    else
+                                        _doSave()
+                                    end
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                end,
+            }
+
+            -- ── Overwrite existing preset with current state ───────────
+            if #names > 0 then
+                items[#items + 1] = {
+                    text = _("Update existing preset…"),
+                    sub_item_table_func = function()
+                        local p2   = _Presets()
+                        local sub  = {}
+                        for _i, name in ipairs(p2 and p2.listNames() or {}) do
+                            local _name = name
+                            sub[#sub + 1] = {
+                                text     = _name,
+                                callback = function()
+                                    local p3 = _Presets()
+                                    if not p3 then return end
+                                    UIManager:show(ConfirmBox():new{
+                                        text        = string.format(
+                                            _("Overwrite preset \"%s\" with the current homescreen settings?"),
+                                            _name
+                                        ),
+                                        ok_text     = _("Overwrite"),
+                                        cancel_text = _("Cancel"),
+                                        ok_callback = function()
+                                            p3.save(_name)
+                                            SUISettings:set("simpleui_hs_active_preset", _name)
+                                            UIManager:show(InfoMessage():new{
+                                                text    = string.format(_("Preset \"%s\" updated."), _name),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    })
+                                end,
+                            }
+                        end
+                        return sub
+                    end,
+                }
+            end
+
+            -- ── Rename ────────────────────────────────────────────────
+            if #names > 0 then
+                items[#items + 1] = {
+                    text = _("Rename preset…"),
+                    sub_item_table_func = function()
+                        local p2  = _Presets()
+                        local sub = {}
+                        for _i, name in ipairs(p2 and p2.listNames() or {}) do
+                            local _name = name
+                            sub[#sub + 1] = {
+                                text     = _name,
+                                callback = function()
+                                    local dialog2
+                                    dialog2 = InputDialog():new{
+                                        title    = string.format(_("Rename \"%s\""), _name),
+                                        input    = _name,
+                                        buttons  = {{
+                                            {
+                                                text     = _("Cancel"),
+                                                id       = "close",
+                                                callback = function()
+                                                    UIManager:close(dialog2)
+                                                end,
+                                            },
+                                            {
+                                                text             = _("Rename"),
+                                                is_enter_default = true,
+                                                callback         = function()
+                                                    local new_name = dialog2:getInputText()
+                                                    new_name = new_name and new_name:match("^%s*(.-)%s*$") or ""
+                                                    if new_name == "" or new_name == _name then
+                                                        UIManager:close(dialog2)
+                                                        return
+                                                    end
+                                                    local p3 = _Presets()
+                                                    if not p3 then return end
+                                                    if p3.exists(new_name) then
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = string.format(
+                                                                _("A preset named \"%s\" already exists."),
+                                                                new_name
+                                                            ),
+                                                            timeout = 2,
+                                                        })
+                                                        return
+                                                    end
+                                                    p3.rename(_name, new_name)
+                                                    local active = SUISettings:get("simpleui_hs_active_preset")
+                                                    if active == _name then
+                                                        SUISettings:set("simpleui_hs_active_preset", new_name)
+                                                    end
+                                                    UIManager:close(dialog2)
+                                                end,
+                                            },
+                                        }},
+                                    }
+                                    UIManager:show(dialog2)
+                                end,
+                            }
+                        end
+                        return sub
+                    end,
+                }
+            end
+
+            -- ── Delete ────────────────────────────────────────────────
+            if #names > 0 then
+                items[#items + 1] = {
+                    text = _("Delete preset…"),
+                    sub_item_table_func = function()
+                        local p2  = _Presets()
+                        local sub = {}
+                        for _i, name in ipairs(p2 and p2.listNames() or {}) do
+                            local _name = name
+                            sub[#sub + 1] = {
+                                text     = _name,
+                                callback = function()
+                                    UIManager:show(ConfirmBox():new{
+                                        text        = string.format(
+                                            _("Delete preset \"%s\"?"),
+                                            _name
+                                        ),
+                                        ok_text     = _("Delete"),
+                                        cancel_text = _("Cancel"),
+                                        ok_callback = function()
+                                            local p3 = _Presets()
+                                            if not p3 then return end
+                                            p3.delete(_name)
+                                            local active = SUISettings:get("simpleui_hs_active_preset")
+                                            if active == _name then
+                                                SUISettings:del("simpleui_hs_active_preset")
+                                            end
+                                        end,
+                                    })
+                                end,
+                            }
+                        end
+                        return sub
+                    end,
+                }
+            end
+
+            -- ── Import ────────────────────────────────────────────────
+            items[#items + 1] = {
+                text = _("Import preset…"),
+                sub_item_table_func = function()
+                    local p = _Presets()
+                    local sub = {}
+                    if not p then return sub end
+                    local files = p.listImportFiles()
+
+                    sub[#sub + 1] = {
+                        text     = _("Open import folder"),
+                        callback = function()
+                            local dir = p.getImportDir()
+                            if not dir then return end
+                            local FM = package.loaded["apps/filemanager/filemanager"]
+                            if FM and FM.instance and FM.instance.file_chooser then
+                                FM.instance.file_chooser:changeToPath(dir)
+                            end
+                        end,
+                        separator = #files > 0,
+                    }
+
+                    if #files == 0 then
+                        sub[#sub + 1] = {
+                            text    = T(_("No preset files found.\nPlace .lua files in:\n%1"), p.getImportDir() or ""),
+                            enabled = false,
+                        }
+                    else
+                        for _i, f in ipairs(files) do
+                            local _f = f
+                            sub[#sub + 1] = {
+                                text     = _f.name,
+                                callback = function()
+                                    local imported_name, err = p.import(_f.path)
+                                    if imported_name then
+                                        UIManager:show(InfoMessage():new{
+                                            text = string.format(_("Preset \"%s\" imported."), imported_name),
+                                            timeout = 3,
+                                        })
+                                    else
+                                        UIManager:show(InfoMessage():new{
+                                            text = _("Error importing preset: ") .. tostring(err),
+                                            timeout = 4,
+                                        })
+                                    end
+                                end,
+                            }
+                        end
+                    end
+                    return sub
+                end,
+                separator = true,
+            }
+
+            -- ── Export ────────────────────────────────────────────────
+            if #names > 0 then
+                items[#items + 1] = {
+                    text = _("Export preset…"),
+                    sub_item_table_func = function()
+                        local p2  = _Presets()
+                        local sub = {}
+                        for _i, name in ipairs(p2 and p2.listNames() or {}) do
+                            local _name = name
+                            sub[#sub + 1] = {
+                                text     = _name,
+                                callback = function()
+                                    local p3 = _Presets()
+                                    if not p3 then return end
+                                    local filepath, err = p3.export(_name)
+                                    if filepath then
+                                        UIManager:show(InfoMessage():new{
+                                            text = string.format(_("Preset exported to:\n%s"), filepath),
+                                            timeout = 4,
+                                        })
+                                    else
+                                        UIManager:show(InfoMessage():new{
+                                            text = _("Error exporting preset: ") .. tostring(err),
+                                            timeout = 4,
+                                        })
+                                    end
+                                end,
+                            }
+                        end
+                        return sub
+                    end,
+                }
+            end
+
+            return items
+        end
+
+        -- ── Final menu structure ─────────────────────────────────────────
+        return {
+            -- Homepage Presets ► (topo, separador abaixo para separar das opções de comportamento)
+            {
+                text_func = function()
+                    local P     = _Presets()
+                    local names = P and P.listNames() or {}
+                    local active = SUISettings:get("simpleui_hs_active_preset")
+                    if active and active ~= "" then
+                        return string.format(_("Homepage Presets  [%s]"), active)
+                    end
+                    if #names == 0 then
+                        return _("Homepage Presets")
+                    end
+                    return string.format(_("Homepage Presets  (%d)"), #names)
+                end,
+                sub_item_table_func = makePresetsMenu,
+                separator = true,
+            },
+            -- Behaviour ►
+            makeBehaviourMenu(),
+            -- Wallpapers ►
+            makeWallpapersMenu(),
+            -- Modules (N) ►
             table.unpack(modules_items),
         }
     end
@@ -2052,12 +2663,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
         sub_item_table = {
             {
                 text_func    = function()
-                    return _("Simple UI") .. " — " .. (G_reader_settings:nilOrTrue("simpleui_enabled") and _("On") or _("Off"))
+                    return _("Simple UI") .. " — " .. (SUISettings:nilOrTrue("simpleui_enabled") and _("On") or _("Off"))
                 end,
-                checked_func = function() return G_reader_settings:nilOrTrue("simpleui_enabled") end,
+                checked_func = function() return SUISettings:nilOrTrue("simpleui_enabled") end,
                 callback     = function()
-                    local on = G_reader_settings:nilOrTrue("simpleui_enabled")
-                    G_reader_settings:saveSetting("simpleui_enabled", not on)
+                    local on = SUISettings:nilOrTrue("simpleui_enabled")
+                    SUISettings:saveSetting("simpleui_enabled", not on)
                     -- When disabling SimpleUI, reset "Start with Homescreen" if active,
                     -- because "homescreen_simpleui" is not a value the base KOReader
                     -- understands — leaving it set would cause a blank screen on next boot.
@@ -2067,7 +2678,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     -- Flush immediately so a hard reboot / crash cannot leave the
                     -- setting unsaved, which would cause a white-screen boot loop
                     -- the next time KOReader starts with the plugin installed.
-                    G_reader_settings:flush()
+                    SUISettings:flush()
                     UIManager:show(ConfirmBox():new{
                         text        = string.format(_("Simple UI will be %s after restart.\n\nRestart now?"), on and _("disabled") or _("enabled")),
                         ok_text     = _("Restart"), cancel_text = _("Later"),
@@ -2087,12 +2698,12 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                         text       = _("Settings Tab"),
                         help_text  = _("Show or hide the dedicated Simple UI tab in the menu bar.\nWhen hidden, Simple UI settings remain accessible via the main menu.\nTakes effect after a restart."),
                         checked_func = function()
-                            return G_reader_settings:nilOrTrue("simpleui_settings_tab_enabled")
+                            return SUISettings:nilOrTrue("simpleui_settings_tab_enabled")
                         end,
                         keep_menu_open = true,
                         callback = function()
-                            local on = G_reader_settings:nilOrTrue("simpleui_settings_tab_enabled")
-                            G_reader_settings:saveSetting("simpleui_settings_tab_enabled", not on)
+                            local on = SUISettings:nilOrTrue("simpleui_settings_tab_enabled")
+                            SUISettings:saveSetting("simpleui_settings_tab_enabled", not on)
                             UIManager:show(ConfirmBox():new{
                                 text = string.format(
                                     _("The Simple UI settings tab will be %s after restart.\n\nRestart now?"),
@@ -2100,7 +2711,7 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                 ),
                                 ok_text = _("Restart"), cancel_text = _("Later"),
                                 ok_callback = function()
-                                    G_reader_settings:flush()
+                                    SUISettings:flush()
                                     UIManager:restartKOReader()
                                 end,
                             })
@@ -2127,6 +2738,694 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     return string.format(_("Quick Actions  (%d/%d — %d left)"), n, MAX_CUSTOM_QA, rem)
                 end,
                 sub_item_table_func = makeQuickActionsMenu,
+            },
+            -- ── Style ─────────────────────────────────────────────────────────
+            {
+                text = _("Style"),
+                sub_item_table = {
+                    {
+                        text = _("Icons"),
+                        sub_item_table = {
+                            -- ── Icon Presets ──────────────────────────────────────────
+                            {
+                                text_func = function()
+                                    local ok_ip, P = pcall(require, "sui_presets")
+                                    if not ok_ip or not P then return _("Icon Presets") end
+                                    local names = P.icons.listNames()
+                                    local active = SUISettings:get("simpleui_icon_active_preset")
+                                    if active and active ~= "" then
+                                        return string.format(_("Icon Presets  [%s]"), active)
+                                    end
+                                    if #names == 0 then return _("Icon Presets") end
+                                    return string.format(_("Icon Presets  (%d)"), #names)
+                                end,
+                                sub_item_table_func = function()
+                                    local ok_ip, P   = pcall(require, "sui_presets")
+                                    local ok_qa, QA2 = pcall(require, "sui_quickactions")
+                                    local ok_ss, SS2 = pcall(require, "sui_style")
+                                    local IP  = ok_ip and P and P.icons or nil
+                                    local QA2 = ok_qa and QA2 or nil
+
+                                    -- Helper: reapply all icon changes after a preset is applied.
+                                    local function _reapplyAll()
+                                        -- Titlebar (system icons).
+                                        local ok_tb, TB = pcall(require, "sui_titlebar")
+                                        if ok_tb and TB then
+                                            local FM = package.loaded["apps/filemanager/filemanager"]
+                                            local fm = FM and FM.instance
+                                            if fm then
+                                                pcall(TB.reapplyAll, fm, UIManager._window_stack)
+                                            end
+                                            if TB.refreshBrowseIcons and fm then
+                                                TB.refreshBrowseIcons(fm)
+                                            end
+                                        end
+                                        -- Pagination chevrons and collections back button.
+                                        local ok_ss2, SS2 = pcall(require, "sui_style")
+                                        if ok_ss2 and SS2 then
+                                            local FM2 = package.loaded["apps/filemanager/filemanager"]
+                                            local fm2 = FM2 and FM2.instance
+                                            if fm2 and fm2.file_chooser then
+                                                pcall(SS2.applyPaginationIcons, fm2.file_chooser)
+                                            end
+                                            local ok_ui2, UIManager2 = pcall(require, "ui/uimanager")
+                                            if ok_ui2 then
+                                                for _, entry in ipairs(UIManager2._window_stack or {}) do
+                                                    local w = entry.widget
+                                                    if w and w.page_info_left_chev then
+                                                        pcall(SS2.applyPaginationIcons, w)
+                                                    end
+                                                    if w and (w.name == "collections" or w.name == "coll_list") then
+                                                        pcall(SS2.applyCollBackIcon, w)
+                                                    end
+                                                end
+                                            end
+                                        end
+
+                                        -- Invalidate Quick Actions & Folder Covers caches
+                                        if QA2 and QA2.invalidateCustomQACache then QA2.invalidateCustomQACache() end
+                                        local ok_fc, FC = pcall(require, "sui_foldercovers")
+                                        if ok_fc and FC and FC.invalidateCache then FC.invalidateCache() end
+                                        local FM = package.loaded["apps/filemanager/filemanager"]
+                                        local fm_inst = FM and FM.instance
+                                        if fm_inst and fm_inst.file_chooser then fm_inst.file_chooser:refreshPath() end
+
+                                        -- QA navbars.
+                                        plugin:_rebuildAllNavbars()
+                                        -- Homescreen: rebuild layout after the menu
+                                        -- closes (nextTick) so setDirty is
+                                        -- processed with the HS on top of the stack.
+                                        local HS = package.loaded["sui_homescreen"]
+                                        if HS and HS._instance then
+                                            local hs = HS._instance
+                                            UIManager:nextTick(function()
+                                                if HS._instance == hs then
+                                                    HS._instance:_refreshImmediate(false)
+                                                end
+                                            end)
+                                        end
+                                    end
+
+                                    local items = {}
+                                    local names = IP and IP.listNames() or {}
+
+                                    -- ── Apply: one entry per saved preset ──────────────────
+                                    if #names > 0 then
+                                        for _k, name in ipairs(names) do
+                                            local _name = name
+                                            items[#items + 1] = {
+                                                text_func = function()
+                                                    local active = SUISettings:get("simpleui_icon_active_preset")
+                                                    return (active == _name and "\u{2713}  " or "    ") .. _name
+                                                end,
+                                                callback = function()
+                                                    if not IP then return end
+                                                    if IP.apply(_name, QA2) then
+                                                        SUISettings:set("simpleui_icon_active_preset", _name)
+                                                        _reapplyAll()
+                                                    else
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = string.format(_("Preset \"%s\" not found."), _name),
+                                                            timeout = 2,
+                                                        })
+                                                    end
+                                                end,
+                                            }
+                                        end
+                                        items[#items].separator = true
+                                    end
+
+                                    -- ── Save as new preset ─────────────────────────────────
+                                    items[#items + 1] = {
+                                        text     = _("Save as new preset…"),
+                                        callback = function()
+                                            if not IP then return end
+                                            local dialog
+                                            dialog = InputDialog():new{
+                                                title      = _("Save icon preset"),
+                                                input      = "",
+                                                input_hint = _("Preset name"),
+                                                buttons    = {{
+                                                    {
+                                                        text     = _("Cancel"),
+                                                        id       = "close",
+                                                        callback = function() UIManager:close(dialog) end,
+                                                    },
+                                                    {
+                                                        text             = _("Save"),
+                                                        is_enter_default = true,
+                                                        callback         = function()
+                                                            local name = dialog:getInputText()
+                                                            name = name and name:match("^%s*(.-)%s*$") or ""
+                                                            if name == "" then
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text    = _("Please enter a name for the preset."),
+                                                                    timeout = 2,
+                                                                })
+                                                                return
+                                                            end
+                                                            local function _doSave()
+                                                                IP.save(name)
+                                                                SUISettings:set("simpleui_icon_active_preset", name)
+                                                                UIManager:close(dialog)
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text    = string.format(_("Preset \"%s\" saved."), name),
+                                                                    timeout = 2,
+                                                                })
+                                                            end
+                                                            if IP.exists(name) then
+                                                                UIManager:show(ConfirmBox():new{
+                                                                    text        = string.format(
+                                                                        _("A preset named \"%s\" already exists.\nOverwrite it?"), name),
+                                                                    ok_text     = _("Overwrite"),
+                                                                    cancel_text = _("Cancel"),
+                                                                    ok_callback = _doSave,
+                                                                })
+                                                            else
+                                                                _doSave()
+                                                            end
+                                                        end,
+                                                    },
+                                                }},
+                                            }
+                                            UIManager:show(dialog)
+                                        end,
+                                    }
+
+                                    -- ── Update existing preset ─────────────────────────────
+                                    if #names > 0 then
+                                        items[#items + 1] = {
+                                            text = _("Update existing preset…"),
+                                            sub_item_table_func = function()
+                                                local sub = {}
+                                                for _k, name in ipairs(IP and IP.listNames() or {}) do
+                                                    local _name = name
+                                                    sub[#sub + 1] = {
+                                                        text     = _name,
+                                                        callback = function()
+                                                            UIManager:show(ConfirmBox():new{
+                                                                text        = string.format(
+                                                                    _("Overwrite preset \"%s\" with the current icon settings?"), _name),
+                                                                ok_text     = _("Overwrite"),
+                                                                cancel_text = _("Cancel"),
+                                                                ok_callback = function()
+                                                                    if IP then
+                                                                        IP.save(_name)
+                                                                        SUISettings:set("simpleui_icon_active_preset", _name)
+                                                                        UIManager:show(InfoMessage():new{
+                                                                            text    = string.format(_("Preset \"%s\" updated."), _name),
+                                                                            timeout = 2,
+                                                                        })
+                                                                    end
+                                                                end,
+                                                            })
+                                                        end,
+                                                    }
+                                                end
+                                                return sub
+                                            end,
+                                        }
+                                    end
+
+                                    -- ── Rename ─────────────────────────────────────────────
+                                    if #names > 0 then
+                                        items[#items + 1] = {
+                                            text = _("Rename preset…"),
+                                            sub_item_table_func = function()
+                                                local sub = {}
+                                                for _k, name in ipairs(IP and IP.listNames() or {}) do
+                                                    local _name = name
+                                                    sub[#sub + 1] = {
+                                                        text     = _name,
+                                                        callback = function()
+                                                            local dialog2
+                                                            dialog2 = InputDialog():new{
+                                                                title   = string.format(_("Rename \"%s\""), _name),
+                                                                input   = _name,
+                                                                buttons = {{
+                                                                    {
+                                                                        text     = _("Cancel"),
+                                                                        id       = "close",
+                                                                        callback = function() UIManager:close(dialog2) end,
+                                                                    },
+                                                                    {
+                                                                        text             = _("Rename"),
+                                                                        is_enter_default = true,
+                                                                        callback         = function()
+                                                                            local new_name = dialog2:getInputText()
+                                                                            new_name = new_name and new_name:match("^%s*(.-)%s*$") or ""
+                                                                            if new_name == "" or new_name == _name then
+                                                                                UIManager:close(dialog2)
+                                                                                return
+                                                                            end
+                                                                            if IP and IP.exists(new_name) then
+                                                                                UIManager:show(InfoMessage():new{
+                                                                                    text    = string.format(
+                                                                                        _("A preset named \"%s\" already exists."), new_name),
+                                                                                    timeout = 2,
+                                                                                })
+                                                                                return
+                                                                            end
+                                                                            if IP then
+                                                                                IP.rename(_name, new_name)
+                                                                                local active = SUISettings:get("simpleui_icon_active_preset")
+                                                                                if active == _name then
+                                                                                    SUISettings:set("simpleui_icon_active_preset", new_name)
+                                                                                end
+                                                                            end
+                                                                            UIManager:close(dialog2)
+                                                                        end,
+                                                                    },
+                                                                }},
+                                                            }
+                                                            UIManager:show(dialog2)
+                                                        end,
+                                                    }
+                                                end
+                                                return sub
+                                            end,
+                                        }
+                                    end
+
+                                    -- ── Delete ─────────────────────────────────────────────
+                                    if #names > 0 then
+                                        items[#items + 1] = {
+                                            text = _("Delete preset…"),
+                                            sub_item_table_func = function()
+                                                local sub = {}
+                                                for _k, name in ipairs(IP and IP.listNames() or {}) do
+                                                    local _name = name
+                                                    sub[#sub + 1] = {
+                                                        text     = _name,
+                                                        callback = function()
+                                                            UIManager:show(ConfirmBox():new{
+                                                                text        = string.format(_("Delete preset \"%s\"?"), _name),
+                                                                ok_text     = _("Delete"),
+                                                                cancel_text = _("Cancel"),
+                                                                ok_callback = function()
+                                                                    if IP then
+                                                                        IP.delete(_name)
+                                                                        local active = SUISettings:get("simpleui_icon_active_preset")
+                                                                        if active == _name then
+                                                                            SUISettings:del("simpleui_icon_active_preset")
+                                                                        end
+                                                                    end
+                                                                end,
+                                                            })
+                                                        end,
+                                                    }
+                                                end
+                                                return sub
+                                            end,
+                                        }
+                                    end
+
+                                    -- ── Import ─────────────────────────────────────────────
+                                    items[#items + 1] = {
+                                        text = _("Import preset…"),
+                                        sub_item_table_func = function()
+                                            local sub = {}
+                                            if not IP then return sub end
+                                            local files = IP.listImportFiles()
+
+                                            sub[#sub + 1] = {
+                                                text     = _("Open import folder"),
+                                                callback = function()
+                                                    local dir = IP.getImportDir()
+                                                    if not dir then return end
+                                                    local FM = package.loaded["apps/filemanager/filemanager"]
+                                                    if FM and FM.instance and FM.instance.file_chooser then
+                                                        FM.instance.file_chooser:changeToPath(dir)
+                                                    end
+                                                end,
+                                                separator = #files > 0,
+                                            }
+
+                                            if #files == 0 then
+                                                sub[#sub + 1] = {
+                                                    text    = T(_("No preset files found.\nPlace .lua files in:\n%1"), IP.getImportDir() or ""),
+                                                    enabled = false,
+                                                }
+                                            else
+                                                for _i, f in ipairs(files) do
+                                                    local _f = f
+                                                    sub[#sub + 1] = {
+                                                        text     = _f.name,
+                                                        callback = function()
+                                                            local imported_name, err = IP.import(_f.path)
+                                                            if imported_name then
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text = string.format(_("Preset \"%s\" imported."), imported_name),
+                                                                    timeout = 3,
+                                                                })
+                                                            else
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text = _("Error importing preset: ") .. tostring(err),
+                                                                    timeout = 4,
+                                                                })
+                                                            end
+                                                        end,
+                                                    }
+                                                end
+                                            end
+                                            return sub
+                                        end,
+                                        separator = true,
+                                    }
+
+                                    -- ── Export ─────────────────────────────────────────────
+                                    if #names > 0 then
+                                        items[#items + 1] = {
+                                            text = _("Export preset…"),
+                                            sub_item_table_func = function()
+                                                local sub = {}
+                                                for _k, name in ipairs(IP and IP.listNames() or {}) do
+                                                    local _name = name
+                                                    sub[#sub + 1] = {
+                                                        text     = _name,
+                                                        callback = function()
+                                                            if not IP then return end
+                                                            local filepath, err = IP.export(_name)
+                                                            if filepath then
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text = string.format(_("Preset exported to:\n%s"), filepath),
+                                                                    timeout = 4,
+                                                                })
+                                                            else
+                                                                UIManager:show(InfoMessage():new{
+                                                                    text = _("Error exporting preset: ") .. tostring(err),
+                                                                    timeout = 4,
+                                                                })
+                                                            end
+                                                        end,
+                                                    }
+                                                end
+                                                return sub
+                                            end,
+                                        }
+                                    end
+
+                                    return items
+                                end,
+                                separator = true,
+                            },
+
+                            -- ── Icon Packs ────────────────────────────────────────────
+                            {
+                                text_func = function()
+                                    local ok_ip, IP = pcall(require, "sui_style")
+                                    if not ok_ip or not IP then return _("Icon Packs") end
+                                    local n = #IP.listPacks()
+                                    if n == 0 then return _("Icon Packs") end
+                                    return string.format(_("Icon Packs  (%d)"), n)
+                                end,
+                                sub_item_table_func = function()
+                                    local ok_ip, IP = pcall(require, "sui_style")
+                                    if not ok_ip or not IP then
+                                        return {{ text = _("Module unavailable"), enabled = false }}
+                                    end
+
+                                    -- ── Helper: reapply all icon changes ─────────────────
+                                    local function _reapplyAllPacks()
+                                        -- Titlebar (system icons)
+                                        local ok_tb, TB = pcall(require, "sui_titlebar")
+                                        if ok_tb and TB then
+                                            local FM = package.loaded["apps/filemanager/filemanager"]
+                                            local fm = FM and FM.instance
+                                            if fm then
+                                                pcall(TB.reapplyAll, fm, UIManager._window_stack)
+                                            end
+                                            if TB.refreshBrowseIcons and fm then
+                                                TB.refreshBrowseIcons(fm)
+                                            end
+                                        end
+                                        -- Pagination chevrons and collections back button
+                                        local ok_ss2, SS2 = pcall(require, "sui_style")
+                                        if ok_ss2 and SS2 then
+                                            local FM2 = package.loaded["apps/filemanager/filemanager"]
+                                            local fm2 = FM2 and FM2.instance
+                                            if fm2 and fm2.file_chooser then
+                                                pcall(SS2.applyPaginationIcons, fm2.file_chooser)
+                                            end
+                                            local ok_ui2, UIManager2 = pcall(require, "ui/uimanager")
+                                            if ok_ui2 then
+                                                for _, entry in ipairs(UIManager2._window_stack or {}) do
+                                                    local w = entry.widget
+                                                    if w and w.page_info_left_chev then
+                                                        pcall(SS2.applyPaginationIcons, w)
+                                                    end
+                                                    if w and (w.name == "collections" or w.name == "coll_list") then
+                                                        pcall(SS2.applyCollBackIcon, w)
+                                                    end
+                                                end
+                                            end
+                                        end
+
+                                        -- Invalidate Quick Actions & Folder Covers caches
+                                        local ok_qa, QA_pack = pcall(require, "sui_quickactions")
+                                        if ok_qa and QA_pack and QA_pack.invalidateCustomQACache then QA_pack.invalidateCustomQACache() end
+                                        local ok_fc, FC = pcall(require, "sui_foldercovers")
+                                        if ok_fc and FC and FC.invalidateCache then FC.invalidateCache() end
+                                        local FM = package.loaded["apps/filemanager/filemanager"]
+                                        local fm_inst = FM and FM.instance
+                                        if fm_inst and fm_inst.file_chooser then fm_inst.file_chooser:refreshPath() end
+
+                                        -- QA navbars
+                                        plugin:_rebuildAllNavbars()
+                                        -- Homescreen
+                                        local HS = package.loaded["sui_homescreen"]
+                                        if HS and HS._instance then
+                                            local hs = HS._instance
+                                            UIManager:nextTick(function()
+                                                if HS._instance == hs then
+                                                    HS._instance:_refreshImmediate(false)
+                                                end
+                                            end)
+                                        end
+                                    end
+
+                                    local items = {}
+
+                                        -- ── Install zip ───────────────────────────────────────
+                                    items[#items + 1] = {
+                                text = _("Install pack from ZIP…"),
+                                sub_item_table_func = function()
+                                    local sub = {}
+                                    local dir = IP.getPacksDir()
+                                    local lfs = require("libs/libkoreader-lfs")
+                                    local T   = require("ffi/util").template
+                                    local zips = {}
+                                    if dir and lfs.attributes(dir, "mode") == "directory" then
+                                        for fname in lfs.dir(dir) do
+                                            if fname ~= "." and fname ~= ".." and fname:lower():match("%.zip$") then
+                                                zips[#zips + 1] = { name = fname, path = dir .. "/" .. fname }
+                                            end
+                                        end
+                                        table.sort(zips, function(a, b) return a.name:lower() < b.name:lower() end)
+                                    end
+
+                                    sub[#sub + 1] = {
+                                        text     = _("Open packs folder"),
+                                        callback = function()
+                                            if not dir then return end
+                                            local FM = package.loaded["apps/filemanager/filemanager"]
+                                            if FM and FM.instance and FM.instance.file_chooser then
+                                                FM.instance.file_chooser:changeToPath(dir)
+                                            end
+                                        end,
+                                        separator = #zips > 0,
+                                    }
+
+                                    if #zips == 0 then
+                                        sub[#sub + 1] = {
+                                            text    = T(_("No .zip files found.\nPlace .zip files in:\n%1"), dir or ""),
+                                            enabled = false,
+                                        }
+                                    else
+                                        for _i, z in ipairs(zips) do
+                                            local _z = z
+                                            sub[#sub + 1] = {
+                                                text     = _z.name,
+                                                callback = function()
+                                                    local pack_name, err = IP.installZip(_z.path)
+                                                    if pack_name then
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = string.format(
+                                                                _("Pack \"%s\" installed.\nYou can now apply it from the list."),
+                                                                pack_name),
+                                                            timeout = 4,
+                                                        })
+                                                    else
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = _("Error installing pack:") .. "\n" .. tostring(err),
+                                                            timeout = 5,
+                                                        })
+                                                    end
+                                                end,
+                                            }
+                                        end
+                                    end
+                                    return sub
+                                end,
+                                separator = true,
+                            }
+
+                                        -- ── Pack list ─────────────────────────────────────────
+                                    local packs = IP.listPacks()
+                                    if #packs == 0 then
+                                        items[#items + 1] = {
+                                            text    = _("No packs found.") .. "\n"
+                                                      .. _("Place a folder or .zip in:") .. "\n"
+                                                      .. (IP.getPacksDir() or ""),
+                                            enabled = false,
+                                        }
+                                    else
+                                        for _i, pack in ipairs(packs) do
+                                            local _pack = pack
+                                            items[#items + 1] = {
+                                        text     = _pack.name,
+                                                callback = function()
+                                                    local result, err = IP.applyPack(_pack.path)
+                                                    if result then
+                                                        _reapplyAllPacks()
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = string.format(
+                                                                _("Pack \"%s\" applied.\n%d icons replaced."),
+                                                                _pack.name, result.applied),
+                                                            timeout = 3,
+                                                        })
+                                                    else
+                                                        UIManager:show(InfoMessage():new{
+                                                            text    = _("Error applying pack:") .. "\n" .. tostring(err),
+                                                            timeout = 5,
+                                                        })
+                                                    end
+                                                end,
+                                            }
+                                        end
+                                    end
+
+                                    return items
+                                end,
+                                separator = true,
+                            },
+
+                            {
+                                text_func = function()
+                                    local ok_ss, SUIStyle = pcall(require, "sui_style")
+                                    if not ok_ss or not SUIStyle then return _("System Icons") end
+                                    local has_custom = false
+                                    for _, s in ipairs(SUIStyle.SLOTS) do
+                                        if s.group ~= "sui_qa_defaults" and SUIStyle.getIcon(s.id) ~= nil then
+                                            has_custom = true
+                                            break
+                                        end
+                                    end
+                                    return _("System Icons") .. (has_custom and "  \u{270E}" or "")
+                                end,
+                                sub_item_table_func = function()
+                                    local ok_ss, SUIStyle = pcall(require, "sui_style")
+                                    if not ok_ss or not SUIStyle then return {} end
+                                    return SUIStyle.makeMenuItems(plugin)
+                                end,
+                            },
+                            {
+                                text_func = function()
+                                    local has_custom = false
+                                    local ok_qa, QA2 = pcall(require, "sui_quickactions")
+                                    if ok_qa and QA2 then
+                                        for _, a in ipairs(Config.ALL_ACTIONS) do
+                                            if QA2.getDefaultActionIcon(a.id) ~= nil then
+                                                has_custom = true
+                                                break
+                                            end
+                                        end
+                                    if not has_custom and QA2.getDefaultActionIcon("wifi_toggle_off") ~= nil then
+                                        has_custom = true
+                                    end
+                                    end
+                                    if not has_custom then
+                                        for _i, qa_id in ipairs(Config.getCustomQAList()) do
+                                            local c = Config.getCustomQAConfig(qa_id)
+                                            if c.icon ~= nil
+                                                and c.icon ~= Config.CUSTOM_ICON
+                                                and c.icon ~= Config.CUSTOM_PLUGIN_ICON
+                                                and c.icon ~= Config.CUSTOM_DISPATCHER_ICON
+                                            then
+                                                has_custom = true
+                                                break
+                                            end
+                                        end
+                                    end
+                                    if not has_custom then
+                                        local ok_ss, SUIStyle = pcall(require, "sui_style")
+                                        if ok_ss and SUIStyle then
+                                            for _, s in ipairs(SUIStyle.SLOTS) do
+                                                if s.group == "sui_qa_defaults" and SUIStyle.getIcon(s.id) ~= nil then
+                                                    has_custom = true
+                                                    break
+                                                end
+                                            end
+                                        end
+                                    end
+                                    return _("Quick Actions Icons") .. (has_custom and "  \u{270E}" or "")
+                                end,
+                                sub_item_table_func = function()
+                                    local ok_qa, QA2 = pcall(require, "sui_quickactions")
+                                    if not ok_qa or not QA2 then return {} end
+                                    return QA2.makeIconsMenuItems(plugin)
+                                end,
+                            },
+                        },
+                    },
+                    -- ── UI Font ───────────────────────────────────────────────────
+                    {
+                        text = _("UI Font"),
+                        text_func = function()
+                            local ok_ss, SUIStyle = pcall(require, "sui_style")
+                            if not ok_ss or not SUIStyle then return _("UI Font") end
+                        local enabled = SUISettings:isTrue("simpleui_ui_font_enabled")
+                            local name    = SUISettings:get("simpleui_ui_font_name") or "Noto Sans"
+                            if not enabled then
+                                return _("UI Font  (default)")
+                            end
+                            return string.format(_("UI Font  [%s]"), name)
+                        end,
+                        sub_item_table_func = function()
+                            local ok_ss, SUIStyle = pcall(require, "sui_style")
+                            if not ok_ss or not SUIStyle then return {} end
+                            local ok_fi, items = pcall(SUIStyle.makeFontMenuItems)
+                            if not ok_fi or type(items) ~= "table" then return {} end
+                            return items
+                        end,
+                    },
+                    -- ── Theme Colors [DISABLED — not ready for release] ───────
+                    --[[
+                    -- ── Theme Colors ──────────────────────────────────────────────
+                    {
+                        text_func = function()
+                            -- Show the edit pencil if any theme color role is set.
+                            local has = SUISettings:get("simpleui_style_theme_bg")
+                                     or SUISettings:get("simpleui_style_theme_fg")
+                                     or SUISettings:get("simpleui_style_theme_bottombar_bg")
+                                     or SUISettings:get("simpleui_style_theme_bottombar_fg")
+                                     or SUISettings:get("simpleui_style_theme_statusbar_bg")
+                                     or SUISettings:get("simpleui_style_theme_statusbar_fg")
+                                     or SUISettings:get("simpleui_style_theme_text_secondary")
+                                     or SUISettings:get("simpleui_style_theme_separator")
+                                     or SUISettings:get("simpleui_style_theme_accent")
+                            return _("Theme Colors") .. (has and "  \u{270E}" or "")
+                        end,
+                        sub_item_table_func = function()
+                            local ok_ss, SUIStyle = pcall(require, "sui_style")
+                            if not ok_ss or not SUIStyle then return {} end
+                            local ok_fi, items = pcall(SUIStyle.makeThemeMenuItems)
+                            if not ok_fi or type(items) ~= "table" then return {} end
+                            return items
+                        end,
+                    },
+                    -- END DISABLED: Theme Colors ]]
+                },
             },
             {
                 text = _("Library"),
@@ -2273,52 +3572,203 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                             text         = _("Overlays"),
                             enabled_func = function() return FC.isEnabled() end,
                             sub_item_table = {
+                                -- ── Badges ───────────────────────────────────────────────────────
                                 {
-                                    text         = _("Number of Books in Folder"),
+                                    text         = _("Badges"),
                                     sub_item_table = {
+                                        -- ── Number of Books in Folder ─────────────────────────────
                                         {
-                                            text           = _("Hidden"),
-                                            checked_func   = function() return FC.getBadgeHidden() end,
-                                            keep_menu_open = true,
-                                            separator      = true,
-                                            callback       = function()
-                                                FC.setBadgeHidden(not FC.getBadgeHidden())
-                                                FC.invalidateCache()
-                                                _refreshFC()
-                                            end,
+                                            text         = _("Number of Books in Folder"),
+                                            sub_item_table = {
+                                                {
+                                                    text           = _("Hidden"),
+                                                    checked_func   = function() return FC.getBadgeHidden() end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function()
+                                                        FC.setBadgeHidden(not FC.getBadgeHidden())
+                                                        FC.invalidateCache()
+                                                        _refreshFC()
+                                                    end,
+                                                },
+                                                {
+                                                    text           = _("Top"),
+                                                    radio          = true,
+                                                    checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "top" end,
+                                                    enabled_func   = function() return not FC.getBadgeHidden() end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgePosition("top"); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Bottom"),
+                                                    radio          = true,
+                                                    checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "bottom" end,
+                                                    enabled_func   = function() return not FC.getBadgeHidden() end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function() FC.setBadgePosition("bottom"); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Dark"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorFolder() == "dark" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorFolder("dark"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Light"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorFolder() == "light" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorFolder("light"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                            },
                                         },
+                                        -- ── Number of Pages ───────────────────────────────────────
                                         {
-                                            text           = _("Top"),
-                                            radio          = true,
-                                            checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "top" end,
-                                            enabled_func   = function() return not FC.getBadgeHidden() end,
-                                            keep_menu_open = true,
-                                            callback       = function() FC.setBadgePosition("top"); _refreshFC() end,
+                                            text         = _("Number of Pages"),
+                                            sub_item_table = {
+                                                {
+                                                    text           = _("Hidden"),
+                                                    checked_func   = function() return not FC.getOverlayPages() end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function() FC.setOverlayPages(not FC.getOverlayPages()); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Dark"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorPages() == "dark" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorPages("dark"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Light"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorPages() == "light" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorPages("light"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                            },
                                         },
+                                        -- ── Series Index ──────────────────────────────────────────
                                         {
-                                            text           = _("Bottom"),
-                                            radio          = true,
-                                            checked_func   = function() return not FC.getBadgeHidden() and FC.getBadgePosition() == "bottom" end,
-                                            enabled_func   = function() return not FC.getBadgeHidden() end,
-                                            keep_menu_open = true,
-                                            callback       = function() FC.setBadgePosition("bottom"); _refreshFC() end,
+                                            text         = _("Series Index"),
+                                            sub_item_table = {
+                                                {
+                                                    text           = _("Hidden"),
+                                                    checked_func   = function() return not FC.getOverlaySeries() end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function() FC.setOverlaySeries(not FC.getOverlaySeries()); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Dark"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorSeries() == "dark" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorSeries("dark"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Light"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorSeries() == "light" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorSeries("light"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                            },
+                                        },
+                                        -- ── Progress ────────────────────────────────────────
+                                        {
+                                            text         = _("Progress"),
+                                            sub_item_table = {
+                                                {
+                                                    text           = _("Banner"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getProgressMode() == "banner" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function()
+                                                        FC.setProgressMode("banner")
+                                                        FC.invalidateCache()
+                                                        _refreshFC()
+                                                    end,
+                                                },
+                                                {
+                                                    text           = _("Native"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getProgressMode() == "native" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function()
+                                                        FC.setProgressMode("native")
+                                                        FC.invalidateCache()
+                                                        _refreshFC()
+                                                    end,
+                                                },
+                                                {
+                                                    text           = _("None"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getProgressMode() == "none" end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function()
+                                                        FC.setProgressMode("none")
+                                                        FC.invalidateCache()
+                                                        _refreshFC()
+                                                    end,
+                                                },
+                                                {
+                                                    text           = _("Dark"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorProgress() == "dark" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorProgress("dark"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Light"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorProgress() == "light" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorProgress("light"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                            },
+                                        },
+                                        -- ── New Book ───────────────────────────────────────────
+                                        {
+                                            text         = _("New Book"),
+                                            sub_item_table = {
+                                                {
+                                                    text           = _("Hidden"),
+                                                    checked_func   = function() return not FC.getOverlayNew() end,
+                                                    keep_menu_open = true,
+                                                    separator      = true,
+                                                    callback       = function()
+                                                        FC.setOverlayNew(not FC.getOverlayNew())
+                                                        FC.invalidateCache()
+                                                        _refreshFC()
+                                                    end,
+                                                },
+                                                {
+                                                    text           = _("Dark"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorNew() == "dark" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorNew("dark"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                                {
+                                                    text           = _("Light"),
+                                                    radio          = true,
+                                                    checked_func   = function() return FC.getBadgeColorNew() == "light" end,
+                                                    keep_menu_open = true,
+                                                    callback       = function() FC.setBadgeColorNew("light"); FC.invalidateCache(); _refreshFC() end,
+                                                },
+                                            },
                                         },
                                     },
                                 },
-                                {
-                                    text           = _("Number of Pages"),
-                                    checked_func   = function() return FC.getOverlayPages() end,
-                                    keep_menu_open = true,
-                                    callback       = function() FC.setOverlayPages(not FC.getOverlayPages()); FC.invalidateCache(); _refreshFC() end,
-                                },
-                                {
-                                    text           = _("Series Index"),
-                                    checked_func   = function() return FC.getOverlaySeries() end,
-                                    keep_menu_open = true,
-                                    callback       = function() FC.setOverlaySeries(not FC.getOverlaySeries()); FC.invalidateCache(); _refreshFC() end,
-                                },
+                                -- ── Folder Name ───────────────────────────────────────────────────
                                 {
                                     text         = _("Folder Name"),
+                                    enabled_func = function() return not FC.getShowTitleStrip() end,
                                     sub_item_table = {
                                         {
                                             text           = _("Hidden"),
@@ -2377,6 +3827,74 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                                 refresh      = function() FC.invalidateCache(); _refreshFC() end,
                                             })
                                         end)(),
+                                    },
+                                },
+                                -- ── Title and Author Below Covers ───────────────────────────────────
+                                {
+                                    text         = _("Title and Author Below Covers"),
+                                    sub_item_table = {
+                                        {
+                                            text           = _("Off"),
+                                            radio          = true,
+                                            checked_func   = function()
+                                                return not FC.getShowTitleStrip() and not FC.getShowAuthorStrip()
+                                            end,
+                                            keep_menu_open = true,
+                                            callback       = function()
+                                                if FC.getShowTitleStrip() or FC.getShowAuthorStrip() then
+                                                    FC.setShowTitleStrip(false)
+                                                    FC.setShowAuthorStrip(false)
+                                                    UIManager:show(ConfirmBox():new{
+                                                        text        = _("Title strip disabled.\n\nRestart now?"),
+                                                        ok_text     = _("Restart"), cancel_text = _("Later"),
+                                                        ok_callback = function()
+                                                            SUISettings:flush()
+                                                            UIManager:restartKOReader()
+                                                        end,
+                                                    })
+                                                end
+                                            end,
+                                        },
+                                        {
+                                            text           = _("Title only"),
+                                            radio          = true,
+                                            checked_func   = function()
+                                                return FC.getShowTitleStrip() and not FC.getShowAuthorStrip()
+                                            end,
+                                            keep_menu_open = true,
+                                            callback       = function()
+                                                FC.setShowTitleStrip(true)
+                                                FC.setShowAuthorStrip(false)
+                                                UIManager:show(ConfirmBox():new{
+                                                    text        = _("Title strip enabled.\n\nRestart now?"),
+                                                    ok_text     = _("Restart"), cancel_text = _("Later"),
+                                                    ok_callback = function()
+                                                        SUISettings:flush()
+                                                        UIManager:restartKOReader()
+                                                    end,
+                                                })
+                                            end,
+                                        },
+                                        {
+                                            text           = _("Title and Author"),
+                                            radio          = true,
+                                            checked_func   = function()
+                                                return FC.getShowTitleStrip() and FC.getShowAuthorStrip()
+                                            end,
+                                            keep_menu_open = true,
+                                            callback       = function()
+                                                FC.setShowTitleStrip(true)
+                                                FC.setShowAuthorStrip(true)
+                                                UIManager:show(ConfirmBox():new{
+                                                    text        = _("Title and author strip enabled.\n\nRestart now?"),
+                                                    ok_text     = _("Restart"), cancel_text = _("Later"),
+                                                    ok_callback = function()
+                                                        SUISettings:flush()
+                                                        UIManager:restartKOReader()
+                                                    end,
+                                                })
+                                            end,
+                                        },
                                     },
                                 },
                             },
@@ -2477,6 +3995,33 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                                     return
                                 end
                                 Updater.checkForUpdates()
+                            end,
+                        },
+                        {
+                            text      = _("Factory Reset"),
+                            separator = true,
+                            callback  = function()
+                                local ConfirmBox = require("ui/widget/confirmbox")
+                                UIManager:show(ConfirmBox:new{
+                                    text        = _("This will delete all Simple UI settings and restart KOReader.\nAre you sure?"),
+                                    ok_text     = _("Delete Settings"),
+                                    cancel_text = _("Cancel"),
+                                    ok_callback = function()
+                                        local keys_to_delete = {}
+                                        for k, _ in SUISettings:iterateKeys() do
+                                            keys_to_delete[#keys_to_delete + 1] = k
+                                        end
+                                        for _, k in ipairs(keys_to_delete) do
+                                            SUISettings:del(k)
+                                        end
+                                        SUISettings:flush()
+                                        
+                                        if G_reader_settings:readSetting("start_with") == "homescreen_simpleui" then
+                                            G_reader_settings:saveSetting("start_with", "filemanager")
+                                        end
+                                        UIManager:restartKOReader()
+                                    end,
+                                })
                             end,
                         },
                     }

@@ -28,6 +28,7 @@ local VerticalSpan    = require("ui/widget/verticalspan")
 -- Internal dependencies
 local Config       = require("sui_config")
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local LABEL_H      = UI.LABEL_H
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -81,14 +82,22 @@ local _BASE_INLINEPCT_FS = Screen:scaleBySize(11)  -- pct label inside the bar (
 local BAR_STYLE_KEY = "currently_bar_style"
 
 local function getBarStyle(pfx)
-    return G_reader_settings:readSetting(pfx .. BAR_STYLE_KEY) or "with_pct"
+    return SUISettings:readSetting(pfx .. BAR_STYLE_KEY) or "with_pct"
 end
 
 -- Setting key for stats layout: "default" (one line per stat) or "compact" (single row with · separator + ETA)
 local STATS_STYLE_KEY = "currently_stats_style"
 
 local function getStatsStyle(pfx)
-    return G_reader_settings:readSetting(pfx .. STATS_STYLE_KEY) or "default"
+    return SUISettings:readSetting(pfx .. STATS_STYLE_KEY) or "default"
+end
+
+local COVER_GAP_KEY = "currently_cover_gap"
+
+local function getCoverGapPct(pfx)
+    local v = SUISettings:readSetting(pfx .. COVER_GAP_KEY)
+    local n = tonumber(v)
+    return n and math.max(0, math.min(300, math.floor(n))) or 100
 end
 
 -- Maximum title length in UTF-8 characters before truncation.
@@ -106,7 +115,7 @@ local _bstats_cache = {}
 -- Builds a progress bar with an inline percentage label: [▓▓▓░░░░] XX%
 -- Spacing below the bar is handled by gap_before() on the next element,
 -- consistent with how every other element in the layout works.
-local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inline)
+local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inline, fg_color)
     local PCT_W   = math.max(16, math.floor(_BASE_PCT_W       * scale * lbl_scale))
     local GAP     = math.max(2,  math.floor(_BASE_BAR_PCT_GAP * scale))
     local bar_w   = math.max(10, w - GAP - PCT_W)
@@ -114,6 +123,7 @@ local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inl
     local pct_str = string.format("%.0f%%", (pct or 0) * 100)
     -- face_inline is pre-resolved by build(); fallback for direct calls.
     local _face   = face_inline or Font:getFace("smallinfofont", math.max(7, math.floor(_BASE_INLINEPCT_FS * scale * lbl_scale)))
+    local _fg     = fg_color or _CLR_DARK
 
     local bar
     if fw <= 0 then
@@ -130,11 +140,11 @@ local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inl
         align = "center",
         bar,
         HorizontalSpan:new{ width = GAP },
-        TextWidget:new{
+        UI.makeColoredText{
             text    = pct_str,
             face    = _face,
             bold    = true,
-            fgcolor = _CLR_DARK,
+            fgcolor = _fg,
             width   = PCT_W,
         },
     }
@@ -243,13 +253,13 @@ end
 
 -- Returns true if the element with the given key is visible (default on).
 local function _showElem(pfx, key)
-    return G_reader_settings:nilOrTrue(pfx .. "currently_show_" .. key)
+    return SUISettings:nilOrTrue(pfx .. "currently_show_" .. key)
 end
 
 -- Toggles the visibility of an element.
 local function _toggleElem(pfx, key)
-    local cur = G_reader_settings:nilOrTrue(pfx .. "currently_show_" .. key)
-    G_reader_settings:saveSetting(pfx .. "currently_show_" .. key, not cur)
+    local cur = SUISettings:nilOrTrue(pfx .. "currently_show_" .. key)
+    SUISettings:saveSetting(pfx .. "currently_show_" .. key, not cur)
 end
 
 
@@ -290,7 +300,7 @@ local function _resolveElemOrder(saved)
 end
 
 local function _getElemOrder(pfx)
-    return _resolveElemOrder(G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY))
+    return _resolveElemOrder(SUISettings:readSetting(pfx .. ELEM_ORDER_KEY))
 end
 
 
@@ -302,6 +312,8 @@ M.name        = _("Currently Reading")
 M.label       = _("Currently Reading")
 M.enabled_key = "currently"
 M.default_on  = true
+M.has_covers  = true   -- activates e-ink dithering and cover poll
+M.is_book_mod = true   -- suppresses empty-state when active
 
 
 -- ---------------------------------------------------------------------------
@@ -439,12 +451,12 @@ function M.build(w, ctx)
         remain   = _showElem(pfx, "book_remaining"),
     }
     -- elem_order: use cached raw value from bundle; resolve lazily.
-    local elem_order  = _resolveElemOrder(c and c.elem_order or G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY))
+    local elem_order  = _resolveElemOrder(c and c.elem_order or SUISettings:readSetting(pfx .. ELEM_ORDER_KEY))
 
     local D           = SH.getDims(scale, thumb_scale)
 
     -- Scale gaps (layout scale only).
-    local cover_gap      = math.max(1, math.floor(_BASE_COVER_GAP      * scale))
+    local cover_gap      = math.max(0, math.floor(_BASE_COVER_GAP      * scale * (getCoverGapPct(pfx) / 100)))
     local title_gap      = math.max(1, math.floor(_BASE_TITLE_GAP      * scale))
     local author_gap     = math.max(1, math.floor(_BASE_AUTHOR_GAP     * scale))
     local bar_gap_before = math.max(1, math.floor(_BASE_BAR_GAP_BEFORE * scale))
@@ -500,6 +512,14 @@ function M.build(w, ctx)
     -- Colour used for placeholder stats text (dimmer than the normal sub-text).
     local CLR_PLACEHOLDER = Blitbuffer.gray(0.55)
 
+    -- Theme: when fg is set use it for all text; otherwise fall back to module defaults.
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _CLR_DARK_EFF    = _theme_fg or _CLR_DARK
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+    local CLR_PH_EFF       = _theme_secondary or _theme_fg or CLR_PLACEHOLDER
+
     -- Pre-resolve the inline-pct font face once for buildProgressBarWithPct.
     local face_inlinepct = Font:getFace("smallinfofont",
         math.max(7, math.floor(_BASE_INLINEPCT_FS * scale * lbl_scale)))
@@ -524,21 +544,32 @@ function M.build(w, ctx)
     for _i, elem in ipairs(elem_order) do
         if elem == "title" and show.title then
             gap_before(title_gap)
-            meta[#meta+1] = TextBoxWidget:new{
+
+            local title_args = {
                 text      = truncateTitle(bd.title) or "?",
                 face      = face_title,
                 bold      = true,
                 width     = tw,
                 max_lines = 2,
+                fgcolor   = _CLR_DARK_EFF,
             }
+
+            local title_w
+            if ctx.has_wallpaper then
+                title_w = UI.makeAlphaTextBox(title_args)
+            else
+                title_w = TextBoxWidget:new(title_args)
+            end
+
+            meta[#meta+1] = title_w
             meta_has_content = true
 
         elseif elem == "author" and show.author and bd.authors and bd.authors ~= "" then
             gap_before(author_gap)
-            meta[#meta+1] = TextWidget:new{
+            meta[#meta+1] = UI.makeColoredText{
                 text            = bd.authors,
                 face            = face_author,
-                fgcolor         = CLR_TEXT_SUB,
+                fgcolor         = CLR_TEXT_SUB_EFF,
                 width           = tw,
                 max_width       = tw,
                 truncation_char = "â¦",  -- "…" UTF-8
@@ -548,7 +579,7 @@ function M.build(w, ctx)
         elseif elem == "progress" and show.progress then
             gap_before(bar_gap_before)
             if bar_style == "with_pct" then
-                meta[#meta+1] = buildProgressBarWithPct(tw, bd.percent, bar_h, scale, lbl_scale, face_inlinepct)
+                meta[#meta+1] = buildProgressBarWithPct(tw, bd.percent, bar_h, scale, lbl_scale, face_inlinepct, _CLR_DARK_EFF)
             else
                 meta[#meta+1] = SH.progressBar(tw, bd.percent, bar_h)
             end
@@ -557,11 +588,11 @@ function M.build(w, ctx)
 
         elseif elem == "percent" and show.percent and bar_style ~= "with_pct" then
             gap_before(pct_gap)
-            meta[#meta+1] = TextWidget:new{
+            meta[#meta+1] = UI.makeColoredText{
                 text    = string.format(_("%d%% Read"), math.floor((bd.percent or 0) * 100 + 0.5)),
                 face    = face_pct,
                 bold    = true,
-                fgcolor = _CLR_DARK,
+                fgcolor = _CLR_DARK_EFF,
                 width   = tw,
             }
             meta_has_content = true
@@ -575,10 +606,10 @@ function M.build(w, ctx)
             local days_label = has_data
                 and string.format(N_("%d day of reading", "%d days of reading", bstats.days), bstats.days)
                 or  string.format(N_("%d day of reading", "%d days of reading", 0), 0)
-            meta[#meta+1] = TextWidget:new{
+            meta[#meta+1] = UI.makeColoredText{
                 text    = days_label,
                 face    = face_s,
-                fgcolor = has_data and CLR_TEXT_SUB or CLR_PLACEHOLDER,
+                fgcolor = has_data and CLR_TEXT_SUB_EFF or CLR_PH_EFF,
                 width   = tw,
             }
             meta_has_content = true
@@ -587,12 +618,12 @@ function M.build(w, ctx)
             -- Fix 1: placeholder when total time is not yet recorded.
             local has_data = bstats and bstats.total_secs and bstats.total_secs > 0
             gap_before(pct_gap)
-            meta[#meta+1] = TextWidget:new{
+            meta[#meta+1] = UI.makeColoredText{
                 text    = has_data
                           and string.format(_("%s read"), fmtTime(bstats.total_secs))
                           or  string.format(_("%s read"), "—"),
                 face    = face_s,
-                fgcolor = has_data and CLR_TEXT_SUB or CLR_PLACEHOLDER,
+                fgcolor = has_data and CLR_TEXT_SUB_EFF or CLR_PH_EFF,
                 width   = tw,
             }
             meta_has_content = true
@@ -614,10 +645,10 @@ function M.build(w, ctx)
             if not avg_t or not bd.pages or bd.pages <= 0 then
                 if pct_done < 1.0 then
                     gap_before(pct_gap)
-                    meta[#meta+1] = TextWidget:new{
+                    meta[#meta+1] = UI.makeColoredText{
                         text    = string.format(_("%s remaining"), "—"),
                         face    = face_s,
-                        fgcolor = CLR_PLACEHOLDER,
+                        fgcolor = CLR_PH_EFF,
                         width   = tw,
                     }
                     meta_has_content = true
@@ -627,10 +658,10 @@ function M.build(w, ctx)
                 local secs_left  = math.floor(avg_t * pages_left)
                 if secs_left > 0 then
                     gap_before(pct_gap)
-                    meta[#meta+1] = TextWidget:new{
+                    meta[#meta+1] = UI.makeColoredText{
                         text    = string.format(_("%s remaining"), fmtTime(secs_left)),
                         face    = face_s,
-                        fgcolor = CLR_TEXT_SUB,
+                        fgcolor = CLR_TEXT_SUB_EFF,
                         width   = tw,
                     }
                     meta_has_content = true
@@ -681,16 +712,16 @@ function M.build(w, ctx)
                     local stats_row = HorizontalGroup:new{ align = "center" }
                     for i, part in ipairs(parts) do
                         if i > 1 then
-                            stats_row[#stats_row+1] = TextWidget:new{
+                            stats_row[#stats_row+1] = UI.makeColoredText{
                                 text    = " · ",
                                 face    = face_s,
-                                fgcolor = CLR_TEXT_SUB,
+                                fgcolor = CLR_TEXT_SUB_EFF,
                             }
                         end
-                        stats_row[#stats_row+1] = TextWidget:new{
+                        stats_row[#stats_row+1] = UI.makeColoredText{
                             text    = part.text,
                             face    = face_s,
-                            fgcolor = part.placeholder and CLR_PLACEHOLDER or CLR_TEXT_SUB,
+                            fgcolor = part.placeholder and CLR_PH_EFF or CLR_TEXT_SUB_EFF,
                         }
                     end
                     meta[#meta+1] = stats_row
@@ -767,10 +798,10 @@ function M.build(w, ctx)
         return OverlapGroup:new{
             dimen = Geom:new{ w = tw, h = th },
             tappable,
-            LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK },
-            LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, th - bw} },
-            LineWidget:new{ dimen = Geom:new{ w = bw, h = th },    background = Blitbuffer.COLOR_BLACK },
-            LineWidget:new{ dimen = Geom:new{ w = bw, h = th },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {tw - bw, 0} },
+            LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = _CLR_DARK_EFF },
+            LineWidget:new{ dimen = Geom:new{ w = tw, h = bw },    background = _CLR_DARK_EFF, overlap_offset = {0, th - bw} },
+            LineWidget:new{ dimen = Geom:new{ w = bw, h = th },    background = _CLR_DARK_EFF },
+            LineWidget:new{ dimen = Geom:new{ w = bw, h = th },    background = _CLR_DARK_EFF, overlap_offset = {tw - bw, 0} },
         }
     end
 
@@ -908,7 +939,6 @@ local function _makeThumbScaleItem(ctx_menu)
     local _lc = ctx_menu._
     return Config.makeScaleItem({
         text_func = function() return _lc("Cover size") end,
-        separator = true,
         title     = _lc("Cover size"),
         info      = _lc("Scale for the cover thumbnail only.\n100% is the default size."),
         get       = function() return Config.getThumbScalePct("currently", pfx) end,
@@ -930,6 +960,29 @@ local function _makeTextScaleItem(ctx_menu)
     })
 end
 
+
+local function _makeCoverGapItem(ctx_menu)
+    local pfx = ctx_menu.pfx
+    local _lc = ctx_menu._
+    return Config.makeScaleItem({
+        text_func = function()
+            local pct = getCoverGapPct(pfx)
+            return pct == 100
+                and _lc("Cover Spacing")
+                or  string.format("%s (%d%%)", _lc("Cover Spacing"), pct)
+        end,
+        separator = true,
+        title     = _lc("Cover Spacing"),
+        info      = _lc("Horizontal space between the cover and the text.\n100% is the default spacing."),
+        get       = function() return getCoverGapPct(pfx) end,
+        set       = function(v) SUISettings:saveSetting(pfx .. COVER_GAP_KEY, v) end,
+        refresh   = ctx_menu.refresh,
+        value_min = 0,
+        value_max = 300,
+        value_step = 10,
+        default_value = 100,
+    })
+end
 
 -- Returns the settings menu items for this module.
 function M.getMenuItems(ctx_menu)
@@ -954,7 +1007,8 @@ function M.getMenuItems(ctx_menu)
     local SortWidget  = ctx_menu.SortWidget
 
     local thumb = _makeThumbScaleItem(ctx_menu)
-    thumb.separator = true
+
+    local gap_item = _makeCoverGapItem(ctx_menu)
 
     local items_submenu = {
         -- Arrange Items: drag-to-reorder the visible elements. Disabled when fewer than 2 are active.
@@ -997,7 +1051,7 @@ function M.getMenuItems(ctx_menu)
                         for _, k in ipairs(_getElemOrder(pfx)) do
                             if not active_set[k] then new_order[#new_order+1] = k end
                         end
-                        G_reader_settings:saveSetting(pfx .. ELEM_ORDER_KEY, new_order)
+                        SUISettings:saveSetting(pfx .. ELEM_ORDER_KEY, new_order)
                         refresh()
                     end,
                 })
@@ -1027,7 +1081,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getBarStyle(pfx) == "simple" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. BAR_STYLE_KEY, "simple")
+                        SUISettings:saveSetting(pfx .. BAR_STYLE_KEY, "simple")
                         refresh()
                     end,
                 },
@@ -1037,7 +1091,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getBarStyle(pfx) == "with_pct" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. BAR_STYLE_KEY, "with_pct")
+                        SUISettings:saveSetting(pfx .. BAR_STYLE_KEY, "with_pct")
                         refresh()
                     end,
                 },
@@ -1055,7 +1109,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getStatsStyle(pfx) == "default" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. STATS_STYLE_KEY, "default")
+                        SUISettings:saveSetting(pfx .. STATS_STYLE_KEY, "default")
                         refresh()
                     end,
                 },
@@ -1065,7 +1119,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getStatsStyle(pfx) == "compact" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. STATS_STYLE_KEY, "compact")
+                        SUISettings:saveSetting(pfx .. STATS_STYLE_KEY, "compact")
                         refresh()
                     end,
                 },
@@ -1077,6 +1131,7 @@ function M.getMenuItems(ctx_menu)
         _makeScaleItem(ctx_menu),
         _makeTextScaleItem(ctx_menu),
         thumb,
+        gap_item,
         Config.makeLabelToggleItem("currently", _("Currently Reading"), refresh, _lc),
         {
             text           = _lc("Items"),

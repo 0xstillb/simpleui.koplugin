@@ -11,6 +11,7 @@ local _         = require("sui_i18n").translate
 local Config    = require("sui_config")
 local UI        = require("sui_core")
 local Bottombar = require("sui_bottombar")
+local SUISettings = require("sui_store")
 
 -- Lazy: only needed on D-pad devices, inside gesture event handlers.
 local _FocusManager
@@ -111,8 +112,28 @@ end
 
 function M.patchFileManagerClass(plugin)
     local FileManager      = require("apps/filemanager/filemanager")
-    local orig_setupLayout = FileManager.setupLayout
-    plugin._orig_fm_setup  = orig_setupLayout
+
+    -- Guard: only wrap FileManager.setupLayout once per session.
+    --
+    -- patchFileManagerClass is called by installAll on every FM lifecycle event
+    -- (including when a new FM instance is created after returning from the reader).
+    -- Without this guard, each call adds another wrapper_A on top of the existing
+    -- chain.  The outermost wrapper_A calls wrapWithNavbar AFTER patchWallpaperFM's
+    -- wrapper_B has already cleared backgrounds, producing a fresh outer
+    -- FrameContainer with COLOR_WHITE that nobody clears → wallpaper disappears.
+    --
+    -- The guard flag lives on the FileManager class table so it survives FM instance
+    -- recreation.  teardownAll clears it so a full disable→enable cycle reinstalls
+    -- the wrapper cleanly.
+    local setup_already_patched = FileManager._simpleui_setup_patched
+    -- orig_setupLayout is declared here (outer scope) so the setupLayout closure
+    -- below can capture it even though both are inside the guard block.
+    local orig_setupLayout
+    if not setup_already_patched then
+        FileManager._simpleui_setup_patched = true
+        orig_setupLayout      = FileManager.setupLayout
+        plugin._orig_fm_setup = orig_setupLayout
+    end
 
     -- Navbar touch zones must be processed before FileChooser scroll children.
     UI.applyGesturePriorityHandleEvent(FileManager)
@@ -144,9 +165,10 @@ function M.patchFileManagerClass(plugin)
         })
     end
 
+    if not setup_already_patched then
     FileManager.setupLayout = function(fm_self)
         -- Calculate total navbar height (bottom bar + optional top bar).
-        local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+        local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
         fm_self._navbar_height = Bottombar.TOTAL_H()
             + (topbar_on and require("sui_topbar").TOTAL_TOP_H() or 0)
 
@@ -409,7 +431,7 @@ function M.patchFileManagerClass(plugin)
 
             if this._navbar_container then
                 local t = Config.loadTabConfig()
-                local return_to_folder = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
+                local return_to_folder = SUISettings:isTrue("simpleui_hs_return_to_book_folder")
                 if not return_to_folder then
                     plugin.active_action = "home"
                     local home = G_reader_settings:readSetting("home_dir")
@@ -496,7 +518,7 @@ function M.patchFileManagerClass(plugin)
         -- while the user navigates tabs, then pops itself on Press or Back.
         local function _enterNavbarKbFocus(return_fn)
             if not Device:hasDPad() then return end
-            if not G_reader_settings:nilOrTrue("navbar_enabled") then return end
+            if not SUISettings:nilOrTrue("simpleui_bar_enabled") then return end
             if _navbar_kb_capture then return end  -- already active
 
             _navbar_kb_return_fn = return_fn or false
@@ -614,6 +636,7 @@ function M.patchFileManagerClass(plugin)
             end
         end
     end
+    end -- if not setup_already_patched
 end
 
 -- ---------------------------------------------------------------------------
@@ -853,7 +876,7 @@ function M.patchCollections(plugin)
                 if TBR and coll_name == TBR.TBR_COLL_NAME then
                     rc_self:addCollection(TBR.TBR_COLL_NAME)
                     rc_self:write({ [TBR.TBR_COLL_NAME] = true })
-                    G_reader_settings:saveSetting("sui_tbr_list", {})
+                    SUISettings:saveSetting("simpleui_tbr_list", {})
                 else
                     _removeFromPool(coll_name)
                     Config.purgeQACollection(coll_name)
@@ -904,7 +927,7 @@ function M.patchCollections(plugin)
     -- Helper: re-read the TBR list from RC and persist into G_reader_settings.
     local function _syncTBRSettings(TBR)
         local list = TBR.getTBRList()
-        G_reader_settings:saveSetting("sui_tbr_list", list)
+        SUISettings:saveSetting("simpleui_tbr_list", list)
     end
 
     local function _getTBR()
@@ -1217,6 +1240,11 @@ function M.patchUIManagerShow(plugin)
     -- already sized to the content area via _navbar_height_reduced).
     local INJECT_NAMES = { collections = true, history = true, coll_list = true, homescreen = true }
 
+    -- Widgets that receive wallpaper injection. Intentionally narrower than
+    -- INJECT_NAMES: SortWidget, PathChooser and other utility overlays that
+    -- happen to set covers_fullscreen must NOT get the wallpaper treatment.
+    M._WALLPAPER_NAMES = { collections = true, history = true, coll_list = true }
+
     -- Resolve the live FM menu at call time so we never capture a stale reference.
     -- The FM is destroyed and recreated every time the reader opens/closes.
     local function _fmMenu()
@@ -1284,14 +1312,21 @@ function M.patchUIManagerShow(plugin)
         end
 
         -- Decide whether to inject the navbar into this widget.
+        -- Check the Bar Injection API registry first (O(n) over a tiny list).
+        local _bi_desc = UI.BarInjection.matchWidget(widget)
+
         local should_inject = _show_depth == 1
             and widget
             and not widget._navbar_injected
             and not widget._navbar_skip_inject
             and widget ~= plugin.ui
             and widget.covers_fullscreen
-            and widget.title_bar
-            and (widget._navbar_height_reduced or (widget.name and INJECT_NAMES[widget.name]))
+            -- title_bar is NOT required for BI-registered widgets: Titlebar.applyToInjected
+            -- already guards itself when title_bar is absent.
+            and (widget.title_bar or _bi_desc ~= nil)
+            and (widget._navbar_height_reduced
+                 or (widget.name and INJECT_NAMES[widget.name])
+                 or _bi_desc ~= nil)
 
         if not should_inject then
             if n_extra > 0 then
@@ -1352,30 +1387,58 @@ function M.patchUIManagerShow(plugin)
             end
         end
 
-        -- Hide the native Back button on the collections widget when the
-        -- "collections" tab is absent; there is no list to go back to.
-        if widget.name == "collections" and not widget._navbar_onreturn_checked then
-            widget._navbar_onreturn_checked = true
-            if not tabs_set["collections"] and widget.onReturn then
-                widget.onReturn = nil
-                if widget.page_return_arrow then
-                    widget.page_return_arrow:hide()
-                end
-            end
-        end
-
         local display_action = effective_action or action_before
         if not widget._navbar_inner then widget._navbar_inner = widget[1] end
 
         -- Build the bar without navpager arrows for non-pageable widgets to
         -- avoid the flash of arrows that would immediately be removed.
-        local widget_is_pageable = (type(widget.page_num) == "number")
-            or (widget.file_chooser and type(widget.file_chooser.page_num) == "number")
+        -- BI descriptor may override the auto-detection via is_pageable.
+        local widget_is_pageable
+        if _bi_desc ~= nil and _bi_desc.is_pageable ~= nil then
+            if type(_bi_desc.is_pageable) == "function" then
+                local ok_ip, ip = pcall(_bi_desc.is_pageable, widget)
+                widget_is_pageable = ok_ip and ip == true
+            else
+                widget_is_pageable = _bi_desc.is_pageable == true
+            end
+        else
+            widget_is_pageable = (type(widget.page_num) == "number")
+                or (widget.file_chooser and type(widget.file_chooser.page_num) == "number")
+        end
         local navbar_container, wrapped, bar, topbar, bar_idx, topbar_on, topbar_idx =
             UI.wrapWithNavbar(widget._navbar_inner, display_action, tabs, not widget_is_pageable)
         UI.applyNavbarState(widget, navbar_container, bar, topbar, bar_idx, topbar_on, topbar_idx, tabs)
         widget._navbar_prev_action = action_before
         widget[1]                  = wrapped
+
+        -- ── Bar Injection API post-injection ────────────────────────────────
+        -- When this widget was matched via BI.matchWidget(), handle the extra
+        -- descriptor-driven behaviour:
+        --   1. Activate the tab the descriptor requested (if any).
+        --   2. Store the descriptor on the widget for O(1) lookup at close time
+        --      (and to survive a BI.unregister() between show and close).
+        --   3. Fire on_inject callback.
+        if _bi_desc then
+            widget._sui_bi_desc = _bi_desc
+
+            -- Determine and activate the action for this widget.
+            local bi_action
+            if type(_bi_desc.get_active_action) == "function" then
+                local ok_ga, ga_result = pcall(_bi_desc.get_active_action, widget)
+                bi_action = ok_ga and ga_result or nil
+            else
+                bi_action = _bi_desc.active_action_id
+            end
+            if bi_action then
+                Bottombar.setActiveAndRefreshFM(plugin, bi_action, tabs)
+            end
+
+            -- on_inject callback.
+            if type(_bi_desc.on_inject) == "function" then
+                pcall(_bi_desc.on_inject, widget, { plugin = plugin, tabs = tabs })
+            end
+        end
+        -- ────────────────────────────────────────────────────────────────────
         plugin:_registerTouchZones(widget)
         UI.applyGesturePriorityHandleEvent(widget)
 
@@ -1387,18 +1450,69 @@ function M.patchUIManagerShow(plugin)
             if DTAP_ZONE_MENU and DTAP_ZONE_MENU_EXT then
                 local screen_h    = Screen:getHeight()
                 local zone_ratio_h
-                if G_reader_settings:nilOrTrue("navbar_topbar_enabled") then
+                if SUISettings:nilOrTrue("simpleui_topbar_enabled") then
                     local Topbar = require("sui_topbar")
                     zone_ratio_h = (Topbar.TOTAL_TOP_H() + UI.MOD_GAP) / screen_h
                 else
                     zone_ratio_h = DTAP_ZONE_MENU.h
                 end
+
+                -- Returns true when the tap position falls inside an injected
+                -- titlebar button (hamburger, close, etc.) on this widget.
+                -- These buttons live in the same top zone as the menu tap zone, so
+                -- we must let their taps fall through rather than opening the menu.
+                -- We prefer button.dimen (populated after the first paint) and fall
+                -- back to the overlap_offset + width values we set explicitly.
+                local function _tapOnInjectedBtn(ges)
+                    local pos = ges.pos
+                    if not pos then return false end
+                    local tb = widget.title_bar
+                    -- Collect all injected button refs stored on the widget.
+                    local btns = {}
+                    if tb and tb.left_button  then btns[#btns+1] = tb.left_button end
+                    if tb and tb.right_button then btns[#btns+1] = tb.right_button end
+                    local logger = require("logger")
+                    logger.dbg("simpleui _tapOnInjectedBtn: pos=", pos.x, pos.y, "n_btns=", #btns)
+                    for i, btn in ipairs(btns) do
+                        local hit = false
+                        local bw = btn.width or (btn.dimen and btn.dimen.w) or 0
+                        local bx_oo = btn.overlap_offset and btn.overlap_offset[1]
+                        local bx_dm = btn.dimen and btn.dimen.x
+                        logger.dbg("  btn[", i, "] width=", bw,
+                            "overlap_offset=", tostring(bx_oo),
+                            "dimen.x=", tostring(bx_dm),
+                            "dimen.w=", tostring(btn.dimen and btn.dimen.w))
+                        if bw <= 0 then goto continue end
+                        -- Prefer overlap_offset (set by the plugin, always current)
+                        -- over dimen (only populated after paintTo; stale on first tap).
+                        if btn.overlap_offset then
+                            local bx = btn.overlap_offset[1]
+                            hit = pos.x >= bx and pos.x <= bx + bw
+                        elseif btn.dimen and btn.dimen.x then
+                            hit = pos.x >= btn.dimen.x
+                              and pos.x <= btn.dimen.x + bw
+                              and pos.y >= (btn.dimen.y or 0)
+                              and pos.y <= (btn.dimen.y or 0) + (btn.dimen.h or bw)
+                        end
+                        logger.dbg("  btn[", i, "] hit=", tostring(hit))
+                        if hit then return true end
+                        ::continue::
+                    end
+                    return false
+                end
+
                 widget:registerTouchZones({
                     {
                         id          = "simpleui_menu_tap",
                         ges         = "tap",
                         screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = zone_ratio_h },
                         handler     = function(ges)
+                            local logger = require("logger")
+                            logger.dbg("simpleui_menu_tap FIRED pos=", ges.pos and ges.pos.x, ges.pos and ges.pos.y)
+                            if _tapOnInjectedBtn(ges) then
+                                logger.dbg("simpleui_menu_tap: btn hit, passing through")
+                                return false
+                            end
                             local m = _fmMenu(); if m then return m:onTapShowMenu(ges) end
                         end,
                     },
@@ -1476,15 +1590,19 @@ function M.patchUIManagerShow(plugin)
             UIManager:setDirty(widget[1], "ui")
         end
 
+        -- Paint the wallpaper behind this fullscreen overlay (Collections,
+        -- History, etc.) using the same mechanism as patchWallpaperFM.
+        pcall(M.injectWallpaperIntoFullscreenWidget, widget)
+
         -- Schedule a navpager arrow update for the next event-loop tick.
         -- Snapshot has_prev/has_next now to avoid races with a second
         -- updatePageInfo call that may fire during the same tick.
-        if G_reader_settings:isTrue("navbar_navpager_enabled") and not _navpager_rebuild_pending then
+        if SUISettings:isTrue("simpleui_bar_navpager_enabled") and not _navpager_rebuild_pending then
             local has_prev_snap, has_next_snap = Config.getNavpagerState()
             _navpager_rebuild_pending = true
             UIManager:scheduleIn(0, function()
                 _navpager_rebuild_pending = false
-                if not G_reader_settings:isTrue("navbar_navpager_enabled") then return end
+                if not SUISettings:isTrue("simpleui_bar_navpager_enabled") then return end
                 local fm2 = plugin.ui
                 if not (fm2 and fm2._navbar_container) then return end
                 local target2 = (widget._navbar_container and widget) or fm2
@@ -1602,18 +1720,35 @@ function M.patchUIManagerClose(plugin)
             widget._navbar_injected = nil
 
             if widget.name == "coll_list" then
-                -- coll_list sits on top of collections; find prev_action on the
-                -- underlying collections widget rather than calling restoreTabInFM.
+                -- coll_list sits on top of collections; find what to restore.
+                -- If there is still a collections/coll_list widget underneath,
+                -- the user is going back to the collections list — so keep the
+                -- "collections" tab active (if it is in the tab bar).
+                -- Only fall back to _navbar_prev_action when there is no
+                -- matching underlying widget (edge-case: collections tab absent).
                 local fm = liveFM()
                 if fm and fm._navbar_container then
                     local t       = Config.loadTabConfig()
                     local restored = nil
+                    local underlying_coll = nil
                     for _, entry in ipairs(UI.getWindowStack()) do
                         local w = entry.widget
                         if w and w ~= widget and w._navbar_injected
                                 and (w.name == "collections" or w.name == "coll_list") then
-                            restored = w._navbar_prev_action
+                            underlying_coll = w
                             break
+                        end
+                    end
+                    if underlying_coll then
+                        -- Going back to the collections list: activate the
+                        -- "collections" tab, or if absent use the underlying
+                        -- widget's prev_action.
+                        local tabs_set = {}
+                        for _, tid in ipairs(t) do tabs_set[tid] = true end
+                        if tabs_set["collections"] then
+                            restored = "collections"
+                        else
+                            restored = underlying_coll._navbar_prev_action
                         end
                     end
                     if not restored then
@@ -1639,6 +1774,15 @@ function M.patchUIManagerClose(plugin)
                 end
             end
         end
+
+        -- ── Bar Injection API on_close callback ─────────────────────────────
+        -- Use the descriptor reference stored at inject time (widget._sui_bi_desc)
+        -- so this fires correctly even when BI.unregister() was called meanwhile.
+        local _bi_close_desc = widget._sui_bi_desc
+        if _bi_close_desc and type(_bi_close_desc.on_close) == "function" then
+            pcall(_bi_close_desc.on_close, widget, { plugin = plugin })
+        end
+        -- ────────────────────────────────────────────────────────────────────
 
         -- When the FM closes, also close the homescreen so the app can exit.
         if widget_is_fm then
@@ -1698,7 +1842,7 @@ function M.patchUIManagerClose(plugin)
                 if widget.name == "ReaderUI" then
                     -- Reader closed back to the FM (not opening another book).
                     if not widget.tearing_down then
-                        local return_to_folder = G_reader_settings:isTrue("navbar_hs_return_to_book_folder")
+                        local return_to_folder = SUISettings:isTrue("simpleui_hs_return_to_book_folder")
                         if not return_to_folder then
                             _hs_pending_after_reader = true
                             -- Stash the real previous tab so the _hs_pending handler can
@@ -1766,7 +1910,34 @@ function M.patchMenuInitForPagination(plugin)
     plugin._orig_menu_init = orig_menu_init
 
     Menu.init = function(menu_self, ...)
+        -- Centralised keyboard-shortcut indicator suppression.
+        -- These are the lettered badges (W, E, R, …) drawn over book covers
+        -- on devices with a physical keyboard.  They overlap cover art and are
+        -- redundant on touch-first devices.
+        --
+        -- To re-enable the indicators, change the constant below to `true`:
+        --   local SUI_SHOW_SHORTCUT_INDICATORS = true
+        local SUI_SHOW_SHORTCUT_INDICATORS = false
+        if not SUI_SHOW_SHORTCUT_INDICATORS then
+            menu_self.is_enable_shortcut = false
+        end
+
         orig_menu_init(menu_self, ...)
+
+        -- Apply icon overrides for collections/history/FM menus.
+        pcall(function()
+            local ok_ss, SS = pcall(require, "sui_style")
+            if not (ok_ss and SS) then return end
+            -- Pagination chevrons: present in all fullscreen menus after init().
+            if SS.applyPaginationIcons then
+                SS.applyPaginationIcons(menu_self)
+            end
+            -- Collections back button: only present in collections/coll_list.
+            if SS.applyCollBackIcon
+                    and (menu_self.name == "collections" or menu_self.name == "coll_list") then
+                SS.applyCollBackIcon(menu_self)
+            end
+        end)
 
         -- Fix: Menu:onSwipe does not return true, so horizontal swipes propagate
         -- to FM's filemanager_swipe zone and advance two pages. Wrap onSwipe to
@@ -1785,13 +1956,18 @@ function M.patchMenuInitForPagination(plugin)
             end
         end
 
-        if G_reader_settings:nilOrTrue("navbar_pagination_visible") then return end
+        if SUISettings:nilOrTrue("simpleui_bar_pagination_visible") then return end
         if not TARGET_NAMES[menu_self.name]
            and not (menu_self.covers_fullscreen and menu_self.is_borderless and menu_self.title_bar_fm_style) then
             return
         end
 
-        -- Remove all children except content_group to strip the pagination row.
+        -- Collections widgets use the native page_return_arrow inside return_button
+        -- (a BottomContainer managed entirely by Menu). Leave their layout untouched.
+        if menu_self.name == "collections" or menu_self.name == "coll_list" then return end
+
+        -- Remove all children except content_group to strip the pagination row
+        -- (page_info, return_button, etc.) for non-collection targets.
         local content = menu_self[1] and menu_self[1][1]
         if content then
             for i = #content, 1, -1 do
@@ -1802,6 +1978,8 @@ function M.patchMenuInitForPagination(plugin)
         end
 
         -- Override _recalculateDimen to suppress pagination widget updates.
+        -- page_return_arrow and page_info are no longer layout children here,
+        -- so nil them out during the call to prevent KOReader sizing them.
         menu_self._recalculateDimen = function(self_inner, no_recalculate_dimen)
             local saved_arrow = self_inner.page_return_arrow
             local saved_text  = self_inner.page_info_text
@@ -1854,8 +2032,8 @@ function M.patchMenuForNavpager(plugin)
 
     -- True when any subtitle (page indicator or pagination subtitle) should show.
     local function _subtitleEnabled()
-        return G_reader_settings:isTrue("navbar_navpager_enabled")
-            or G_reader_settings:isTrue("navbar_pagination_show_subtitle")
+        return SUISettings:isTrue("simpleui_bar_navpager_enabled")
+            or SUISettings:isTrue("simpleui_bar_pagination_show_subtitle")
     end
     M._subtitleEnabled = _subtitleEnabled
 
@@ -1930,7 +2108,7 @@ function M.patchMenuForNavpager(plugin)
 
         UIManager:scheduleIn(0, function()
             _navpager_rebuild_pending = false
-            if not G_reader_settings:isTrue("navbar_navpager_enabled") then return end
+            if not SUISettings:isTrue("simpleui_bar_navpager_enabled") then return end
             local fm = plugin.ui
             if not (fm and fm._navbar_container) then return end
             local target = _getNavbarTarget(fm)
@@ -1970,16 +2148,19 @@ function M.patchMenuForNavpager(plugin)
         local at_home    = force_home or (home_dir ~= "" and clean_path == home_dir)
 
         -- Determine whether we are at the filesystem root (back button hidden).
-        -- Also treat the home folder as root when "Lock Home Folder" is enabled.
-        local at_root = (clean_path == "/")
-        if not at_root then
-            local fc_cur = fm_self.file_chooser
-            if fc_cur and fc_cur._simpleui_has_go_up ~= nil then
-                at_root = not fc_cur._simpleui_has_go_up
+        -- Delegate to sui_titlebar's isAtRoot which owns the single authoritative
+        -- criterion (virtual paths, series-view, lock_home_folder all handled there).
+        local fc_cur  = fm_self.file_chooser
+        local ok_ti, TI = pcall(require, "sui_titlebar")
+        local at_root
+        if ok_ti and TI and TI.isAtRoot then
+            at_root = TI.isAtRoot(fc_cur)
+        else
+            -- Fallback: path-only check when sui_titlebar is unavailable.
+            at_root = (clean_path == "/")
+            if not at_root and G_reader_settings:isTrue("lock_home_folder") and at_home then
+                at_root = true
             end
-        end
-        if not at_root and G_reader_settings:isTrue("lock_home_folder") and at_home then
-            at_root = true
         end
 
         -- Show or hide the back button and adjust the search button position.
@@ -2203,7 +2384,7 @@ function M._wrapButtonPaintTo(plugin, Button)
 
     Button.paintTo = function(btn_self, bb, x, y)
         orig_paintTo(btn_self, bb, x, y)
-        if not G_reader_settings:isTrue("simpleui_debug_button_bounds") then return end
+        if not SUISettings:isTrue("simpleui_debug_button_bounds") then return end
         local dimen = btn_self:getSize()
         if not dimen then return end
         bb:paintBorder(x, y, dimen.w, dimen.h, 2, Blitbuffer.COLOR_RED)
@@ -2357,6 +2538,521 @@ function M.closeReaderToLibrary(plugin)
     end)
 end
 
+-- ---------------------------------------------------------------------------
+-- Wallpaper in File Manager and fullscreen overlays
+-- Paints the SimpleUI homescreen wallpaper behind the FM, Collections,
+-- History, and other fullscreen surfaces when the "Show in FM" setting is on.
+--
+-- Widget tree after wrapWithNavbar (FM case):
+--   fm_self[1]              = simpleui FrameContainer  (background=COLOR_WHITE)
+--   fm_self[1][1]           = OverlapGroup (navbar_container, no background)
+--   fm_self[1][1][1]        = KOReader fm_ui FrameContainer (background=COLOR_WHITE)
+--   fm_self[1][1][1][1]     = FileChooser (Menu subclass)
+--   fm_self[1][1][1][1][1]  = Menu's inner FrameContainer (background=COLOR_WHITE)
+--   fm_self._navbar_inner   = same as fm_self[1][1][1] (saved before wrapping)
+--
+-- Widget tree after wrapWithNavbar (fullscreen overlay -- Collections, History):
+--   widget[1]               = simpleui FrameContainer  (background=COLOR_WHITE)
+--   widget[1][1]            = OverlapGroup (navbar_container)
+--   widget[1][1][1]         = original Menu widget
+--   widget[1][1][1][1]      = Menu's inner FrameContainer (background=COLOR_WHITE)
+--   widget._navbar_inner    = same as widget[1][1][1]
+--
+-- Fix: wrap paintTo on the outermost simpleui FrameContainer to paint wallpaper
+-- first; clear background=nil on every FrameContainer in the chain so none of
+-- them overwrite it with a white fill.  The _navbar_inner reference gives us
+-- direct access to the KOReader-level widgets without walking the full tree.
+-- ---------------------------------------------------------------------------
+
+-- Paint the wallpaper onto bb, anchored at y=0 (top of screen), with opacity.
+local function _paintWallpaper(bg_widget, bb, x, y)
+    if not bg_widget then return end
+    local ok_hs, HS = pcall(require, "sui_homescreen")
+    local opacity = ok_hs and HS and HS.styleGetWallpaperOpacityValue() or 0
+    bg_widget:paintTo(bb, x, 0)
+    if opacity and opacity > 0 then
+        bb:lightenRect(x, 0, Screen:getWidth(), Screen:getHeight(), opacity / 100)
+    end
+end
+
+local function _getWallpaperBg()
+    local ok, HS = pcall(require, "sui_homescreen")
+    if not (ok and HS and HS.styleGetBgWidget) then return nil end
+    return HS.styleGetBgWidget()
+end
+
+local function _wallpaperEnabledFM()
+    local ok, HS = pcall(require, "sui_homescreen")
+    return ok and HS and HS.styleGetWallpaperShowInFM()
+end
+
+-- Recursively nil all COLOR_WHITE backgrounds in a widget tree.
+-- Stops at depth 12 to avoid runaway traversal.
+local function _clearWhiteBackgrounds(w, depth)
+    if not w or type(w) ~= "table" or depth > 12 then return end
+    local Blitbuffer = require("ffi/blitbuffer")
+    -- Use pcall to guard against __eq crashing on cdata nil values.
+    -- w.background can be a cdata (e.g. BlitBuffer color) that triggers
+    -- blitbuffer.lua's __eq metamethod, which crashes if either operand
+    -- is an uninitialised/null cdata rather than a proper Lua nil.
+    local ok, is_white = pcall(function() return w.background == Blitbuffer.COLOR_WHITE end)
+    if ok and is_white then
+        w.background = nil
+    end
+    for i = 1, #w do
+        _clearWhiteBackgrounds(w[i], depth + 1)
+    end
+end
+
+-- Inject the wallpaper paint hook into a fullscreen overlay widget
+-- (Collections, History, etc.) after wrapWithNavbar has run.
+--
+-- For overlays the widget object itself is stable — KOReader reuses the same
+-- Lua table across opens.  The hook is placed on widget[1] (the outer
+-- FrameContainer produced by wrapWithNavbar) guarded by _sui_wallpaper_patched
+-- so we only wrap paintTo once.  Backgrounds in the chain are cleared so
+-- they do not paint white over the wallpaper.
+--
+-- NOTE: This function is NOT used for the FM — see patchWallpaperFM below,
+-- which wraps paintTo on the FileManager instance itself (the stable object
+-- that sits in UIManager._window_stack and is never recreated).
+local function _injectWallpaperIntoWidget(widget)
+    if not widget then return end
+    local outer = widget[1]   -- simpleui outer FrameContainer
+    if not outer or outer._sui_wallpaper_patched then return end
+    outer._sui_wallpaper_patched = true
+
+    -- Clear opaque backgrounds in the widget chain.
+    outer.background = nil
+    local ni = widget._navbar_inner
+    if ni then
+        ni.background = nil
+        local ni1 = ni[1]
+        if ni1 then
+            ni1.background = nil
+            if ni1[1] then ni1[1].background = nil end
+        end
+    end
+
+    -- Deep-clear nested backgrounds (Button frames, item wrappers, etc.)
+    if ni then
+        _clearWhiteBackgrounds(ni, 0)
+    else
+        _clearWhiteBackgrounds(outer, 0)
+    end
+
+    -- Wrap paintTo on the outer FrameContainer.
+    local _orig_pt = outer.paintTo
+    function outer:paintTo(bb, x, y)
+        local live_bg = _wallpaperEnabledFM() and _getWallpaperBg() or nil
+        if live_bg then
+            _paintWallpaper(live_bg, bb, x, y)
+        end
+        _orig_pt(self, bb, x, y)
+    end
+end
+
+function M.patchWallpaperFM(plugin)
+    local FileManager = require("apps/filemanager/filemanager")
+
+    -- Guard: only install once per session.
+    if FileManager._simpleui_wallpaper_fm_patched then return end
+    FileManager._simpleui_wallpaper_fm_patched = true
+
+    -- -----------------------------------------------------------------------
+    -- Core approach: wrap paintTo on the FileManager CLASS, not on transient
+    -- inner widgets.
+    --
+    -- Why inner widgets don't work:
+    --   Every setupLayout call (e.g. after closing a book) calls wrapWithNavbar,
+    --   which creates brand-new FrameContainer and OverlapGroup objects.  Any
+    --   paintTo hook installed on those objects is silently discarded the moment
+    --   setupLayout runs again — the FM's self[1] now points to the new objects
+    --   and the old ones (with the hook) are garbage-collected.
+    --
+    -- Why wrapping the class works:
+    --   UIManager._repaint() calls widget:paintTo() on the object that was
+    --   passed to UIManager:show() — the FileManager *instance*.  That instance
+    --   is never replaced (only its self[1] child changes).  By wrapping the
+    --   CLASS-level paintTo we intercept every repaint before any child widget
+    --   is painted, regardless of how many times setupLayout rebuilds self[1].
+    --
+    -- Flow per repaint:
+    --   1. Our hook fires first → _paintWallpaper() draws wallpaper onto Screen.bb
+    --   2. original WidgetContainer:paintTo → self[1]:paintTo (the outer FC)
+    --        → outer FC paints nothing (background=nil, bordersize=0, padding=0)
+    --        → OverlapGroup:paintTo → KOReader fm_ui FC (background=nil) → etc.
+    --
+    --   setupLayout also clears backgrounds in the chain (same as before) so
+    --   no white rectangle is drawn on top of the wallpaper.
+    -- -----------------------------------------------------------------------
+    local orig_fm_paintTo = FileManager.paintTo  -- nil: inherits WidgetContainer:paintTo
+    local base_wc_paintTo                        -- resolved lazily on first call
+
+    plugin._simpleui_orig_fm_paintTo = orig_fm_paintTo  -- may be nil; stored for teardown
+
+    FileManager.paintTo = function(fm_self, bb, x, y)
+        -- Only intercept the FileManager instance (not subclasses / other callers).
+        if _wallpaperEnabledFM() then
+            local live_bg = _getWallpaperBg()
+            if live_bg then
+                _paintWallpaper(live_bg, bb, x, y)
+            end
+        end
+        -- Call the original paintTo (WidgetContainer:paintTo).
+        if orig_fm_paintTo then
+            orig_fm_paintTo(fm_self, bb, x, y)
+        else
+            if not base_wc_paintTo then
+                local WC = require("ui/widget/container/widgetcontainer")
+                base_wc_paintTo = WC.paintTo
+            end
+            base_wc_paintTo(fm_self, bb, x, y)
+        end
+    end
+
+    -- Chain after patchFileManagerClass.setupLayout so the widget tree is
+    -- already wrapped by wrapWithNavbar when our code runs.
+    -- The sole job of this setupLayout wrapper is now to clear the white
+    -- backgrounds in the newly-built widget chain so nothing paints a white
+    -- rectangle on top of the wallpaper that was already drawn by paintTo.
+    local base_setupLayout = FileManager.setupLayout
+    plugin._orig_fm_wallpaper_setup = base_setupLayout
+
+    FileManager.setupLayout = function(fm_self)
+        base_setupLayout(fm_self)
+
+        if not _wallpaperEnabledFM() then return end
+
+        -- Clear all opaque backgrounds in the freshly-built widget chain.
+        -- wrapWithNavbar sets outer.background = COLOR_WHITE when the navbar
+        -- is not transparent; KOReader's setupLayout sets fm_ui.background =
+        -- COLOR_WHITE.  Nil them all so paintTo (above) can show through.
+        local outer = fm_self[1]
+        if outer then
+            outer.background = nil
+            local ni = fm_self._navbar_inner
+            if ni then
+                ni.background = nil
+                local ni1 = ni[1]
+                if ni1 then
+                    ni1.background = nil
+                    if ni1[1] then ni1[1].background = nil end
+                end
+                _clearWhiteBackgrounds(ni, 0)
+            else
+                _clearWhiteBackgrounds(outer, 0)
+            end
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- Button frame background patch
+    -- button.lua always sets frame.background = COLOR_WHITE when the Button
+    -- has no explicit self.background colour (the else branch, line ~226).
+    -- This makes chevrons, coll_back, and other icon Buttons paint a white
+    -- rectangle behind them even with bordersize=0.
+    -- Fix: wrap Button:paintTo to temporarily nil frame.background while
+    -- wallpaper-in-FM is active, then restore it after the paint call.
+    -- We guard against double-patching by saving our own orig ref.
+    -- -----------------------------------------------------------------------
+    local ok_btn, Button = pcall(require, "ui/widget/button")
+    if ok_btn and Button and not plugin._orig_wp_button_paintTo then
+        local orig_btn_pt = Button.paintTo
+        plugin._orig_wp_button_paintTo = orig_btn_pt
+
+        Button.paintTo = function(btn_self, bb, x, y)
+            -- Only intercept when: wallpaper active, no explicit button colour,
+            -- and the frame FrameContainer exists and has a background.
+            if _wallpaperEnabledFM() and not btn_self.background
+                    and btn_self[1] and btn_self[1].background then
+                local saved = btn_self[1].background
+                btn_self[1].background = nil
+                orig_btn_pt(btn_self, bb, x, y)
+                btn_self[1].background = saved
+            else
+                orig_btn_pt(btn_self, bb, x, y)
+            end
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- IconWidget alpha patch
+    -- Button:paintTo above already nils frame.background to avoid painting the
+    -- white rectangle of the FrameContainer. But the IconWidget inside the Button
+    -- (chevrons, coll_back) and inside the native KOReader TitleBar IconButton
+    -- (home, hamburger, plus) was rendered with alpha=false by default:
+    -- the lazy _render() composites the icon onto a white BB and caches this
+    -- "flat" version — the white pixels get baked in.
+    -- Even with frame.background=nil, IconWidget:paintTo calls blitFrom()
+    -- (without alpha-blending) and paints those white pixels directly over
+    -- the wallpaper.
+    --
+    -- Fix: wrap IconWidget:init to set self.alpha = true when the FM wallpaper
+    -- is active. Since _render() is lazy (called on the first paintTo via
+    -- getSize()), the flag is read BEFORE the cache lookup, forcing the
+    -- "...|alpha" hash and compositing with the alpha channel intact, without
+    -- touching the background already painted by the wallpaper.
+    --
+    -- original_in_nightmode=false: native ImageWidget/KOReader field.
+    -- When alpha=true and the screen is in night mode, ImageWidget:paintTo
+    -- inverts the image again (to cancel out the global screen inversion).
+    -- For icons over wallpapers this is undesirable — we disable it here.
+    -- Guard: only acts if iw_self.alpha is still false, avoiding overwriting
+    -- explicit configurations set by the widgets themselves.
+    -- -----------------------------------------------------------------------
+    local ok_iw, IconWidget = pcall(require, "ui/widget/iconwidget")
+    if ok_iw and IconWidget and not plugin._orig_wp_iconwidget_init then
+        local orig_iw_init = IconWidget.init
+        plugin._orig_wp_iconwidget_init = orig_iw_init
+
+        IconWidget.init = function(iw_self, ...)
+            orig_iw_init(iw_self, ...)
+            -- Only intervenes when the FM wallpaper is active and the icon does
+            -- not yet have an explicit alpha defined by the instantiating widget.
+            if _wallpaperEnabledFM() and not iw_self.alpha then
+                iw_self.alpha = true
+                iw_self.original_in_nightmode = false
+            end
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- Menu.init background patch
+    -- Menu:init (menu.lua ~913) always creates self[1] = FrameContainer with
+    -- background = COLOR_WHITE. _injectWallpaperIntoWidget nils it once, but
+    -- every setupLayout call re-creates the full widget tree via Menu:init.
+    -- Wrap Menu.init so fullscreen FM-style menus always get nil backgrounds
+    -- when wallpaper is active.  We chain on top of whatever Menu.init is
+    -- current (may already be wrapped by patchMenuInitForPagination).
+    -- -----------------------------------------------------------------------
+    local ok_menu, Menu = pcall(require, "ui/widget/menu")
+    if ok_menu and Menu and not plugin._orig_wp_menu_init then
+        local orig_menu_init = Menu.init
+        plugin._orig_wp_menu_init = orig_menu_init
+
+        Menu.init = function(menu_self, ...)
+            orig_menu_init(menu_self, ...)
+            if not _wallpaperEnabledFM() then return end
+            -- Covers two cases:
+            --   1. Fullscreen borderless overlays (Collections, History, etc.)
+            --   2. FM FileChooser (name == "filemanager") — does not have
+            --      covers_fullscreen or is_borderless but occupies the whole screen.
+            --      Without this, Menu:init resets background=COLOR_WHITE on every
+            --      file list rebuild and the original condition never catches it.
+            local is_fm_file_chooser   = (menu_self.name == "filemanager")
+            local is_fullscreen_overlay = menu_self.covers_fullscreen
+                                       and menu_self.is_borderless
+            if (is_fm_file_chooser or is_fullscreen_overlay) and menu_self[1] then
+                -- Clear the outer FrameContainer KOReader always builds white.
+                menu_self[1].background = nil
+                -- Also clear the inner OverlapGroup's first FrameContainer child.
+                local inner = menu_self[1][1]
+                if inner and inner[1] then
+                    inner[1].background = nil
+                end
+            end
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- UnderlineContainer colour patch
+    -- UnderlineContainer (used by MosaicMenuItem and ListMenuItem as the
+    -- per-item root widget) defaults to color = COLOR_WHITE so its focus
+    -- indicator line is invisible by default.  Against a white Menu background
+    -- that's fine, but against a wallpaper the white line is very visible
+    -- under every book item even when the item is not focused.
+    -- Fix: wrap UnderlineContainer:paintTo so that when wallpaper is active
+    -- and color == COLOR_WHITE (the "hidden / unfocused" state), we skip the
+    -- bb:paintRect call that draws the white line.
+    -- -----------------------------------------------------------------------
+    local ok_uc, UnderlineContainer = pcall(require, "ui/widget/container/underlinecontainer")
+    if ok_uc and UnderlineContainer and not plugin._orig_wp_uc_paintTo then
+        local Blitbuffer = require("ffi/blitbuffer")
+        local orig_uc_pt = UnderlineContainer.paintTo
+        plugin._orig_wp_uc_paintTo = orig_uc_pt
+
+        UnderlineContainer.paintTo = function(uc_self, bb, x, y)
+            if _wallpaperEnabledFM() and uc_self.color == Blitbuffer.COLOR_WHITE then
+                -- Paint only the child, skip the white underline.
+                local container_size = uc_self:getSize()
+                if not uc_self.dimen then
+                    local Geom = require("ui/geometry")
+                    uc_self.dimen = Geom:new{ x = x, y = y, w = container_size.w, h = container_size.h }
+                else
+                    uc_self.dimen.x = x
+                    uc_self.dimen.y = y
+                end
+                local content_size = uc_self[1]:getSize()
+                uc_self[1]:paintTo(bb, x, y)
+            else
+                orig_uc_pt(uc_self, bb, x, y)
+            end
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- TextBoxWidget transparent-composite patch
+    -- TextBoxWidget fills its internal blitbuffer (_bb) with
+    -- self.bgcolor = COLOR_WHITE before each paintTo, even with
+    -- bordersize=0 and without FrameContainer. This causes an opaque white
+    -- background on book titles in "Detailed" and "Detailed with Cover" views,
+    -- on the pagination bar text, and in any TextBoxWidget inside
+    -- the FM when the wallpaper is active.
+    --
+    -- Reuses the same technique as UI.makeAlphaTextBox (sui_core.lua):
+    --   1. renders the TBW into an 8-bit tmp_bb with bgcolor=white (normal)
+    --   2. inverts the tmp_bb (text=white/mask, background=black/transparent)
+    --   3. colorblitFromRGB32 composites with the original fgcolor over the
+    --      destination bb (which already has the wallpaper painted underneath)
+    --
+    -- Only intervenes when: active wallpaper AND bgcolor == COLOR_WHITE (i.e.
+    -- the default white background — custom bgcolors are respected).
+    -- -----------------------------------------------------------------------
+    local ok_tbw, TextBoxWidget = pcall(require, "ui/widget/textboxwidget")
+    if ok_tbw and TextBoxWidget and not plugin._orig_wp_tbw_paintTo then
+        local Blitbuffer = require("ffi/blitbuffer")
+        local orig_tbw_pt = TextBoxWidget.paintTo
+        plugin._orig_wp_tbw_paintTo = orig_tbw_pt
+
+        TextBoxWidget.paintTo = function(tbw_self, bb, x, y)
+            if not (_wallpaperEnabledFM()
+                    and tbw_self.bgcolor == Blitbuffer.COLOR_WHITE) then
+                return orig_tbw_pt(tbw_self, bb, x, y)
+            end
+
+            local dimen = tbw_self:getSize()
+            local w, h  = dimen.w, dimen.h
+            if w <= 0 or h <= 0 then
+                return orig_tbw_pt(tbw_self, bb, x, y)
+            end
+
+            local fgcolor = tbw_self.fgcolor or Blitbuffer.COLOR_BLACK
+        require("sui_core").paintWithAlphaMask(tbw_self, bb, x, y, w, h, fgcolor, orig_tbw_pt)
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- ProgressWidget bgcolor patch
+    -- ProgressWidget (reading progress bar in mosaic and list views)
+    -- is created with bgcolor = COLOR_WHITE and paints a background rectangle
+    -- directly in paintTo, without going through FrameContainer.
+    -- Fix: temporarily replace bgcolor with nil during paint to omit the
+    -- white fill; the border and the fill bar (fillcolor/bordercolor)
+    -- are drawn over the existing wallpaper.
+    -- -----------------------------------------------------------------------
+    local ok_pw, ProgressWidget = pcall(require, "ui/widget/progresswidget")
+    if ok_pw and ProgressWidget and not plugin._orig_wp_pw_paintTo then
+        local Blitbuffer = require("ffi/blitbuffer")
+        local orig_pw_pt = ProgressWidget.paintTo
+        plugin._orig_wp_pw_paintTo = orig_pw_pt
+
+        ProgressWidget.paintTo = function(pw_self, bb, x, y)
+            if _wallpaperEnabledFM()
+                    and pw_self.bgcolor == Blitbuffer.COLOR_WHITE then
+                local saved = pw_self.bgcolor
+                pw_self.bgcolor = nil
+                orig_pw_pt(pw_self, bb, x, y)
+                pw_self.bgcolor = saved
+            else
+                orig_pw_pt(pw_self, bb, x, y)
+            end
+        end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- ffi/util.purgeDir safety patch
+-- Root cause: purgeDir iterates a directory with lfs.dir(), then calls
+-- lfs.attributes(fullpath) on each entry. If an entry disappears between
+-- the lfs.dir() listing and the lfs.attributes() call (race condition with
+-- macOS .DS_Store / temp files, or files removed mid-iteration), attributes
+-- is nil and `attributes.mode` crashes with "attempt to index a nil value".
+--
+-- Strategy: require("ffi/util") returns the same cached table that
+-- filemanager.lua holds as its local `ffiUtil` upvalue.  Replacing
+-- ffiUtil.purgeDir on that table means every caller — including the
+-- recursive call inside purgeDir itself — picks up the safe version,
+-- because the recursive call is `util.purgeDir(fullpath)` via the table,
+-- not a local upvalue.
+--
+-- The patch is applied once (guarded by _simpleui_purgeDir_patched) and
+-- reversed cleanly in teardownAll.
+-- ---------------------------------------------------------------------------
+function M.patchPurgeDir(plugin)
+    local ok, ffiUtil = pcall(require, "ffi/util")
+    if not ok or not ffiUtil or not ffiUtil.purgeDir then return end
+    if ffiUtil._simpleui_purgeDir_patched then return end
+    ffiUtil._simpleui_purgeDir_patched = true
+
+    local lfs          = require("libs/libkoreader-lfs")
+    local orig_purgeDir = ffiUtil.purgeDir
+    if plugin then plugin._orig_ffi_purgeDir = orig_purgeDir end
+
+    ffiUtil.purgeDir = function(dir)
+        local ok2, err
+        ok2, err = lfs.attributes(dir)
+        if not ok2 or err ~= nil then
+            return nil, err
+        end
+        for f in lfs.dir(dir) do
+            if f ~= "." and f ~= ".." then
+                local fullpath = ffiUtil.joinPath(dir, f)
+                local attributes = lfs.attributes(fullpath)
+                if not attributes then
+                    -- Entry disappeared between lfs.dir() and lfs.attributes()
+                    -- (race condition with .DS_Store, temp files, etc.); skip.
+                elseif attributes.mode == "directory" then
+                    ok2, err = ffiUtil.purgeDir(fullpath)
+                    if not ok2 or err ~= nil then return ok2, err end
+                else
+                    ok2, err = os.remove(fullpath)
+                    if not ok2 or err ~= nil then return ok2, err end
+                end
+            end
+        end
+        return os.remove(dir)
+    end
+end
+
+-- (kept for teardown symmetry — no longer does folder-level guarding)
+function M.patchDeleteFile(FileManager, plugin)
+    if FileManager._simpleui_deleteFile_patched then return end
+    FileManager._simpleui_deleteFile_patched = true
+
+    local orig_deleteFile = FileManager.deleteFile
+    if plugin then plugin._orig_fm_deleteFile = orig_deleteFile end
+
+    FileManager.deleteFile = function(fm_self, file, is_file)
+        if not is_file then
+            if not file then
+                logger.warn("simpleui: deleteFile called with nil folder path, aborting")
+                return false
+            end
+            local lfs2 = require("libs/libkoreader-lfs")
+            if not lfs2.attributes(file, "mode") then
+                logger.warn("simpleui: deleteFile: folder gone before purgeDir:", tostring(file))
+                -- Return true so post_delete_callback fires and FM refreshes.
+                return true
+            end
+        end
+        return orig_deleteFile(fm_self, file, is_file)
+    end
+end
+
+-- Called from patchUIManagerShow after a fullscreen overlay (Collections,
+-- History, etc.) has been wrapped with wrapWithNavbar and shown.
+function M.injectWallpaperIntoFullscreenWidget(widget)
+    if not widget then return end
+    -- Only inject wallpaper into the known FM-style overlay widgets.
+    -- Utility overlays that happen to set covers_fullscreen (SortWidget,
+    -- PathChooser, etc.) must be left untouched.
+    if not (M._WALLPAPER_NAMES and M._WALLPAPER_NAMES[widget.name]) then return end
+    if not (_wallpaperEnabledFM() and _getWallpaperBg()) then return end
+    _injectWallpaperIntoWidget(widget)
+end
+
+
 function M.installAll(plugin)
     local _prof_enabled = G_reader_settings:isTrue("simpleui_profile_startup")
     local _t0 = _prof_enabled and os.clock() or 0
@@ -2366,6 +3062,9 @@ function M.installAll(plugin)
         end
     end
 
+    M.patchPurgeDir(plugin)
+    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManager then M.patchDeleteFile(FileManager, plugin) end
     M.patchFileManagerClass(plugin);     _pp("patchFileManagerClass")
     M.patchStartWithMenu();              _pp("patchStartWithMenu")
     M.patchBookList(plugin);             _pp("patchBookList")
@@ -2376,7 +3075,13 @@ function M.installAll(plugin)
     M.patchMenuInitForPagination(plugin); _pp("patchMenuInitForPagination")
     M.patchMenuForNavpager(plugin);      _pp("patchMenuForNavpager")
     M.patchBookInfoNavigation(plugin);   _pp("patchBookInfoNavigation")
-    if G_reader_settings:isTrue("simpleui_debug_button_bounds") then
+    -- Install the FM tab icon patch so system icon overrides survive menu rebuilds.
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    if ok_ss and SUIStyle then
+        pcall(SUIStyle.installTabIconPatch, plugin)
+    end
+    -- Install button-bounds overlay when the debug setting is on at startup.
+    if SUISettings:isTrue("simpleui_debug_button_bounds") then
         M.installButtonBoundsDebug(plugin)
     end
     local ok_fc, FC = pcall(require, "sui_foldercovers")
@@ -2387,9 +3092,27 @@ function M.installAll(plugin)
     local ok_bm, BM = pcall(require, "sui_browsemeta")
     if ok_bm and BM and BM.isEnabled() then pcall(BM.install) end
     _pp("browsemeta — installAll total")
+    -- Wallpaper in FM and fullscreen overlay surfaces.
+    M.patchWallpaperFM(plugin)
 end
 
 function M.teardownAll(plugin)
+    -- Restore ffi/util.purgeDir patch.
+    local ffiUtil = package.loaded["ffi/util"]
+    if ffiUtil and ffiUtil._simpleui_purgeDir_patched and plugin._orig_ffi_purgeDir then
+        ffiUtil.purgeDir                  = plugin._orig_ffi_purgeDir
+        ffiUtil._simpleui_purgeDir_patched = nil
+        plugin._orig_ffi_purgeDir         = nil
+    end
+
+    -- Restore FileManager.deleteFile patch.
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    if FM and FM._simpleui_deleteFile_patched and plugin._orig_fm_deleteFile then
+        FM.deleteFile                    = plugin._orig_fm_deleteFile
+        FM._simpleui_deleteFile_patched  = nil
+        plugin._orig_fm_deleteFile       = nil
+    end
+
     -- Restore UIManager patches first (highest call frequency).
     if plugin._orig_uimanager_show then
         UIManager.show              = plugin._orig_uimanager_show
@@ -2442,6 +3165,9 @@ function M.teardownAll(plugin)
             FileManager.setupLayout = plugin._orig_fm_setup
             plugin._orig_fm_setup   = nil
         end
+        -- Clear the setupLayout guard so patchFileManagerClass reinstalls the
+        -- wrapper cleanly on the next installAll (e.g. after disable→enable).
+        FileManager._simpleui_setup_patched = nil
     end
 
     local FMColl = package.loaded["apps/filemanager/filemanagercollection"]
@@ -2522,6 +3248,12 @@ function M.teardownAll(plugin)
         FileManagerMenu._simpleui_startwith_orig    = nil
         FileManagerMenu._simpleui_startwith_patched = nil
     end
+    -- Remove the FM tab icon patch installed by SUIStyle.
+    if plugin._sysicon_fmmenu_patched then
+        local ok_ss, SUIStyle = pcall(require, "sui_style")
+        if ok_ss and SUIStyle then pcall(SUIStyle.removeTabIconPatch) end
+        plugin._sysicon_fmmenu_patched = nil
+    end
 
     local Dispatcher = package.loaded["dispatcher"]
     if Dispatcher and Dispatcher._simpleui_execute_patched then
@@ -2572,6 +3304,70 @@ function M.teardownAll(plugin)
     if BM then
         pcall(BM.uninstall)
         pcall(BM.reset)
+    end
+
+    -- Restore wallpaper FM patch.
+    -- Do NOT restore _orig_fm_wallpaper_setup: patchFileManagerClass's teardown
+    -- above has already restored FileManager.setupLayout to the KOReader native
+    -- version (plugin._orig_fm_setup).  The wallpaper wrapper saved
+    -- base_setupLayout = the patchFileManagerClass version at install time; putting
+    -- that stale pointer back now would leave an extra, unreachable wrapper in the
+    -- chain on the next FM instance.
+    -- Instead, just discard the saved pointer and clear the guard flag so that the
+    -- next installAll (triggered when the new FM instance calls plugin:init()) can
+    -- reinstall the wallpaper wrapper on top of the freshly reinstalled
+    -- patchFileManagerClass wrapper.
+    local FM_wp = package.loaded["apps/filemanager/filemanager"]
+    if FM_wp then
+        -- Restore FileManager.paintTo (our wallpaper hook lives here).
+        -- _simpleui_orig_fm_paintTo is nil when FM had no own paintTo
+        -- (inherited WidgetContainer:paintTo) — setting to nil restores that.
+        FM_wp.paintTo                        = plugin._simpleui_orig_fm_paintTo
+        plugin._simpleui_orig_fm_paintTo     = nil
+        plugin._orig_fm_wallpaper_setup      = nil
+        FM_wp._simpleui_wallpaper_fm_patched = nil   -- allow reinstall on next init
+    end
+
+    -- Restore wallpaper Button:paintTo patch.
+    local Button_wp = package.loaded["ui/widget/button"]
+    if Button_wp and plugin._orig_wp_button_paintTo then
+        Button_wp.paintTo              = plugin._orig_wp_button_paintTo
+        plugin._orig_wp_button_paintTo = nil
+    end
+
+    -- Restore wallpaper IconWidget:init patch.
+    local IW_wp = package.loaded["ui/widget/iconwidget"]
+    if IW_wp and plugin._orig_wp_iconwidget_init then
+        IW_wp.init                      = plugin._orig_wp_iconwidget_init
+        plugin._orig_wp_iconwidget_init = nil
+    end
+
+    -- Restore wallpaper Menu.init patch.
+    local Menu_wp = package.loaded["ui/widget/menu"]
+    if Menu_wp and plugin._orig_wp_menu_init then
+        Menu_wp.init              = plugin._orig_wp_menu_init
+        plugin._orig_wp_menu_init = nil
+    end
+
+    -- Restore wallpaper UnderlineContainer:paintTo patch.
+    local UC_wp = package.loaded["ui/widget/container/underlinecontainer"]
+    if UC_wp and plugin._orig_wp_uc_paintTo then
+        UC_wp.paintTo              = plugin._orig_wp_uc_paintTo
+        plugin._orig_wp_uc_paintTo = nil
+    end
+
+    -- Restore wallpaper TextBoxWidget:paintTo patch.
+    local TBW_wp = package.loaded["ui/widget/textboxwidget"]
+    if TBW_wp and plugin._orig_wp_tbw_paintTo then
+        TBW_wp.paintTo              = plugin._orig_wp_tbw_paintTo
+        plugin._orig_wp_tbw_paintTo = nil
+    end
+
+    -- Restore wallpaper ProgressWidget:paintTo patch.
+    local PW_wp = package.loaded["ui/widget/progresswidget"]
+    if PW_wp and plugin._orig_wp_pw_paintTo then
+        PW_wp.paintTo              = plugin._orig_wp_pw_paintTo
+        plugin._orig_wp_pw_paintTo = nil
     end
 end
 

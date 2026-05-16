@@ -21,6 +21,7 @@ local _ = require("sui_i18n").translate
 local Config          = require("sui_config")
 
 local UI      = require("sui_core")
+local SUISettings = require("sui_store")
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 local PAD     = UI.PAD
 local MOD_GAP = UI.MOD_GAP
@@ -43,11 +44,11 @@ local SETTING_TYPE  = "reading_stats_type"   -- suffix: pfx .. "reading_stats_ty
 local SETTING_ALIGN = "reading_stats_align"  -- suffix: pfx .. "reading_stats_align"
 
 local function getType(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_TYPE) or "cards"
+    return SUISettings:readSetting(pfx .. SETTING_TYPE) or "cards"
 end
 
 local function getAlign(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_ALIGN)
+    local v = SUISettings:readSetting(pfx .. SETTING_ALIGN)
     if v == "left" or v == "right" or v == "center" then return v end
     return "center"
 end
@@ -104,45 +105,47 @@ local _STREAK_ICON     = ""            -- U+F490 Nerd Fonts flame
 local _STREAK_ICON_CLR = Blitbuffer.gray(0.80)  -- dark grey; 0=black, 1=white
 local _STREAK_ICON_GAP = 6                   -- pixels between icon and number
 
-local function makeStreakValWidget(val_str, d)
+local function makeStreakValWidget(val_str, d, clr_blk)
     return HorizontalGroup:new{ align = "center",
-        TextWidget:new{
+        UI.makeColoredText{
             text    = _STREAK_ICON,
             face    = d.face_val,
             fgcolor = _STREAK_ICON_CLR,
         },
         HorizontalSpan:new{ width = _STREAK_ICON_GAP },
-        TextWidget:new{
+        UI.makeColoredText{
             text    = val_str,
             face    = d.face_val,
             bold    = true,
-            fgcolor = _CLR_TEXT_BLK,
+            fgcolor = clr_blk or _CLR_TEXT_BLK,
         },
     }
 end
 
-local function buildStatCardWidget(card_w, stat_id, stats, d, align)
+local function buildStatCardWidget(card_w, stat_id, stats, d, align, colors, transparent)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
     local lbl_str = entry.label_fn and entry.label_fn(stats) or entry.label
+    local clr_blk = colors and colors.blk or _CLR_TEXT_BLK
+    local clr_sub = colors and colors.sub or CLR_TEXT_SUB
     return FrameContainer:new{
         dimen      = Geom:new{ w = card_w, h = d.card_h },
         bordersize = 1,
         color      = _CLR_CARD_BDR,
-        background = Blitbuffer.COLOR_WHITE,
+        background = not transparent and Blitbuffer.COLOR_WHITE or nil,
         radius     = d.corner_r,
         padding    = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = card_w, h = d.card_h },
             VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
-                    and makeStreakValWidget(val_str, d)
-                    or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
-                TextWidget:new{
+                    and makeStreakValWidget(val_str, d, clr_blk)
+                    or  UI.makeColoredText{ text = val_str, face = d.face_val, bold = true, fgcolor = clr_blk },
+                UI.makeColoredText{
                     text    = lbl_str,
                     face    = d.face_lbl,
-                    fgcolor = CLR_TEXT_SUB,
+                    fgcolor = clr_sub,
                 },
             },
         },
@@ -151,11 +154,13 @@ end
 
 -- Flat mode: no border, tinted background, content aligned.
 local _CLR_FLAT_BG = Blitbuffer.gray(0.08)
-local function buildStatFlatWidget(card_w, stat_id, stats, d, align)
+local function buildStatFlatWidget(card_w, stat_id, stats, d, align, colors)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
     local lbl_str = entry.label_fn and entry.label_fn(stats) or entry.label
+    local clr_blk = colors and colors.blk or _CLR_TEXT_BLK
+    local clr_sub = colors and colors.sub or CLR_TEXT_SUB
     return FrameContainer:new{
         dimen      = Geom:new{ w = card_w, h = d.card_h },
         bordersize = 0,
@@ -166,38 +171,39 @@ local function buildStatFlatWidget(card_w, stat_id, stats, d, align)
             dimen = Geom:new{ w = card_w, h = d.card_h },
             VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
-                    and makeStreakValWidget(val_str, d)
-                    or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
-                TextWidget:new{
+                    and makeStreakValWidget(val_str, d, clr_blk)
+                    or  UI.makeColoredText{ text = val_str, face = d.face_val, bold = true, fgcolor = clr_blk },
+                UI.makeColoredText{
                     text    = lbl_str,
                     face    = d.face_lbl,
-                    fgcolor = CLR_TEXT_SUB,
+                    fgcolor = clr_sub,
                 },
             },
         },
     }
 end
-local function buildStatListCell(cell_w, stat_id, stats, show_sep, d, align)
+local function buildStatListCell(cell_w, stat_id, stats, show_sep, d, align, colors)
     local entry = STAT_MAP[stat_id]
     if not entry then return nil end
     local val_str = entry.value(stats)
     local lbl_str = entry.label_fn and entry.label_fn(stats) or entry.label
+    local clr_blk = colors and colors.blk or _CLR_TEXT_BLK
+    local clr_sub = colors and colors.sub or CLR_TEXT_SUB
 
     local card = FrameContainer:new{
         dimen      = Geom:new{ w = cell_w, h = d.card_h },
         bordersize = 0,
-        background = Blitbuffer.COLOR_WHITE,
         padding    = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = cell_w, h = d.card_h },
             VerticalGroup:new{ align = align,
                 stat_id == "streak" and stats.streak >= 5
-                    and makeStreakValWidget(val_str, d)
-                    or  TextWidget:new{ text = val_str, face = d.face_val, bold = true, fgcolor = _CLR_TEXT_BLK },
-                TextWidget:new{
+                    and makeStreakValWidget(val_str, d, clr_blk)
+                    or  UI.makeColoredText{ text = val_str, face = d.face_val, bold = true, fgcolor = clr_blk },
+                UI.makeColoredText{
                     text    = lbl_str,
                     face    = d.face_lbl,
-                    fgcolor = CLR_TEXT_SUB,
+                    fgcolor = clr_sub,
                 },
             },
         },
@@ -234,15 +240,15 @@ M.default_on = false
 M.MAX_ITEMS  = RS_N_COLS   -- public field instead of getMaxItems() function
 
 function M.isEnabled(pfx)
-    return G_reader_settings:readSetting(pfx .. "reading_stats_enabled") == true
+    return SUISettings:readSetting(pfx .. "reading_stats_enabled") == true
 end
 
 function M.setEnabled(pfx, on)
-    G_reader_settings:saveSetting(pfx .. "reading_stats_enabled", on)
+    SUISettings:saveSetting(pfx .. "reading_stats_enabled", on)
 end
 
 function M.getCountLabel(pfx)
-    local n      = #(G_reader_settings:readSetting(pfx .. "reading_stats_items") or {})
+    local n      = #(SUISettings:readSetting(pfx .. "reading_stats_items") or {})
     local max_rs = M.MAX_ITEMS
     local rem    = max_rs - n
     if n == 0   then return nil end
@@ -268,7 +274,7 @@ end
 
 function M.build(w, ctx)
     if not M.isEnabled(ctx.pfx) then return nil end
-    local stat_ids = G_reader_settings:readSetting(ctx.pfx .. "reading_stats_items") or {}
+    local stat_ids = SUISettings:readSetting(ctx.pfx .. "reading_stats_items") or {}
 
     -- Compute all scaled dims once for this render pass.
     local scale     = Config.getModuleScale("reading_stats", ctx and ctx.pfx)
@@ -291,14 +297,21 @@ function M.build(w, ctx)
         face_ph  = Font:getFace("smallinfofont", _ph_fs),
     }
 
+    -- Theme: when fg is set use it for all text; otherwise fall back to module defaults.
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _CLR_TEXT_BLK_EFF = _theme_fg or _CLR_TEXT_BLK
+    local CLR_TEXT_SUB_EFF  = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+
     -- Show a placeholder when enabled but no stats have been selected yet.
     if #stat_ids == 0 then
         return CenterContainer:new{
             dimen = Geom:new{ w = w, h = d.card_h },
-            TextWidget:new{
+            UI.makeColoredText{
                 text    = _("No stats selected"),
                 face    = d.face_ph,
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = CLR_TEXT_SUB_EFF,
                 width   = w - PAD * 2,
             },
         }
@@ -324,8 +337,9 @@ function M.build(w, ctx)
 
     if mode == "list" then
         local cell_w = math.floor(w / n)
+        local colors = { blk = _CLR_TEXT_BLK_EFF, sub = CLR_TEXT_SUB_EFF }
         for i = 1, n do
-            local cell = buildStatListCell(cell_w, stat_ids[i], stats, i < n, d, align)
+            local cell = buildStatListCell(cell_w, stat_ids[i], stats, i < n, d, align, colors)
                       or OverlapGroup:new{
                              dimen = Geom:new{ w = cell_w, h = d.card_h },
                          }
@@ -353,12 +367,15 @@ function M.build(w, ctx)
         -- "flat" = no border, tinted background; "cards" = bordered white.
         local avail_w = w - PAD * 2
         local card_w  = math.floor((avail_w - d.gap * (n - 1)) / n)
+        local colors  = { blk = _CLR_TEXT_BLK_EFF, sub = CLR_TEXT_SUB_EFF }
         for i = 1, n do
             local card
             if mode == "flat" then
-                card = buildStatFlatWidget(card_w, stat_ids[i], stats, d, align)
+                card = buildStatFlatWidget(card_w, stat_ids[i], stats, d, align, colors)
+            elseif mode == "cards_transparent" then
+                card = buildStatCardWidget(card_w, stat_ids[i], stats, d, align, colors, true)
             else
-                card = buildStatCardWidget(card_w, stat_ids[i], stats, d, align)
+                card = buildStatCardWidget(card_w, stat_ids[i], stats, d, align, colors, false)
             end
             card = card or FrameContainer:new{
                 dimen = Geom:new{ w = card_w, h = d.card_h },
@@ -420,7 +437,7 @@ function M.getMenuItems(ctx_menu)
     local items_key   = pfx .. "reading_stats_items"
     local MAX_RS      = M.MAX_ITEMS
 
-    local function getItems() return G_reader_settings:readSetting(items_key) or {} end
+    local function getItems() return SUISettings:readSetting(items_key) or {} end
     local function isSelected(id)
         for _, v in ipairs(getItems()) do if v == id then return true end end; return false
     end
@@ -436,7 +453,7 @@ function M.getMenuItems(ctx_menu)
             end
             new_items[#new_items+1] = id
         end
-        G_reader_settings:saveSetting(items_key, new_items); refresh()
+        SUISettings:saveSetting(items_key, new_items); refresh()
     end
 
     local items = {
@@ -449,7 +466,17 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getType(pfx) == "cards" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_TYPE, "cards")
+                        SUISettings:saveSetting(pfx .. SETTING_TYPE, "cards")
+                        refresh()
+                    end,
+                },
+                {
+                    text           = _lc("Cards - Transparent"),
+                    radio          = true,
+                    keep_menu_open = true,
+                    checked_func   = function() return getType(pfx) == "cards_transparent" end,
+                    callback       = function()
+                        SUISettings:saveSetting(pfx .. SETTING_TYPE, "cards_transparent")
                         refresh()
                     end,
                 },
@@ -459,7 +486,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getType(pfx) == "flat" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_TYPE, "flat")
+                        SUISettings:saveSetting(pfx .. SETTING_TYPE, "flat")
                         refresh()
                     end,
                 },
@@ -469,7 +496,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getType(pfx) == "list" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_TYPE, "list")
+                        SUISettings:saveSetting(pfx .. SETTING_TYPE, "list")
                         refresh()
                     end,
                 },
@@ -504,7 +531,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getAlign(pfx) == "left"   end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "left")
+                        SUISettings:saveSetting(pfx .. SETTING_ALIGN, "left")
                         refresh()
                     end,
                 },
@@ -514,7 +541,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getAlign(pfx) == "center" end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "center")
+                        SUISettings:saveSetting(pfx .. SETTING_ALIGN, "center")
                         refresh()
                     end,
                 },
@@ -524,7 +551,7 @@ function M.getMenuItems(ctx_menu)
                     keep_menu_open = true,
                     checked_func   = function() return getAlign(pfx) == "right"  end,
                     callback       = function()
-                        G_reader_settings:saveSetting(pfx .. SETTING_ALIGN, "right")
+                        SUISettings:saveSetting(pfx .. SETTING_ALIGN, "right")
                         refresh()
                     end,
                 },
@@ -543,7 +570,7 @@ function M.getMenuItems(ctx_menu)
                 item_table = sort_items, callback = function()
                     local new_order = {}
                     for _, item in ipairs(sort_items) do new_order[#new_order+1] = item.orig_item end
-                    G_reader_settings:saveSetting(items_key, new_order); refresh()
+                    SUISettings:saveSetting(items_key, new_order); refresh()
                 end })
         end },
     }

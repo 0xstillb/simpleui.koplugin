@@ -1,6 +1,7 @@
 -- module_coverdeck.lua
 -- Displays recent or TBR books as a cover-flow carousel.
 
+local Blitbuffer  = require("ffi/blitbuffer")
 local Device         = require("device")
 local Font           = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -17,6 +18,7 @@ local logger         = require("logger")
 
 local Config       = require("sui_config")
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local PAD2         = UI.PAD2
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -82,27 +84,27 @@ local _ELEM_LABELS = {
 -- ---------------------------------------------------------------------------
 
 local function getSource(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_SOURCE) or "recent"
+    return SUISettings:readSetting(pfx .. SETTING_SOURCE) or "recent"
 end
 
 local function getTitlePos(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_TITLE_POS) or "below"
+    return SUISettings:readSetting(pfx .. SETTING_TITLE_POS) or "below"
 end
 
 local function showFinished(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_SHOW_FINISHED) == true
+    return SUISettings:readSetting(pfx .. SETTING_SHOW_FINISHED) == true
 end
 
 local function _showElem(pfx, key)
-    return G_reader_settings:nilOrTrue(pfx .. "flow_show_" .. key)
+    return SUISettings:nilOrTrue(pfx .. "flow_show_" .. key)
 end
 
 local function _toggleElem(pfx, key)
-    G_reader_settings:saveSetting(pfx .. "flow_show_" .. key, not _showElem(pfx, key))
+    SUISettings:saveSetting(pfx .. "flow_show_" .. key, not _showElem(pfx, key))
 end
 
 local function _getElemOrder(pfx)
-    local saved = G_reader_settings:readSetting(pfx .. ELEM_ORDER_KEY)
+    local saved = SUISettings:readSetting(pfx .. ELEM_ORDER_KEY)
     if type(saved) ~= "table" or #saved == 0 then return _ELEM_DEFAULT_ORDER end
     local seen, result = {}, {}
     for _i, v in ipairs(saved) do
@@ -311,6 +313,8 @@ M.name        = _("Cover Deck")
 M.label       = nil
 M.enabled_key = "coverdeck"
 M.default_on  = false
+M.has_covers  = true   -- activates e-ink dithering and cover poll
+M.is_book_mod = true   -- suppresses empty-state when active
 
 function M.reset()
     _SH                 = nil
@@ -364,6 +368,13 @@ function M.build(w, ctx)
 
     local SH = getSH()
     if not SH then return nil end
+
+    -- Theme colors
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local CLR_TEXT_EFF     = _theme_fg or Blitbuffer.COLOR_BLACK
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
 
     -- Scales
     local scale       = c and c.scale       or Config.getModuleScale("coverdeck", pfx)
@@ -542,10 +553,11 @@ function M.build(w, ctx)
     -- Title widget
     local title_widget
     if show_title then
-        title_widget  = TextWidget:new{
+        title_widget  = UI.makeColoredText{
             text      = truncateTitle(bd.title, 30),
             face      = face_title,
             bold      = true,
+            fgcolor   = CLR_TEXT_EFF,
             width     = inner_w,
             alignment = "center",
         }
@@ -613,10 +625,10 @@ function M.build(w, ctx)
 
     if #stats_parts > 0 then
         if #meta > 0 then meta[#meta+1] = SH.vspan(PAD2, ctx.vspan_pool) end
-        meta[#meta+1] = TextWidget:new{
+        meta[#meta+1] = UI.makeColoredText{
             text      = table.concat(stats_parts, " · "),
             face      = face_info,
-            fgcolor   = CLR_TEXT_SUB,
+            fgcolor   = CLR_TEXT_SUB_EFF,
             width     = inner_w,
             alignment = "center",
         }
@@ -768,7 +780,7 @@ function M.getMenuItems(ctx_menu)
                 text         = _lc("Recent Books"), radio = true,
                 checked_func = function() return getSource(pfx) == "recent" end,
                 callback     = function()
-                    G_reader_settings:saveSetting(pfx .. SETTING_SOURCE, "recent")
+                    SUISettings:saveSetting(pfx .. SETTING_SOURCE, "recent")
                     refresh()
                 end,
             },
@@ -776,7 +788,7 @@ function M.getMenuItems(ctx_menu)
                 text         = _lc("To Be Read"), radio = true,
                 checked_func = function() return getSource(pfx) == "tbr" end,
                 callback     = function()
-                    G_reader_settings:saveSetting(pfx .. SETTING_SOURCE, "tbr")
+                    SUISettings:saveSetting(pfx .. SETTING_SOURCE, "tbr")
                     refresh()
                 end,
             },
@@ -790,7 +802,7 @@ function M.getMenuItems(ctx_menu)
                 text         = _lc("Above"), radio = true,
                 checked_func = function() return getTitlePos(pfx) == "above" end,
                 callback     = function()
-                    G_reader_settings:saveSetting(pfx .. SETTING_TITLE_POS, "above")
+                    SUISettings:saveSetting(pfx .. SETTING_TITLE_POS, "above")
                     refresh()
                 end,
             },
@@ -798,7 +810,7 @@ function M.getMenuItems(ctx_menu)
                 text         = _lc("Below"), radio = true,
                 checked_func = function() return getTitlePos(pfx) == "below" end,
                 callback     = function()
-                    G_reader_settings:saveSetting(pfx .. SETTING_TITLE_POS, "below")
+                    SUISettings:saveSetting(pfx .. SETTING_TITLE_POS, "below")
                     refresh()
                 end,
             },
@@ -837,7 +849,7 @@ function M.getMenuItems(ctx_menu)
                             for _i, k in ipairs(_getElemOrder(pfx)) do
                                 if not active_set[k] then new_order[#new_order+1] = k end
                             end
-                            G_reader_settings:saveSetting(pfx .. ELEM_ORDER_KEY, new_order)
+                            SUISettings:saveSetting(pfx .. ELEM_ORDER_KEY, new_order)
                             refresh()
                         end,
                     })
@@ -860,7 +872,7 @@ function M.getMenuItems(ctx_menu)
         checked_func   = function() return showFinished(pfx) end,
         keep_menu_open = true,
         callback       = function()
-            G_reader_settings:saveSetting(pfx .. SETTING_SHOW_FINISHED, not showFinished(pfx))
+            SUISettings:saveSetting(pfx .. SETTING_SHOW_FINISHED, not showFinished(pfx))
             refresh()
         end,
     }

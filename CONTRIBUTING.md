@@ -148,35 +148,72 @@ msgmerge --update locale/<lang>.po locale/simpleui.pot
 - Prefer `local` variables; avoid polluting the module-level scope
 - If a string is shown to the user, it must be wrapped in `_()`
 - Add a short comment when the reason for a decision is not obvious from the code
+- All settings keys written to `G_reader_settings` must use either the `simpleui_` or `navbar_` prefix — never bare unprefixed keys
+
+### User data directories
+
+SimpleUI stores user-customisable files **outside the plugin folder** so they survive plugin updates. Do not place user files inside the plugin directory.
+
+| Purpose | Path on device |
+|---|---|
+| Custom quick-action icons | `<KOReader settings dir>/simpleui/custom_icons/` |
+| Custom quote files | `<KOReader settings dir>/simpleui/custom_quotes/` |
+
+`<KOReader settings dir>` is the KOReader settings directory returned by `DataStorage:getSettingsDir()` — typically `/mnt/onboard/.adds/koreader/settings` on Kobo or `/mnt/us/koreader/settings` on Kindle.
+
+On first run (and after each update) the plugin automatically creates these directories and migrates any files that were previously stored inside the plugin folder.
+
+If you are adding a new feature that requires user-supplied files, always resolve the path via `DataStorage:getSettingsDir() .. "/simpleui/<your_subfolder>"` and create the directory in the `simpleui_userdata_migrated_v*` block in `main.lua`.
+
+### Building a release ZIP
+
+Run `make build` from inside the plugin folder. This produces `simpleui.koplugin.zip` in the parent directory.
+
+The Makefile automatically excludes development-only files (README, LICENSE, Makefile itself, `.git`, etc.) and the contents of the user data directories (`icons/custom/` and `desktop_modules/custom_quotes/`) so that user files on a device are never overwritten by an update.
 
 ### File structure
 
 ```
 simpleui.koplugin/
-├── main.lua                  — plugin entry point and lifecycle
-├── config.lua                — constants, action catalogue, settings helpers
-├── ui.lua                    — shared layout infrastructure
-├── bottombar.lua             — bottom navigation bar
-├── topbar.lua                — top status bar
-├── homescreen.lua            — Home Screen widget
-├── patches.lua               — KOReader monkey-patches
-├── menu.lua                  — settings menu (lazy-loaded)
-├── i18n.lua                  — translation loader
-├── quotes.lua                — Quote of the Day database
+├── main.lua                  — plugin entry point, lifecycle, and user-data migration
+├── sui_config.lua            — constants, action catalogue, settings helpers
+├── sui_core.lua              — shared layout infrastructure
+├── sui_bottombar.lua         — bottom navigation bar
+├── sui_topbar.lua            — top status bar
+├── sui_homescreen.lua        — Home Screen widget
+├── sui_patches.lua           — KOReader monkey-patches
+├── sui_menu.lua              — settings menu (lazy-loaded)
+├── sui_i18n.lua              — translation loader
+├── sui_quickactions.lua      — custom quick-action CRUD and icon picker
+├── sui_titlebar.lua          — custom title bar
+├── sui_browsemeta.lua        — folder covers and browse metadata
+├── sui_updater.lua           — OTA update checker and installer
 ├── desktop_modules/
 │   ├── moduleregistry.lua    — module registry and ordering
-│   ├── module_header.lua     — Header module (clock, date, quote)
 │   ├── module_currently.lua  — Currently Reading module
 │   ├── module_recent.lua     — Recent Books module
+│   ├── module_new_books.lua  — New Books module
 │   ├── module_collections.lua — Collections module
+│   ├── module_tbr.lua        — To Be Read module
 │   ├── module_reading_goals.lua — Reading Goals module
 │   ├── module_reading_stats.lua — Reading Stats module
 │   ├── module_quick_actions.lua — Quick Actions module
-│   └── module_books_shared.lua  — shared helpers for book modules
+│   ├── module_quote.lua      — Quote of the Day module
+│   ├── module_clock.lua      — Clock module
+│   ├── module_coverdeck.lua  — Cover Deck module
+│   ├── module_books_shared.lua  — shared helpers for book modules
+│   ├── module_stats_provider.lua — reading stats data provider
+│   ├── module_action_list.lua — action list helpers
+│   ├── quotes.lua            — built-in quote database
+│   └── custom_quotes/        — placeholder only; user files live in DataStorage
+├── icons/
+│   ├── *.svg                 — built-in icons
+│   └── custom/               — placeholder only; user files live in DataStorage
 └── locale/
-    ├── simpleui.pot          — translation template (190 strings)
+    ├── simpleui.pot          — translation template
     ├── pt_PT.po              — Portuguese (Portugal)
-    └── pt_BR.po              — Portuguese (Brazil)
+    ├── pt_BR.po              — Portuguese (Brazil)
+    └── …                     — other language files
 ```
 
 ---
@@ -188,6 +225,8 @@ Before submitting, please check:
 - [ ] The change works on a real device or the KOReader emulator
 - [ ] Any new UI strings are wrapped in `_()`
 - [ ] New strings are added to `locale/simpleui.pot`
+- [ ] New `G_reader_settings` keys use the `simpleui_` or `navbar_` prefix
+- [ ] Any new user files are stored in `DataStorage/simpleui/` (not inside the plugin folder)
 - [ ] The commit message clearly describes the change
 - [ ] No debug logging or commented-out code is left in
 

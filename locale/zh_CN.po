@@ -21,7 +21,7 @@ msgstr "  实体书  (%d 本在 %s)"
 
 #: desktop_modules/module_reading_goals.lua:648
 msgid "  Set Goal  (%d min/day)"
-msgstr "  设置目标  (每天 %d 分钟)"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:627
 msgid "  Set Goal  (%s)"
@@ -87,7 +87,7 @@ msgstr "操作列表"
 #: sui_menu.lua:1408 desktop_modules/module_action_list.lua:459
 #: desktop_modules/module_quick_actions.lua:318
 msgid "Add at least 2 actions to arrange."
-msgstr "请至少添加 2 个操作以便排序。"
+msgstr ""
 
 #: desktop_modules/module_tbr.lua:568
 msgid "Add at least 2 books to arrange."
@@ -302,11 +302,11 @@ msgstr "浏览方式"
 
 #: sui_menu.lua:2133
 msgid "Browse by Author / Series / Tags"
-msgstr "按 作者/系列/标签 浏览"
+msgstr ""
 
 #: sui_bottombar.lua:1479
 msgid "Browse by Authors/Series/Tags not available."
-msgstr "按 作者/系列/标签 浏览不可用。"
+msgstr ""
 
 #: sui_titlebar.lua:692
 msgid "Browse library"
@@ -403,7 +403,7 @@ msgstr "正在关闭书籍..."
 
 #: sui_quickactions.lua:458
 msgid "Codepoint out of valid Unicode range (0–10FFFF)."
-msgstr "码点超出有效 Unicode 范围（0–10FFFF）。"
+msgstr ""
 
 #: sui_quickactions.lua:874
 msgid "Collection"
@@ -600,7 +600,7 @@ msgstr "删除"
 
 #: sui_quickactions.lua:1132
 msgid "Delete quick action \"%s\"?"
-msgstr "删除快捷操作 \"%s\"？"
+msgstr ""
 
 #: sui_quickactions.lua:555
 msgid "Dictionary Lookup"
@@ -612,7 +612,7 @@ msgstr "数字目标  (%s)"
 
 #: sui_menu.lua:1846
 msgid "Disable \"Lock Scale\" first to set a custom label scale."
-msgstr "请先禁用\"锁定比例\"以设置自定义标签比例。"
+msgstr ""
 
 #: sui_config.lua:1703
 msgid "Disable \"Lock Scale\" first to set a per-module scale."
@@ -644,7 +644,7 @@ msgstr "下载错误："
 
 #: sui_updater.lua:393
 msgid "Downloading Simple UI %s…"
-msgstr "正在下载 Simple UI %s…"
+msgstr ""
 
 #: sui_quickactions.lua:1118
 msgid "Edit"
@@ -660,7 +660,7 @@ msgstr "编辑快捷操作"
 
 #: sui_bottombar.lua:1483
 msgid "Enable 'Browse by Author / Series / Tags' in the library menu first."
-msgstr "请先在书库菜单中启用“按 作者/系列/标签 浏览”。"
+msgstr ""
 
 #: sui_menu.lua:2185
 msgid "Enable Folder Covers"
@@ -809,7 +809,7 @@ msgstr "隐藏文字"
 
 #: sui_menu.lua:617
 msgid "Hide Wi-Fi icon when off"
-msgstr "关闭时隐藏 Wi-Fi 图标"
+msgstr ""
 
 #: sui_menu.lua:2384
 msgid "Hide book spine"
@@ -1061,11 +1061,11 @@ msgstr ""
 
 #: sui_quickactions.lua:419
 msgid "Nerd Font Icon"
-msgstr "Nerd Font 图标"
+msgstr ""
 
 #: sui_quickactions.lua:504
 msgid "Nerd Font symbol…"
-msgstr "Nerd Font 符号…"
+msgstr ""
 
 #: sui_bottombar.lua:1521
 msgid "Network manager unavailable."
@@ -1104,7 +1104,7 @@ msgstr "下一页"
 
 #: desktop_modules/module_quote.lua:1281
 msgid "No .lua files found in custom_quotes/"
-msgstr "在 custom_quotes/ 中未找到 .lua 文件"
+msgstr ""
 
 #: desktop_modules/module_action_list.lua:109
 #: desktop_modules/module_action_list.lua:133
@@ -1149,9 +1149,6 @@ msgid ""
 "No custom quotes found. Add a .lua file to the plugin's desktop_modules/"
 "custom_quotes/ folder and select it in Settings."
 msgstr ""
-"未找到自定义引用。请将一个 .lua 文件添加到插件的 desktop_modules/"
-"custom_quotes/ 文件夹中，然后在设置中选中它。"
-
 #: sui_updater.lua:480
 msgid ""
 "No download file found.\n"
@@ -1251,7 +1248,7 @@ msgstr "叠加层"
 
 #: sui_homescreen.lua:1415 sui_patches.lua:1464 sui_patches.lua:1873
 msgid "Page %1 of %2"
-msgstr "第 %1 页 / 共 %2 页"
+msgstr ""
 
 #: sui_menu.lua:1709 sui_menu.lua:1729
 msgid "Page %d"
@@ -1319,7 +1316,7 @@ msgstr "今年阅读的实体书："
 
 #: desktop_modules/module_quote.lua:1306
 msgid "Place .lua files in the plugin's desktop_modules/custom_quotes/ folder"
-msgstr "将 .lua 文件放入插件的 desktop_modules/custom_quotes/ 文件夹中"
+msgstr ""
 
 #: sui_menu.lua:2395
 msgid "Placeholder cover for bookless folders"
@@ -1360,11 +1357,11 @@ msgstr "快捷操作"
 
 #: sui_menu.lua:2109
 msgid "Quick Actions  (%d/%d — %d left)"
-msgstr "快捷操作  (%d/%d — 剩余 %d)"
+msgstr ""
 
 #: sui_menu.lua:2107
 msgid "Quick Actions  (%d/%d — at limit)"
-msgstr "快捷操作  (%d/%d — 已达限制)"
+msgstr ""
 
 #: sui_menu.lua:1378 desktop_modules/module_quick_actions.lua:224
 #: desktop_modules/module_quick_actions.lua:274
@@ -1756,12 +1753,9 @@ msgid ""
 "Simple UI %s is available!\n"
 "You have %s."
 msgstr ""
-"Simple UI %s 可用！\n"
-"当前版本：%s。"
-
 #: sui_updater.lua:468
 msgid "Simple UI is up to date (%s)."
-msgstr "Simple UI 已是最新版本（%s）"
+msgstr ""
 
 #: sui_menu.lua:2054
 msgid ""
@@ -1769,20 +1763,17 @@ msgid ""
 "\n"
 "Restart now?"
 msgstr ""
-"重启后 Simple UI 将变为 %s。\n"
-"是否立即重启？"
-
 #: main.lua:94
 msgid "Simple UI: Go to Homescreen"
-msgstr "Simple UI：前往主屏幕"
+msgstr ""
 
 #: main.lua:100
 msgid "Simple UI: Go to Library"
-msgstr "Simple UI：前往书库"
+msgstr ""
 
 #: main.lua:106
 msgid "Simple UI: Toggle Homescreen / Library"
-msgstr "Simple UI：切换主屏幕 / 书库"
+msgstr ""
 
 #: sui_menu.lua:2206
 msgid "Single Cover"
@@ -1889,7 +1880,7 @@ msgstr "系统操作错误：%s"
 
 #: sui_menu.lua:1034
 msgid "Tabs  (%d/%d — %d left)"
-msgstr "标签  (%d/%d — 剩余 %d)"
+msgstr ""
 
 #: sui_menu.lua:1032
 msgid "Tabs  (%d/%d — at limit)"
@@ -2027,7 +2018,7 @@ msgstr ""
 
 #: sui_homescreen.lua:1480
 msgid "Top Margin  (%d%%)"
-msgstr "顶部边距  (%d%%)"
+msgstr ""
 
 #: sui_menu.lua:1010
 msgid "Top separator"
@@ -2065,7 +2056,7 @@ msgstr "未找到更新模块。"
 
 #: sui_quickactions.lua:396
 msgid "Use this Nerd Font icon?"
-msgstr "使用此 Nerd Font 图标吗？"
+msgstr ""
 
 #: sui_menu.lua:508
 msgid ""
@@ -2169,7 +2160,7 @@ msgstr "WiFi"
 
 #: sui_bottombar.lua:1516
 msgid "WiFi not available on this device."
-msgstr "此设备不支持 WiFi。"
+msgstr ""
 
 #: sui_quickactions.lua:556
 msgid "Wikipedia Lookup"
@@ -2213,7 +2204,7 @@ msgstr "例如：漫画…"
 
 #: sui_quickactions.lua:827
 msgid "e.g. Rakuyomi…"
-msgstr "例如：Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:800
 msgid "e.g. Sci-Fi…"

@@ -8,6 +8,17 @@
 
 local _ = require("sui_i18n").translate
 local Config = require("sui_config")
+local SUISettings = require("sui_store")
+
+-- Lazy reference to the style module — avoids a circular-require at load time.
+local _SUIStyle
+local function SUIStyle()
+    _SUIStyle = _SUIStyle or (function()
+        local ok, m = pcall(require, "sui_style")
+        return ok and m or nil
+    end)()
+    return _SUIStyle
+end
 
 -- Lua 5.1 / LuaJIT compat: table.unpack was added in 5.2.
 local _unpack = table.unpack or unpack
@@ -15,21 +26,37 @@ local _unpack = table.unpack or unpack
 -- Plugin directory resolved once at load time (used for browse-mode icon paths).
 local _PLUGIN_DIR = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
 
--- Full paths for the four browse-mode icons.
-local _BROWSE_ICONS = {
+-- Full paths for the four browse-mode icons (plugin-bundled defaults).
+local _BROWSE_ICONS_DEFAULT = {
     normal = _PLUGIN_DIR .. "icons/default.svg",
     author = _PLUGIN_DIR .. "icons/author.svg",
     series = _PLUGIN_DIR .. "icons/series.svg",
     tags   = _PLUGIN_DIR .. "icons/tags.svg",
 }
 
+-- Maps browse mode → SUIStyle slot id for user overrides.
+local _BM_SLOT = {
+    normal = "sui_browse_normal",
+    author = "sui_browse_author",
+    series = "sui_browse_series",
+    tags   = "sui_browse_tags",
+}
+
+-- Returns the effective icon path for a browse mode, respecting SUIStyle overrides.
+local function _browseIcon(mode)
+    local _ss = SUIStyle()
+    if _ss then
+        local slot = _BM_SLOT[mode]
+        if slot then
+            local override = _ss.getIcon(slot)
+            if override then return override end
+        end
+    end
+    return _BROWSE_ICONS_DEFAULT[mode] or _BROWSE_ICONS_DEFAULT.normal
+end
+
 local M = {}
 
--- ---------------------------------------------------------------------------
--- Improvement #4 — module-level lazy loader for sui_browsemeta.
--- Avoids repeated pcall(require, ...) inside hot paths (genItemTable wrapper,
--- onFolderUp, browse button callback). false means "tried and not available".
--- ---------------------------------------------------------------------------
 
 local _BM_cache  -- nil = not yet tried; false = unavailable; table = module
 local function _BrowseMeta()
@@ -74,9 +101,9 @@ local _FM_DEFAULTS = {
     order_right = { "browse_button", "menu_button" },
 }
 local _INJ_DEFAULTS = {
-    side        = { inj_back = "left", inj_right = "right" },
-    order_left  = { "inj_back" },
-    order_right = { "inj_right" },
+    side        = { inj_back = "right", inj_right = "right" },
+    order_left  = {},
+    order_right = { "inj_back", "inj_right" },
 }
 
 -- ---------------------------------------------------------------------------
@@ -84,33 +111,33 @@ local _INJ_DEFAULTS = {
 -- ---------------------------------------------------------------------------
 
 M.ITEMS = {
-    { id = "menu_button",   label = function() return _("Menu")   end, ctx = "fm"  },
-    { id = "up_button",     label = function() return _("Back")   end, ctx = "fm"  },
-    { id = "search_button", label = function() return _("Search") end, ctx = "fm"  },
-    { id = "browse_button", label = function() return _("Browse") end, ctx = "fm"  },
-    { id = "title",         label = function() return _("Title")  end, ctx = "fm",  no_side = true },
-    { id = "inj_back",      label = function() return _("Menu")   end, ctx = "inj" },
-    { id = "inj_right",     label = function() return _("Close")  end, ctx = "inj" },
+    { id = "menu_button",   label = function() return _("Menu")              end, ctx = "fm"  },
+    { id = "up_button",     label = function() return _("Back")              end, ctx = "fm"  },
+    { id = "search_button", label = function() return _("Search")            end, ctx = "fm"  },
+    { id = "browse_button", label = function() return _("Browse")            end, ctx = "fm"  },
+    { id = "title",         label = function() return _("Title")             end, ctx = "fm",  no_side = true },
+    { id = "inj_back",      label = function() return _("Menu")              end, ctx = "inj" },
+    { id = "inj_right",     label = function() return _("Close")             end, ctx = "inj" },
 }
 
 -- ---------------------------------------------------------------------------
 -- Public settings accessors
 -- ---------------------------------------------------------------------------
 
-function M.isEnabled()   return G_reader_settings:nilOrTrue(SETTING_KEY) end
-function M.setEnabled(v) G_reader_settings:saveSetting(SETTING_KEY, v)   end
+function M.isEnabled()   return SUISettings:nilOrTrue(SETTING_KEY) end
+function M.setEnabled(v) SUISettings:saveSetting(SETTING_KEY, v)   end
 
 local function _visKey(id) return "simpleui_tb_item_" .. id end
 
 function M.isItemVisible(id)
-    local v = G_reader_settings:readSetting(_visKey(id))
+    local v = SUISettings:readSetting(_visKey(id))
     if v == nil then return _VIS_DEFAULTS[id] ~= false end
     return v == true
 end
-function M.setItemVisible(id, v) G_reader_settings:saveSetting(_visKey(id), v) end
+function M.setItemVisible(id, v) SUISettings:saveSetting(_visKey(id), v) end
 
-function M.getSizeKey()   return G_reader_settings:readSetting(SIZE_KEY) or "default" end
-function M.setSizeKey(v)  G_reader_settings:saveSetting(SIZE_KEY, v) end
+function M.getSizeKey()   return SUISettings:readSetting(SIZE_KEY) or "default" end
+function M.setSizeKey(v)  SUISettings:saveSetting(SIZE_KEY, v) end
 function M.getSizeScale() return _SIZE_SCALE[M.getSizeKey()] or 1.0 end
 
 -- ---------------------------------------------------------------------------
@@ -120,7 +147,7 @@ function M.getSizeScale() return _SIZE_SCALE[M.getSizeKey()] or 1.0 end
 -- Merges saved config onto defaults. Any default items absent from the saved
 -- order lists are appended, so newly-added buttons always appear in Arrange.
 local function _loadCfg(key, defaults)
-    local raw = G_reader_settings:readSetting(key)
+    local raw = SUISettings:readSetting(key)
     if type(raw) ~= "table" then
         local side = {}
         for k, v in pairs(defaults.side) do side[k] = v end
@@ -158,8 +185,8 @@ end
 
 function M.getFMConfig()      return _loadCfg(FM_CFG_KEY,  _FM_DEFAULTS)  end
 function M.getInjConfig()     return _loadCfg(INJ_CFG_KEY, _INJ_DEFAULTS) end
-function M.saveFMConfig(cfg)  G_reader_settings:saveSetting(FM_CFG_KEY,  cfg) end
-function M.saveInjConfig(cfg) G_reader_settings:saveSetting(INJ_CFG_KEY, cfg) end
+function M.saveFMConfig(cfg)  SUISettings:saveSetting(FM_CFG_KEY,  cfg) end
+function M.saveInjConfig(cfg) SUISettings:saveSetting(INJ_CFG_KEY, cfg) end
 
 -- ---------------------------------------------------------------------------
 -- Internal layout helpers
@@ -222,6 +249,7 @@ end
 -- Uses realpath so Android /sdcard symlinks normalise consistently.
 -- DOES NOT handle series-view (path unchanged from parent) — caller checks
 -- fc.item_table._sg_is_series_view separately.
+
 local function _isSubFolder(path)
     if not path then return false end
     local p = _normPath(path)
@@ -252,13 +280,15 @@ local function _isSubFolder(path)
     end
 end
 
--- _isAtRoot: backwards-compat wrapper used by early-hide and browse-button.
+-- M.isAtRoot: exported so sui_patches can use the same criterion without
+-- duplicating the logic or depending on the _simpleui_has_go_up flag.
 local function _isAtRoot(fc)
     if not fc then return true end
     -- Series view always has a parent even if the path is the home root.
     if fc.item_table and fc.item_table._sg_is_series_view then return false end
     return not _isSubFolder(fc.path)
 end
+function M.isAtRoot(fc) return _isAtRoot(fc) end
 
 -- Keep _isLockedAtHome for any callers outside this file that may require it,
 -- but internally we now use _isAtFSRoot / _isSubFolder.
@@ -334,7 +364,14 @@ local function _snapBtn(btn, opts)
         h       = btn.height,
     }
     if opts then
-        if opts.save_icon     then snap.icon     = btn.image and btn.image.file end
+        if opts.save_icon then
+            -- Save both .file and .icon fields of the ImageWidget.
+            -- KOReader's ImageWidget gives precedence to .icon over .file in
+            -- init(), so we must snapshot and restore both to avoid the
+            -- restored button resolving to a stale icon from another widget.
+            snap.icon      = btn.image and btn.image.file
+            snap.image_icon = btn.image and btn.image.icon
+        end
         if opts.save_callback then
             snap.callback = btn.callback
             snap.hold_cb  = btn.hold_callback
@@ -347,9 +384,31 @@ end
 -- Restores a button from a snapshot produced by _snapBtn.
 local function _restoreBtn(btn, snap)
     if not snap then return end
-    if snap.icon and btn.image then
-        btn.image.file = snap.icon
-        _reloadImage(btn.image)
+    if btn.image then
+        if snap.image_icon ~= nil then
+            -- Restore the original .icon field (may be nil to clear an override).
+            btn.image.icon = snap.image_icon
+            -- When the original button used a symbolic icon name (.icon non-nil),
+            -- we must also clear .file even if snap.icon has a value.  Otherwise
+            -- a stale path written into .file by a previous _applyBackButtonState
+            -- call (e.g. the search button's custom icon path bled into lb.image.file)
+            -- will survive the restore and then win over the symbolic name in the
+            -- next init(), because KOReader's ImageWidget:init() checks .icon first
+            -- but some call paths reach .file as a fallback — and a non-nil .file
+            -- can confuse the resolution entirely.
+            -- Safe to nil here: if snap.image_icon is set, the button is driven by
+            -- the symbolic name, not a raw file path.
+            if snap.image_icon ~= nil and snap.image_icon ~= "" then
+                btn.image.file = nil
+            elseif snap.icon then
+                btn.image.file = snap.icon
+            end
+        elseif snap.icon then
+            btn.image.file = snap.icon
+        end
+        if snap.icon or snap.image_icon ~= nil then
+            _reloadImage(btn.image)
+        end
     end
     btn.overlap_align  = snap.align
     btn.overlap_offset = snap.offset
@@ -406,10 +465,8 @@ end
 --   3. Normal filesystem: _isSubFolder compares realpath-normalised strings,
 --      handling Android /sdcard symlinks consistently.
 --
--- The cached _simpleui_has_go_up flag is kept for the early-hide path in
--- apply() (before the first genItemTable fires), but is no longer the primary
--- source of truth here.
 -- ---------------------------------------------------------------------------
+
 local function _resolveIsSub(fc_self)
     -- Series view: path is unchanged from parent, so path comparison is blind.
     -- The flag is set by sui_foldercovers when it calls switchItemTable.
@@ -420,11 +477,7 @@ local function _resolveIsSub(fc_self)
     return _isSubFolder(fc_self.path)
 end
 
--- ---------------------------------------------------------------------------
--- Improvement #6 — _hideOffset: defensive off-screen x value.
--- Uses 2× screen width instead of a fixed +100px so the button stays
--- invisible even after orientation changes before the next reapply.
--- ---------------------------------------------------------------------------
+
 local function _hideOffset(sw)
     return sw * 2
 end
@@ -486,7 +539,9 @@ function M.apply(fm_self)
             local result = orig_setRightIcon(tb_self, icon, ...)
             if icon == "plus" and _icon_enabled then
                 if tb_self.right_button and tb_self.right_button.image then
-                    tb_self.right_button.image.file = Config.ICON.ko_menu
+                    local _ss = SUIStyle()
+                    local _custom = _ss and _ss.getIcon("sui_menu")
+                    tb_self.right_button.image.file = _custom or Config.ICON.ko_menu
                     _reloadImage(tb_self.right_button.image)
                 end
                 UIManager:setDirty(tb_self.show_parent, "ui", tb_self.dimen)
@@ -496,7 +551,8 @@ function M.apply(fm_self)
 
         if show_menu then
             if rb.image then
-                rb.image.file = Config.ICON.ko_menu
+                local _ss = SUIStyle()
+                rb.image.file = (_ss and _ss.getIcon("sui_menu")) or Config.ICON.ko_menu
                 _reloadImage(rb.image)
             end
             placeBtn("menu_button", rb)
@@ -510,25 +566,28 @@ function M.apply(fm_self)
     end
 
     -- Left button (back/up) --------------------------------------------------
+    -- The native tb.left_button is permanently hidden; a fresh IconButton is
+    -- injected into the TitleBar OverlapGroup, mirroring the search_button
+    -- approach.  All back/up logic drives the injected widget exclusively.
 
+    -- Always hide the native left_button (snap first so restore() can undo).
     if tb.left_button then
         local lb = tb.left_button
-        fm_self._titlebar_lb = _snapBtn(lb, { save_callback = true })
+        fm_self._titlebar_lb = _snapBtn(lb, { save_icon = true, save_callback = true })
+        lb.overlap_align  = nil
+        lb.overlap_offset = { _hideOffset(sw), 0 }
+        lb.callback       = function() end
+        lb.hold_callback  = function() end
+    end
 
-        if show_up then
-            placeBtn("up_button", lb)
+    if show_up then
+        local ok_ib, IconButton = pcall(require, "ui/widget/iconbutton")
+        if ok_ib and IconButton then
+            local s = slot_map["up_button"]
+            if s then
+                local btn_padding = tb.button_padding
+                    or require("device").screen:scaleBySize(11)
 
-            -- Hide back button immediately if already at root before the first
-            -- genItemTable fires, to avoid a brief flash of the button.
-            if _isAtRoot(fm_self.file_chooser) then
-                -- Improvement #6: use defensive 2× width offset.
-                lb.overlap_offset = { _hideOffset(sw), 0 }
-                lb.callback       = function() end
-                lb.hold_callback  = function() end
-            end
-
-            local fc = fm_self.file_chooser
-            if fc then
                 -- Resolve bidi chevron direction once.
                 local ICON_UP = "chevron.left"
                 pcall(function()
@@ -536,219 +595,278 @@ function M.apply(fm_self)
                     ICON_UP = BD.mirroredUILayout() and "chevron.right" or "chevron.left"
                 end)
 
-                -- Improvement #7 — _leftSideBtns built once after apply() sets
-                -- _titlebar_search_btn / _titlebar_browse_btn, then cached.
-                -- Rebuilt only on reapply() (which calls restore() + apply() fresh).
-                -- The comment in the original noted "rebuilt each call because
-                -- search_btn/browse_btn are assigned later"; we solve this by
-                -- deferring construction to the first _applyBackButtonState call,
-                -- at which point both injected buttons have been assigned.
-                local _left_btns_cache = nil
-                local function _leftSideBtns()
-                    if _left_btns_cache then return _left_btns_cache end
-                    local list = {}
-                    for _, id in ipairs(cfg.order_left) do
-                        if id ~= "up_button" and slot_map[id] and slot_map[id].side == "left" then
-                            local widget
-                            if id == "search_button" then
-                                widget = fm_self._titlebar_search_btn
-                            elseif id == "browse_button" then
-                                widget = fm_self._titlebar_browse_btn
-                            end
-                            if widget then
-                                list[#list + 1] = { btn = widget, slot = slot_map[id].slot }
-                            end
-                        end
-                    end
-                    _left_btns_cache = list
-                    return list
+                local up_btn
+                up_btn = IconButton:new{
+                    icon        = ICON_UP,
+                    width       = iw,
+                    height      = iw,
+                    padding     = btn_padding,
+                    show_parent = tb.show_parent or fm_self,
+                    callback    = function() end,   -- set by _applyBackButtonState
+                }
+                _resizeAndStrip(up_btn, iw)
+
+                -- Apply sui_back icon override (same logic as before).
+                do
+                    local _ss = SUIStyle()
+                    if _ss then _ss.applyIconToBtn("sui_back", up_btn) end
                 end
 
-                local up_slot = slot_map["up_button"].slot
-                fm_self._simpleui_up_x = _buttonX("left", up_slot, iw, pad, gap, sw)
+                up_btn.overlap_align  = nil
+                up_btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
+                table.insert(tb, up_btn)
+                fm_self._titlebar_up_btn = up_btn
+                fm_self._simpleui_up_x   = _buttonX(s.side, s.slot, iw, pad, gap, sw)
 
-                -- Single authoritative function for back-button visibility and action.
-                -- root+page1: hide; root+page>1: paginate; subfolder: folder-up.
-                -- `page` is always passed explicitly to avoid stale cur_page reads.
-                local function _applyBackButtonState(fc_self, is_sub, page)
-                    local tb2 = fm_self.title_bar
-                    if not (tb2 and tb2.left_button) then return end
-                    local btn       = tb2.left_button
-                    local neighbors = _leftSideBtns()
+                -- Hide immediately if already at root on first apply.
+                if _isAtRoot(fm_self.file_chooser) then
+                    up_btn.overlap_offset = { _hideOffset(sw), 0 }
+                    up_btn.callback       = function() end
+                    up_btn.hold_callback  = function() end
+                end
 
-                    if not is_sub and page <= 1 then
-                        -- Hide back button and compact neighbors left.
-                        -- Improvement #6: use defensive 2× width offset.
-                        btn.overlap_offset = { _hideOffset(sw), 0 }
-                        btn.callback       = function() end
-                        btn.hold_callback  = function() end
-                        for _, entry in ipairs(neighbors) do
-                            local dslot = entry.slot > up_slot and entry.slot - 1 or entry.slot
-                            entry.btn.overlap_offset = { _buttonX("left", dslot, iw, pad, gap, sw), 0 }
+                local fc = fm_self.file_chooser
+                if fc then
+                    local function _leftSideBtns()
+                        local list = {}
+                        for _, id in ipairs(cfg.order_left) do
+                            if id ~= "up_button" and slot_map[id]
+                               and slot_map[id].side == "left" then
+                                local widget
+                                if id == "search_button" then
+                                    widget = fm_self._titlebar_search_btn
+                                elseif id == "browse_button" then
+                                    widget = fm_self._titlebar_browse_btn
+                                end
+                                if widget then
+                                    list[#list + 1] = {
+                                        btn  = widget,
+                                        slot = slot_map[id].slot,
+                                    }
+                                end
+                            end
                         end
-                    else
-                        -- Show back button and restore neighbor positions.
-                        btn:setIcon(ICON_UP)
-                        btn.overlap_offset = { _buttonX("left", up_slot, iw, pad, gap, sw), 0 }
-                        for _, entry in ipairs(neighbors) do
-                            entry.btn.overlap_offset = { _buttonX("left", entry.slot, iw, pad, gap, sw), 0 }
-                        end
-                        if page > 1 then
-                            -- Paginated list: tap goes back one page, hold goes to page 1.
-                            btn.callback      = function() fc_self:onGotoPage(page - 1) end
-                            btn.hold_callback = function() fc_self:onGotoPage(1) end
+                        return list
+                    end
+
+                    local up_slot = s.slot
+
+                    -- Single authoritative function for back-button visibility and action.
+                    -- root+page1: hide; root+page>1: paginate; subfolder: folder-up.
+                    -- `page` is always passed explicitly to avoid stale cur_page reads.
+                    -- Drives the injected up_btn, not tb.left_button.
+                    local function _applyBackButtonState(fc_self, is_sub, page)
+                        local btn = fm_self._titlebar_up_btn
+                        if not btn then return end
+                        local tb2       = fm_self.title_bar
+                        local neighbors = _leftSideBtns()
+
+                        if not is_sub and page <= 1 then
+                            -- Hide back button and compact neighbors left.
+                            btn.overlap_offset = { _hideOffset(sw), 0 }
+                            btn.callback       = function() end
+                            btn.hold_callback  = function() end
+                            for _, entry in ipairs(neighbors) do
+                                local dslot = entry.slot > up_slot
+                                              and entry.slot - 1 or entry.slot
+                                entry.btn.overlap_offset = {
+                                    _buttonX("left", dslot, iw, pad, gap, sw), 0
+                                }
+                            end
                         else
-                            -- Subfolder page 1: tap goes to parent, hold is no-op.
-                            btn.callback      = function() fc_self:onFolderUp() end
-                            btn.hold_callback = function() end
-                        end
-                    end
-                    UIManager:setDirty(tb2.show_parent or fm_self, "ui", tb2.dimen)
-                end
-
-                -- ---------------------------------------------------------------------------
-                -- Improvement #2 — single genItemTable wrapper with a listener registry.
-                -- Instead of wrapping fc.genItemTable twice (once here for the back button,
-                -- once below for the browse icon), we install one wrapper that calls all
-                -- registered listeners after the original. Each feature registers its own
-                -- listener via fc._simpleui_gen_listeners. restore() clears the list and
-                -- restores the original, avoiding listener-chain fragility.
-                -- ---------------------------------------------------------------------------
-                fm_self._titlebar_orig_fc_genItemTable = fc.genItemTable
-                fc._simpleui_gen_listeners = {}
-
-                local orig_genItemTable = fc.genItemTable
-                fc.genItemTable = function(fc_self, dirs, files, path)
-                    local item_table = orig_genItemTable(fc_self, dirs, files, path)
-                    if not item_table then return item_table end
-
-                    -- Strip the go-up row from the list (we own the back button now).
-                    -- is_sub is determined by path, not by the presence of this item.
-                    local filtered = {}
-                    for _, item in ipairs(item_table) do
-                        if not _isGoUpItem(item) then
-                            filtered[#filtered + 1] = item
-                        end
-                    end
-
-                    -- Path-based is_sub: use the path argument when available (it
-                    -- reflects the destination of the current genItemTable call),
-                    -- falling back to fc_self.path for the initial load.
-                    local effective_path = path or fc_self.path
-                    local is_sub = _isSubFolder(effective_path)
-                    -- Series view overrides path-based result (path unchanged from parent).
-                    if fc_self.item_table and fc_self.item_table._sg_is_series_view then
-                        is_sub = true
-                    end
-                    fc_self._simpleui_has_go_up = is_sub
-                    _applyBackButtonState(fc_self, is_sub, 1)
-
-                    -- Notify all other registered listeners (e.g. browse icon refresh).
-                    for _, listener in ipairs(fc_self._simpleui_gen_listeners or {}) do
-                        pcall(listener, fc_self)
-                    end
-
-                    return filtered
-                end
-
-                -- KOReader called genItemTable before our patch was installed on the
-                -- first FM open. Strip the go-up entry retroactively so the initial
-                -- render matches subsequent navigations.
-                local it = fc.item_table
-                if it then
-                    local cleaned     = {}
-                    local found_go_up = false
-                    for _, item in ipairs(it) do
-                        if _isGoUpItem(item) then
-                            found_go_up = true
-                        else
-                            cleaned[#cleaned + 1] = item
-                        end
-                    end
-                    if found_go_up then
-                        for i = #it, 1, -1 do it[i] = nil end
-                        for i, v in ipairs(cleaned) do it[i] = v end
-                        UIManager:nextTick(function()
-                            if fc and fc.updateItems then
-                                pcall(fc.updateItems, fc, 1, true)
+                            -- Show: refresh icon (respects SUIStyle override).
+                            -- IMPORTANT: .icon and .file must be kept mutually exclusive.
+                            -- KOReader's ImageWidget:init() gives precedence to .icon over
+                            -- .file, so whichever field we do NOT want must be nil-ed.
+                            local _ss        = SUIStyle()
+                            local custom_back = _ss and _ss.getIcon("sui_back")
+                            if custom_back then
+                                btn.image.icon = nil
+                                btn.image.file = custom_back
+                                pcall(btn.image.free, btn.image)
+                                pcall(btn.image.init, btn.image)
+                            else
+                                btn.image.file = nil
+                                btn.image.icon = nil
+                                btn:setIcon(ICON_UP)
                             end
-                        end)
-                    end
-                end
-
-                -- onFolderUp re-evaluates back-button state after navigation.
-                -- FileChooser.onFolderUp is resolved at call time (not captured as an
-                -- upvalue) because sui_foldercovers may swap the class method at runtime.
-                --
-                -- Improvement #8 — save the previous instance value of onFolderUp
-                -- (which may be nil or a value set by another plugin) so restore()
-                -- can reinstate it exactly, rather than blindly nil-ing the slot.
-                local FileChooser_cls = require("ui/widget/filechooser")
-                fm_self._titlebar_orig_fc_onFolderUp = fc.onFolderUp  -- may be nil
-                fc.onFolderUp = function(fc_self, ...)
-                    -- At the dim_list level of a virtual browse tree, exit to normal FS.
-                    -- Improvement #4: use cached _BrowseMeta().
-                    local BM = _BrowseMeta()
-                    if BM and BM.exitToNormal then
-                        local path = fc_self.path or ""
-                        if path:find("/", 1, true) then
-                            local ok_pl, level = pcall(BM.getPathLevel, path)
-                            if ok_pl and level == "dim_list" then
-                                BM.exitToNormal(fc_self, fm_self)
-                                -- Improvement #1: use _resolveIsSub instead of inline duplicate.
-                                local is_sub_after = _resolveIsSub(fc_self)
-                                fc_self._simpleui_has_go_up = is_sub_after
-                                _applyBackButtonState(fc_self, is_sub_after, 1)
-                                return true
+                            btn.overlap_offset = {
+                                _buttonX("left", up_slot, iw, pad, gap, sw), 0
+                            }
+                            for _, entry in ipairs(neighbors) do
+                                entry.btn.overlap_offset = {
+                                    _buttonX("left", entry.slot, iw, pad, gap, sw), 0
+                                }
+                            end
+                            if page > 1 then
+                                -- Paginated list: tap goes back one page, hold goes to page 1.
+                                btn.callback      = function()
+                                    fc_self:onGotoPage(page - 1)
+                                end
+                                btn.hold_callback = function()
+                                    fc_self:onGotoPage(1)
+                                end
+                            else
+                                -- Subfolder page 1: tap goes to parent, hold is no-op.
+                                btn.callback      = function()
+                                    fc_self:onFolderUp()
+                                end
+                                btn.hold_callback = function() end
                             end
                         end
-                    end
-                    -- Delegate to the current class method (resolved at call time).
-                    local current = FileChooser_cls.onFolderUp
-                    local ok, result = pcall(current, fc_self, ...)
-                    -- Improvement #1: use _resolveIsSub instead of inline duplicate.
-                    -- Note: _resolveIsSub prefers the cached flag set by genItemTable.
-                    local is_sub = _resolveIsSub(fc_self)
-                    fc_self._simpleui_has_go_up = is_sub
-                    _applyBackButtonState(fc_self, is_sub, 1)
-                    if not ok then error(result) end
-                    return result
-                end
-
-                -- onGotoPage updates back-button state on every CoverBrowser page turn.
-                -- Re-entrancy guard prevents KOReader's internal recursive calls from
-                -- overwriting the state set for the outer call.
-                local orig_onGotoPage = fc.onGotoPage
-                if orig_onGotoPage then
-                    fm_self._titlebar_orig_fc_onGotoPage = orig_onGotoPage
-                    fc.onGotoPage = function(fc_self, page, ...)
-                        if fc_self._simpleui_in_goto then
-                            return orig_onGotoPage(fc_self, page, ...)
+                        if tb2 then
+                            UIManager:setDirty(
+                                tb2.show_parent or fm_self, "ui", tb2.dimen
+                            )
                         end
-                        fc_self._simpleui_in_goto = true
-                        local ok, result = pcall(orig_onGotoPage, fc_self, page, ...)
-                        -- Clear re-entrancy guard BEFORE any error() so a failure
-                        -- inside orig_onGotoPage never leaves the flag stuck at true.
-                        fc_self._simpleui_in_goto = nil
+                    end
 
-                        -- _resolveIsSub now handles both the series-view flag and the
-                        -- path-based test, so no inline special case is needed here.
+                    fm_self._simpleui_force_refresh_layout = _applyBackButtonState
+
+                    fm_self._titlebar_orig_fc_genItemTable = fc.genItemTable
+                    fc._simpleui_gen_listeners = {}
+
+                    local orig_genItemTable = fc.genItemTable
+                    fc.genItemTable = function(fc_self, dirs, files, path)
+                        local item_table = orig_genItemTable(fc_self, dirs, files, path)
+                        if not item_table then return item_table end
+
+                        -- Strip the go-up row from the list (we own the back button now).
+                        -- is_sub is determined by path, not by the presence of this item.
+                        local filtered = {}
+                        for _, item in ipairs(item_table) do
+                            if not _isGoUpItem(item) then
+                                filtered[#filtered + 1] = item
+                            end
+                        end
+
+                        -- Path-based is_sub: use the path argument when available (it
+                        -- reflects the destination of the current genItemTable call),
+                        -- falling back to fc_self.path for the initial load.
+                        local effective_path = path or fc_self.path
+                        local is_sub = _isSubFolder(effective_path)
+                        -- Series view overrides path-based result (path unchanged from parent).
+                        if fc_self.item_table
+                           and fc_self.item_table._sg_is_series_view then
+                            is_sub = true
+                        end
+                        _applyBackButtonState(fc_self, is_sub, 1)
+
+                        -- Notify all other registered listeners (e.g. browse icon refresh).
+                        for _, listener in ipairs(
+                            fc_self._simpleui_gen_listeners or {}
+                        ) do
+                            pcall(listener, fc_self)
+                        end
+
+                        return filtered
+                    end
+
+                    -- KOReader called genItemTable before our patch was installed on the
+                    -- first FM open. Strip the go-up entry retroactively so the initial
+                    -- render matches subsequent navigations.
+                    local it = fc.item_table
+                    if it then
+                        local cleaned     = {}
+                        local found_go_up = false
+                        for _, item in ipairs(it) do
+                            if _isGoUpItem(item) then
+                                found_go_up = true
+                            else
+                                cleaned[#cleaned + 1] = item
+                            end
+                        end
+                        if found_go_up then
+                            for i = #it, 1, -1 do it[i] = nil end
+                            for i, v in ipairs(cleaned) do it[i] = v end
+                            UIManager:nextTick(function()
+                                if fc and fc.updateItems then
+                                    pcall(fc.updateItems, fc, 1, true)
+                                end
+                            end)
+                        end
+                    end
+
+                    -- onFolderUp re-evaluates back-button state after navigation.
+                    -- FileChooser.onFolderUp is resolved at call time (not captured as an
+                    -- upvalue) because sui_foldercovers may swap the class method at runtime.
+                    --
+                    -- Save the previous instance value so restore() can reinstate it
+                    -- exactly, rather than blindly nil-ing the slot.
+                    local FileChooser_cls = require("ui/widget/filechooser")
+                    fm_self._titlebar_orig_fc_onFolderUp = fc.onFolderUp  -- may be nil
+                    fc.onFolderUp = function(fc_self, ...)
+                        -- When the user navigated here from the book dialog ("More by X"),
+                        -- a single back press should return to the real folder they came
+                        -- from, scrolled to the book — not to the Authors root.
+                        local BM = _BrowseMeta()
+                        if BM then
+                            local origin = fc_self._sui_author_dialog_origin
+                            if origin and origin.path then
+                                local path = fc_self.path or ""
+                                local ok_pl, level = pcall(BM.getPathLevel, path)
+                                if ok_pl and level == "file_list" then
+                                    -- Clear origin so subsequent back presses behave normally.
+                                    fc_self._sui_author_dialog_origin = nil
+                                    BM.exitToNormal(fc_self, fm_self)
+                                    -- Navigate to the saved real folder with the book focused
+                                    -- so the list scrolls to the right page automatically.
+                                    fc_self:changeToPath(origin.path, origin.file)
+                                    local is_sub_after = _resolveIsSub(fc_self)
+                                    _applyBackButtonState(fc_self, is_sub_after, 1)
+                                    return true
+                                end
+                            end
+                        end
+                        -- At the dim_list level of a virtual browse tree, exit to normal FS.
+                        if BM and BM.exitToNormal then
+                            local path = fc_self.path or ""
+                            if path:find("/", 1, true) then
+                                local ok_pl, level =
+                                    pcall(BM.getPathLevel, path)
+                                if ok_pl and level == "dim_list" then
+                                    BM.exitToNormal(fc_self, fm_self)
+                                    local is_sub_after = _resolveIsSub(fc_self)
+                                    _applyBackButtonState(fc_self, is_sub_after, 1)
+                                    return true
+                                end
+                            end
+                        end
+                        -- Delegate to the current class method (resolved at call time).
+                        local current = FileChooser_cls.onFolderUp
+                        local ok, result = pcall(current, fc_self, ...)
                         local is_sub = _resolveIsSub(fc_self)
-                        fc_self._simpleui_has_go_up = is_sub
-                        _applyBackButtonState(fc_self, is_sub, page)
+                        _applyBackButtonState(fc_self, is_sub, 1)
                         if not ok then error(result) end
                         return result
                     end
-                end
-            end
-        else
-            lb.overlap_align  = nil
-            -- Improvement #6: use defensive 2× width offset.
-            lb.overlap_offset = { _hideOffset(sw), 0 }
-            lb.callback       = function() end
-            lb.hold_callback  = function() end
-        end
-    end
+
+                    -- onGotoPage updates back-button state on every CoverBrowser page turn.
+                    -- Re-entrancy guard prevents KOReader's internal recursive calls from
+                    -- overwriting the state set for the outer call.
+                    local orig_onGotoPage = fc.onGotoPage
+                    if orig_onGotoPage then
+                        fm_self._titlebar_orig_fc_onGotoPage = orig_onGotoPage
+                        fc.onGotoPage = function(fc_self, page, ...)
+                            if fc_self._simpleui_in_goto then
+                                return orig_onGotoPage(fc_self, page, ...)
+                            end
+                            fc_self._simpleui_in_goto = true
+                            local ok, result =
+                                pcall(orig_onGotoPage, fc_self, page, ...)
+                            -- Clear re-entrancy guard BEFORE any error() so a failure
+                            -- inside orig_onGotoPage never leaves the flag stuck at true.
+                            fc_self._simpleui_in_goto = nil
+                            local is_sub = _resolveIsSub(fc_self)
+                            _applyBackButtonState(fc_self, is_sub, page)
+                            if not ok then error(result) end
+                            return result
+                        end
+                    end
+                end -- if fc
+            end -- if s
+        end -- if ok_ib
+    end -- if show_up
 
     -- Search button ----------------------------------------------------------
     -- Injected directly into the TitleBar OverlapGroup.
@@ -772,14 +890,18 @@ function M.apply(fm_self)
                     end,
                 }
                 _resizeAndStrip(search_btn, iw)
+                -- Apply sui_search icon override.
+                do
+                    local _ss = SUIStyle()
+                    if _ss then _ss.applyIconToBtn("sui_search", search_btn) end
+                end
                 search_btn.overlap_align  = nil
                 search_btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
                 table.insert(tb, search_btn)
                 fm_self._titlebar_search_btn = search_btn
                 fm_self._simpleui_search_x   = _buttonX(s.side, s.slot, iw, pad, gap, sw)
 
-                -- Improvement #3 — compute compact slot once, reuse for both
-                -- the cached value and the immediate-at-root initial adjustment.
+
                 if s.side == "left" then
                     local up_slot2  = slot_map["up_button"] and slot_map["up_button"].slot or 0
                     local dslot     = s.slot > up_slot2 and s.slot - 1 or s.slot
@@ -808,12 +930,12 @@ function M.apply(fm_self)
 
                 -- Resolve initial icon from the current browse mode.
                 -- Improvement #4: use cached _BrowseMeta().
-                local _initial_icon = _BROWSE_ICONS.normal
+                local _initial_icon = _browseIcon("normal")
                 local BM0 = _BrowseMeta()
                 if BM0 then
                     local fc0  = fm_self.file_chooser
                     local mode = fc0 and BM0.getCurrentMode(fc0) or "normal"
-                    _initial_icon = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
+                    _initial_icon = _browseIcon(mode)
                 end
 
                 local browse_btn
@@ -838,7 +960,7 @@ function M.apply(fm_self)
                             UIManager:close(dlg)
                             BM.navigateTo(fm_self, mode)
                             if browse_btn.image then
-                                browse_btn.image.file = _BROWSE_ICONS[mode] or _BROWSE_ICONS.normal
+                                browse_btn.image.file = _browseIcon(mode)
                                 _reloadImage(browse_btn.image)
                                 UIManager:setDirty(tb.show_parent or fm_self, "ui", tb.dimen)
                             end
@@ -884,8 +1006,7 @@ function M.apply(fm_self)
                     end
                 end
 
-                -- Improvement #2 — register browse-icon refresh as a listener on the
-                -- shared genItemTable wrapper instead of wrapping genItemTable again.
+
                 local fc_b = fm_self.file_chooser
                 if fc_b and fc_b._simpleui_gen_listeners then
                     fc_b._simpleui_gen_listeners[#fc_b._simpleui_gen_listeners + 1] = function(fc_self)
@@ -893,7 +1014,7 @@ function M.apply(fm_self)
                         local BM2 = _BrowseMeta()
                         if BM2 and browse_btn.image then
                             local mode2 = BM2.getCurrentMode(fc_self)
-                            local icon2 = _BROWSE_ICONS[mode2] or _BROWSE_ICONS.normal
+                            local icon2 = _browseIcon(mode2)
                             if browse_btn.image.file ~= icon2 then
                                 browse_btn.image.file = icon2
                                 _reloadImage(browse_btn.image)
@@ -909,6 +1030,16 @@ function M.apply(fm_self)
 
     -- Title ------------------------------------------------------------------
 
+    if fm_self._simpleui_force_refresh_layout and fm_self.file_chooser then
+        local current_is_sub = _resolveIsSub(fm_self.file_chooser)
+        local current_page   = fm_self.file_chooser.page or 1
+        
+        
+        fm_self._simpleui_force_refresh_layout(fm_self.file_chooser, current_is_sub, current_page)
+        
+        
+        fm_self._simpleui_force_refresh_layout = nil 
+    end
     if tb.setTitle then
         fm_self._titlebar_orig_title_set = true
         tb:setTitle(show_title and _("Library") or "")
@@ -936,12 +1067,19 @@ function M.restore(fm_self)
     if tb.left_button  then _restoreBtn(tb.left_button,  fm_self._titlebar_lb) end
     fm_self._titlebar_lb = nil
 
-    -- Remove injected search and browse buttons from the TitleBar OverlapGroup.
-    for _, key in ipairs({ "_titlebar_search_btn", "_titlebar_browse_btn" }) do
+    -- Remove injected up, search and browse buttons from the TitleBar OverlapGroup.
+    for _, key in ipairs({ "_titlebar_up_btn", "_titlebar_search_btn", "_titlebar_browse_btn" }) do
         local btn = fm_self[key]
         if btn then
+            -- Free the C/FFI image memory
+            if btn.image then pcall(btn.image.free, btn.image) end
+            
+            -- Remove from the visual table (OverlapGroup)
             for i = #tb, 1, -1 do
-                if tb[i] == btn then table.remove(tb, i); break end
+                if tb[i] == btn then 
+                    table.remove(tb, i)
+                    break 
+                end
             end
             fm_self[key] = nil
         end
@@ -952,13 +1090,10 @@ function M.restore(fm_self)
     -- Restore file-chooser patches.
     local fc = fm_self.file_chooser
     if fc then
-        -- Improvement #2: clear the listener registry and restore original genItemTable.
         fc._simpleui_gen_listeners = nil
         if fm_self._titlebar_orig_fc_genItemTable then
             fc.genItemTable = fm_self._titlebar_orig_fc_genItemTable
         end
-        -- Improvement #8: restore the exact previous value of onFolderUp (may be nil),
-        -- rather than unconditionally setting it to nil.
         if fm_self._titlebar_orig_fc_onFolderUp ~= nil then
             fc.onFolderUp = fm_self._titlebar_orig_fc_onFolderUp
         else
@@ -1001,8 +1136,8 @@ function M.applyToInjected(widget)
 
     local lp                = _layoutParams(tb)
     local iw, pad, gap, sw  = lp.iw, lp.pad, lp.gap, lp.sw
-    local show_back  = M.isItemVisible("inj_back")
-    local show_right = M.isItemVisible("inj_right")
+    local show_back      = M.isItemVisible("inj_back")
+    local show_right     = M.isItemVisible("inj_right")
 
     local cfg     = M.getInjConfig()
     local visible = {}
@@ -1018,15 +1153,20 @@ function M.applyToInjected(widget)
         btn.overlap_offset = { _buttonX(s.side, s.slot, iw, pad, gap, sw), 0 }
     end
 
-    -- Left button (back).
+   -- Left button (hamburger / inj_back).
     if tb.left_button then
         local lb = tb.left_button
         widget._titlebar_inj_lb = _snapBtn(lb)
         if show_back then
             placeBtn("inj_back", lb)
+            do
+                local _ss = SUIStyle()
+                if _ss then 
+                    _ss.applyIconToBtn("sui_menu", lb) 
+                end
+            end
         else
             lb.overlap_align  = nil
-            -- Improvement #6: use defensive 2× width offset.
             lb.overlap_offset = { _hideOffset(sw), 0 }
         end
     end
@@ -1080,6 +1220,31 @@ function M.reapplyAll(fm_self, window_stack)
                     logger.warn("simpleui: titlebar.reapplyAll widget failed:", tostring(err))
                 end
             end
+        end
+    end
+end
+
+--- Refreshes the browse button icon in the live FM titlebar to reflect the
+--- current mode AND the current SUIStyle override.  Called by sui_style.lua
+--- after the user picks a new Browse Meta icon override.
+--- @param fm   FileManager instance (may be nil — in that case does nothing)
+function M.refreshBrowseIcons(fm)
+    if not (fm and fm._titlebar_browse_btn) then return end
+    local browse_btn = fm._titlebar_browse_btn
+    if not (browse_btn and browse_btn.image) then return end
+
+    local BM = _BrowseMeta()
+    local mode = "normal"
+    if BM and fm.file_chooser then
+        mode = BM.getCurrentMode(fm.file_chooser) or "normal"
+    end
+    local new_icon = _browseIcon(mode)
+    if browse_btn.image.file ~= new_icon then
+        browse_btn.image.file = new_icon
+        _reloadImage(browse_btn.image)
+        local ok_ui, UIManager = pcall(require, "ui/uimanager")
+        if ok_ui and fm._titlebar then
+            UIManager:setDirty(fm, "ui", fm._titlebar.dimen)
         end
     end
 end

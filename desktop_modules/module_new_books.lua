@@ -47,6 +47,7 @@ M.name        = _("New Books")
 M.label       = _("New Books")
 M.enabled_key = "new_books"
 M.default_on  = false  -- opt-in; users enable via Arrange Modules
+M.has_covers  = true   -- activates e-ink dithering and cover poll
 
 function M.reset() _SH = nil end
 
@@ -160,6 +161,11 @@ function M.build(w, ctx)
     local D           = SH.getDims(scale, thumb_scale)
     local label_fs    = math.max(8, math.floor(_BASE_NB_LABEL_FS * scale * lbl_scale))
 
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
+
     local cols    = math.min(#new_fps, 5)
     local cw      = D.RECENT_W
     local ch      = D.RECENT_H
@@ -189,11 +195,11 @@ function M.build(w, ctx)
             SH.vspan(D.RB_GAP1, ctx.vspan_pool),
             SH.progressBar(cw, bd.percent, D.RB_BAR_H),
             SH.vspan(D.RB_GAP2, ctx.vspan_pool),
-            TextWidget:new{
+            UI.makeColoredText{
                 text      = label_text,
                 face      = face,
                 bold      = true,
-                fgcolor   = CLR_TEXT_SUB,
+                fgcolor   = CLR_TEXT_SUB_EFF,
                 width     = cw,
                 height    = D.RB_LABEL_H,
                 alignment = "center",

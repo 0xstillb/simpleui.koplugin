@@ -32,6 +32,7 @@ local N_ = require("sui_i18n").ngettext
 local Config = require("sui_config")
 local QA     = require("sui_quickactions")
 local UI          = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD         = UI.PAD
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 
@@ -63,13 +64,13 @@ end
 local ALIGN_VALUES = { "left", "center", "right" }
 
 local function getAlignment(pfx, suffix)
-    local v = G_reader_settings:readSetting(pfx .. suffix .. "_align")
+    local v = SUISettings:readSetting(pfx .. suffix .. "_align")
     for _, a in ipairs(ALIGN_VALUES) do if a == v then return v end end
     return "center"  -- default
 end
 
 local function setAlignment(pfx, suffix, val)
-    G_reader_settings:saveSetting(pfx .. suffix .. "_align", val)
+    SUISettings:saveSetting(pfx .. suffix .. "_align", val)
 end
 
 local function alignLabel(align)
@@ -82,7 +83,7 @@ end
 -- Icon visibility helper
 -- ---------------------------------------------------------------------------
 local function isIconHidden(pfx, suffix)
-    return G_reader_settings:readSetting(pfx .. suffix .. "_hide_icon") == true
+    return SUISettings:readSetting(pfx .. suffix .. "_hide_icon") == true
 end
 
 -- ---------------------------------------------------------------------------
@@ -99,16 +100,19 @@ end
 -- ---------------------------------------------------------------------------
 -- Core widget builder
 -- ---------------------------------------------------------------------------
-local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
+local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d, colors)
+    local clr_blk = colors and colors.blk or Blitbuffer.COLOR_BLACK
+    local clr_sub = colors and colors.sub or CLR_TEXT_SUB
+
     -- Placeholder: no actions configured at all
     if not action_ids or #action_ids == 0 then
         local ph_fs = math.max(8, math.floor(_BASE_PH_FS * (d.row_h / _BASE_ROW_H)))
         return CenterContainer:new{
             dimen = Geom:new{ w = w, h = d.row_h },
-            TextWidget:new{
+            UI.makeColoredText{
                 text    = _("No actions configured"),
                 face    = Font:getFace("smallinfofont", ph_fs),
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = clr_sub,
                 width   = w - PAD * 2,
             },
         }
@@ -120,7 +124,7 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
     for _, aid in ipairs(action_ids) do
         if aid:match("^custom_qa_%d+$") then
             if cqa_valid[aid] then valid_ids[#valid_ids + 1] = aid end
-        elseif Config.ACTION_BY_ID[aid] then
+        elseif QA.isBuiltin(aid) then
             valid_ids[#valid_ids + 1] = aid
         end
     end
@@ -129,10 +133,10 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
         local ph_fs = math.max(8, math.floor(_BASE_PH_FS * (d.row_h / _BASE_ROW_H)))
         return CenterContainer:new{
             dimen = Geom:new{ w = w, h = d.row_h },
-            TextWidget:new{
+            UI.makeColoredText{
                 text    = _("No actions configured"),
                 face    = Font:getFace("smallinfofont", ph_fs),
-                fgcolor = CLR_TEXT_SUB,
+                fgcolor = clr_sub,
                 width   = w - PAD * 2,
             },
         }
@@ -157,10 +161,10 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
             if nerd_char then
                 icon_widget = CenterContainer:new{
                     dimen = Geom:new{ w = d.icon_sz, h = d.row_h },
-                    TextWidget:new{
+                    UI.makeColoredText{
                         text    = nerd_char,
                         face    = Font:getFace("symbols", math.floor(d.icon_sz * 0.85)),
-                        fgcolor = Blitbuffer.COLOR_BLACK,
+                        fgcolor = clr_blk,
                         padding = 0,
                     },
                 }
@@ -179,10 +183,10 @@ local function buildListWidget(w, action_ids, show_icons, align, on_tap_fn, d)
         end
 
         -- ── Label ─────────────────────────────────────────────────────────
-        local label_tw = TextWidget:new{
+        local label_tw = UI.makeColoredText{
             text    = entry.label,
             face    = Font:getFace("cfont", d.fs),
-            fgcolor = Blitbuffer.COLOR_BLACK,
+            fgcolor = clr_blk,
             width   = text_w,
             padding = 0,
         }
@@ -287,11 +291,11 @@ end
 
 local function getALPool()
     local available = {}
-    for _, a in ipairs(Config.ALL_ACTIONS) do
-        if actionAvailable(a.id) then
+    for desc in QA.iterBuiltin() do
+        if actionAvailable(desc.id) then
             available[#available + 1] = {
-                id    = a.id,
-                label = a.id == "home" and Config.homeLabel() or a.label,
+                id    = desc.id,
+                label = desc.id == "home" and Config.homeLabel() or QA.getEntry(desc.id).label,
             }
         end
     end
@@ -312,26 +316,33 @@ M.label      = nil
 M.default_on = false
 
 function M.isEnabled(pfx)
-    return G_reader_settings:readSetting(pfx .. MOD_SUFFIX .. "_enabled") == true
+    return SUISettings:readSetting(pfx .. MOD_SUFFIX .. "_enabled") == true
 end
 
 function M.setEnabled(pfx, on)
-    G_reader_settings:saveSetting(pfx .. MOD_SUFFIX .. "_enabled", on)
+    SUISettings:saveSetting(pfx .. MOD_SUFFIX .. "_enabled", on)
 end
 
 function M.build(w, ctx)
     if not M.isEnabled(ctx.pfx) then return nil end
-    local qa_ids    = G_reader_settings:readSetting(ctx.pfx .. ITEMS_KEY) or {}
+    local qa_ids    = SUISettings:readSetting(ctx.pfx .. ITEMS_KEY) or {}
     local show_icons = not isIconHidden(ctx.pfx, MOD_SUFFIX)
     local align     = getAlignment(ctx.pfx, MOD_SUFFIX)
     local d         = _getDims(Config.getModuleScale(MOD_ID, ctx.pfx))
     local lbl_scale = Config.getItemLabelScale(MOD_ID, ctx.pfx)
     d.fs = math.max(8, math.floor(d.fs * lbl_scale))
-    return buildListWidget(w, qa_ids, show_icons, align, ctx.on_qa_tap, d)
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local colors = (_theme_fg or _theme_secondary) and {
+        blk = _theme_fg or Blitbuffer.COLOR_BLACK,
+        sub = _theme_secondary or _theme_fg or CLR_TEXT_SUB,
+    } or nil
+    return buildListWidget(w, qa_ids, show_icons, align, ctx.on_qa_tap, d, colors)
 end
 
 function M.getHeight(ctx)
-    local qa_ids = G_reader_settings:readSetting(ctx.pfx .. ITEMS_KEY) or {}
+    local qa_ids = SUISettings:readSetting(ctx.pfx .. ITEMS_KEY) or {}
     local d      = _getDims(Config.getModuleScale(MOD_ID, ctx.pfx))
     local n      = #qa_ids
     -- When empty, getHeight must match the placeholder widget height
@@ -374,7 +385,7 @@ function M.getMenuItems(ctx_menu)
         checked_func   = function() return isIconHidden(pfx, MOD_SUFFIX) end,
         keep_menu_open = true,
         callback       = function()
-            G_reader_settings:saveSetting(pfx .. HIDE_ICON_KEY, not isIconHidden(pfx, MOD_SUFFIX))
+            SUISettings:saveSetting(pfx .. HIDE_ICON_KEY, not isIconHidden(pfx, MOD_SUFFIX))
             refresh()
         end,
     }
@@ -409,7 +420,7 @@ function M.getMenuItems(ctx_menu)
 
     -- Items submenu (add/remove/arrange)
     local function getItems()
-        return G_reader_settings:readSetting(pfx .. ITEMS_KEY) or {}
+        return SUISettings:readSetting(pfx .. ITEMS_KEY) or {}
     end
     local function isSelected(id)
         for _, v in ipairs(getItems()) do if v == id then return true end end
@@ -437,7 +448,7 @@ function M.getMenuItems(ctx_menu)
             end
             new[#new + 1] = id
         end
-        G_reader_settings:saveSetting(pfx .. ITEMS_KEY, new)
+        SUISettings:saveSetting(pfx .. ITEMS_KEY, new)
         refresh()
     end
 
@@ -476,7 +487,7 @@ function M.getMenuItems(ctx_menu)
                     for _, item in ipairs(sort_items) do
                         new_order[#new_order + 1] = item.orig_item
                     end
-                    G_reader_settings:saveSetting(pfx .. ITEMS_KEY, new_order)
+                    SUISettings:saveSetting(pfx .. ITEMS_KEY, new_order)
                     refresh()
                 end,
             })

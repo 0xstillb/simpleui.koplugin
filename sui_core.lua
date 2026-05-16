@@ -15,6 +15,7 @@ local Blitbuffer     = require("ffi/blitbuffer")
 local Device         = require("device")
 local Screen         = Device.screen
 local logger         = require("logger")
+local SUISettings = require("sui_store")
 
 -- Lazy references to sibling modules — resolved on first use to avoid
 -- circular-require issues at load time, but stored as upvalues so that
@@ -138,12 +139,12 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.getContentHeight()
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     return Screen:getHeight() - _BB().TOTAL_H() - (topbar_on and _TB().TOTAL_TOP_H() or 0)
 end
 
 function M.getContentTop()
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     return topbar_on and _TB().TOTAL_TOP_H() or 0
 end
 
@@ -184,8 +185,8 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
     local screen_w  = Screen:getWidth()
     local screen_h  = Screen:getHeight()
     -- Read both settings once — used multiple times below.
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
-    local navbar_on = G_reader_settings:nilOrTrue("navbar_enabled")
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
+    local navbar_on = SUISettings:nilOrTrue("simpleui_bar_enabled")
     local topbar_top = topbar_on and Topbar.TOTAL_TOP_H() or 0
     local navbar_h   = Bottombar.TOTAL_H()
     local content_h  = screen_h - topbar_top - navbar_h
@@ -214,30 +215,26 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
 
     if navbar_on then
         local bar_y = screen_h - navbar_h
-        local bot_y = screen_h - Bottombar.BOT_SP()
 
         local sep_color = Bottombar.sepColor()
         local sep_h     = Bottombar.SEP_H()
         local top_sp    = Bottombar.TOP_SP()
-        local side_m = Bottombar.SIDE_M()
+        local side_m    = Bottombar.SIDE_M()
+        local bars_transparent = SUISettings:isTrue("simpleui_navbar_transparent")
         -- Separator line with the same lateral padding as the bar itself,
         -- matching the original per-tab separator visual exactly.
         local sep_line = LineWidget():new{
             dimen      = Geom():new{ w = screen_w - side_m * 2, h = sep_h },
-            background = sep_color,
+            background = bars_transparent and nil or sep_color,
         }
-        local bot_pad = LineWidget():new{
-            dimen      = Geom():new{ w = screen_w, h = Bottombar.BOT_SP() },
-            background = Blitbuffer.COLOR_WHITE,
-        }
-        -- Separator sits immediately above the bar content (flush with the indicator).
+        -- Bottom padding is absorbed into padding_bottom of the bar FrameContainer
+        -- itself (_buildBarContainer in sui_bottombar.lua). No separate bot_pad
+        -- element is needed — one fewer widget in the overlap stack.
         sep_line.overlap_offset = { side_m, bar_y + top_sp - sep_h }
         bar.overlap_offset      = { 0, bar_y + top_sp }
-        bot_pad.overlap_offset  = { 0, bot_y }
 
         overlap_items[2] = sep_line
         overlap_items[3] = bar
-        overlap_items[4] = bot_pad
         bar_idx = 3
     end
 
@@ -248,11 +245,12 @@ function M.wrapWithNavbar(inner_widget, active_action_id, tabs, force_no_arrows)
 
     local topbar_idx       = topbar_on and #overlap_items or nil
     local navbar_container = OverlapGroup():new(overlap_items)
+    local wrapper_bg = (SUISettings:isTrue("simpleui_navbar_transparent") or SUISettings:isTrue("simpleui_statusbar_transparent")) and nil or Blitbuffer.COLOR_WHITE
 
     return navbar_container,
            FrameContainer():new{
                bordersize = 0, padding = 0, margin = 0,
-               background = Blitbuffer.COLOR_WHITE,
+               background = wrapper_bg,
                navbar_container,
            },
            bar, topbar, bar_idx, topbar_on, topbar_idx
@@ -422,6 +420,269 @@ function M.showSettingsMenu(title, item_table_fn, top_offset, screen_h, bottomba
         menu.dimen.y = top_offset
     end
     UIManager:show(menu)
+end
+
+-- ---------------------------------------------------------------------------
+-- Shared helper to paint a widget with perfect alpha transparency over wallpapers
+-- ---------------------------------------------------------------------------
+function M.paintWithAlphaMask(widget, target_bb, x, y, w, h, fgcolor, custom_paint_fn)
+    local tmp_bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+    tmp_bb:fill(Blitbuffer.COLOR_WHITE)
+    if custom_paint_fn then
+        custom_paint_fn(widget, tmp_bb, 0, 0)
+    else
+        widget:paintTo(tmp_bb, 0, 0)
+    end
+    tmp_bb:invertRect(0, 0, w, h)
+    target_bb:colorblitFromRGB32(tmp_bb, x, y, 0, 0, w, h, fgcolor)
+    tmp_bb:free()
+end
+
+-- ---------------------------------------------------------------------------
+-- makeColoredText — TextWidget wrapper that actually honours fgcolor.
+--
+-- KOReader's TextWidget silently ignores the `fgcolor` parameter on many
+-- device builds (it was not wired through to RenderText in older versions).
+-- TextBoxWidget does honour fgcolor, but TextWidget is preferred for single-
+-- line text because it auto-sizes and supports truncation / max_width.
+--
+-- This helper:
+--   1. Creates an inner TextWidget with all the caller-supplied params.
+--   2. If fgcolor is nil (caller wants the device default), returns the inner
+--      TextWidget directly — zero overhead, no change in behaviour.
+--   3. Otherwise wraps it in a WidgetContainer whose paintTo() renders the
+--      text into a temporary 8-bit buffer and composites the result onto the
+--      target framebuffer using colorblitFromRGB32, which correctly applies
+--      arbitrary Blitbuffer colours on all KOReader builds.
+--
+-- Drop-in for TextWidget:new when you need fgcolor to work:
+--   local w = UI.makeColoredText{
+--       text    = "hello",
+--       face    = Font:getFace("cfont", 12),
+--       bold    = true,
+--       fgcolor = Blitbuffer.COLOR_BLACK,  -- any colour
+--       width   = 200,                     -- optional, as with TextWidget
+--   }
+-- ---------------------------------------------------------------------------
+-- Shared lazy loaders for both makeColoredText and makeAlphaTextBox.
+local _WidgetContainer
+local function _WC()
+    _WidgetContainer = _WidgetContainer or require("ui/widget/container/widgetcontainer")
+    return _WidgetContainer
+end
+
+local _TextWidget
+local function _TW()
+    _TextWidget = _TextWidget or require("ui/widget/textwidget")
+    return _TextWidget
+end
+
+function M.makeColoredText(opts)
+    local fgcolor = opts.fgcolor
+
+    -- If no custom colour is requested, return the TextWidget as-is.
+    if not fgcolor then return _TW():new(opts) end
+
+    -- Force the inner TextWidget to draw in BLACK. Since we use paintWithAlphaMask
+    -- which renders onto a white buffer and inverts it, drawing white text on a
+    -- white buffer would produce an empty mask (invisible text).
+    local inner_opts = {}
+    for k, v in pairs(opts) do inner_opts[k] = v end
+    inner_opts.fgcolor = Blitbuffer.COLOR_BLACK
+
+    local inner = _TW():new(inner_opts)
+
+    local dimen = inner:getSize()
+
+    local widget = _WC():new{}
+    widget.dimen  = dimen
+    widget._inner = inner
+    widget._fg    = fgcolor
+
+    function widget:getSize()
+        return self.dimen
+    end
+
+    function widget:paintTo(bb, x, y)
+        self.dimen.x, self.dimen.y = x, y
+        local w = self.dimen.w
+        local h = self.dimen.h
+        if w <= 0 or h <= 0 then return end
+
+        M.paintWithAlphaMask(self._inner, bb, x, y, w, h, self._fg)
+    end
+
+    function widget:onCloseWidget() self:free() end
+
+    function widget:free()
+        if self._inner then
+            self._inner:free()
+            self._inner = nil
+        end
+    end
+
+    function widget:onToggleNightMode() require("ui/uimanager"):setDirty(self) end
+    function widget:onSetNightMode()    require("ui/uimanager"):setDirty(self) end
+    function widget:onApplyTheme()      require("ui/uimanager"):setDirty(self) end
+
+    return widget
+end
+
+-- ---------------------------------------------------------------------------
+-- makeAlphaTextBox — transparent-background TextBoxWidget replacement.
+--
+-- Builds a WidgetContainer that renders a TextBoxWidget using Blitbuffer's
+-- colorblitFromRGB32 so the text composites over whatever is already on the
+-- framebuffer (i.e. a wallpaper) rather than painting an opaque white rect.
+--
+-- The implementation is self-contained: it does NOT depend on lib/setting,
+-- lib/common, or ui/font_color (all of which are external to SimpleUI).
+-- fgcolor is used directly — the caller supplies it from its own colour logic.
+--
+-- Usage (drop-in for TextBoxWidget:new when has_wallpaper is true):
+--   local w = UI.makeAlphaTextBox{
+--       text      = "...",
+--       face      = face,
+--       bold      = true,
+--       width     = tw,
+--       alignment = "center",
+--       fgcolor   = Blitbuffer.COLOR_BLACK,
+--       max_lines = 2,     -- optional, passed through to inner TextBoxWidget
+--   }
+-- ---------------------------------------------------------------------------
+local _TextBoxWidget
+local function _TBW()
+    _TextBoxWidget = _TextBoxWidget or require("ui/widget/textboxwidget")
+    return _TextBoxWidget
+end
+
+function M.makeAlphaTextBox(opts)
+    local fgcolor = opts.fgcolor or Blitbuffer.COLOR_BLACK
+
+    local inner = _TBW():new{
+        text        = opts.text,
+        face        = opts.face,
+        bold        = opts.bold,
+        width       = opts.width,
+        height      = opts.height,
+        alignment   = opts.alignment   or "left",
+        justified   = opts.justified   or false,
+        line_height = opts.line_height or 0.3,
+        max_lines   = opts.max_lines,
+        fgcolor     = Blitbuffer.COLOR_BLACK,
+        bgcolor     = Blitbuffer.COLOR_WHITE,
+        alpha       = true,
+    }
+
+    local dimen = inner:getSize()
+
+    local widget = _WC():new{}
+    widget.dimen  = dimen
+    widget._inner = inner
+    widget._fg    = fgcolor
+
+    function widget:getSize()
+        return self.dimen
+    end
+
+    function widget:paintTo(bb, x, y)
+        self.dimen.x, self.dimen.y = x, y
+        local w = self.dimen.w
+        local h = self.dimen.h
+
+        M.paintWithAlphaMask(self._inner, bb, x, y, w, h, self._fg)
+    end
+
+    function widget:onCloseWidget()
+        self:free()
+    end
+
+    function widget:free()
+        if self._inner then
+            self._inner:free()
+            self._inner = nil
+        end
+    end
+
+    function widget:onToggleNightMode() require("ui/uimanager"):setDirty(self) end
+    function widget:onSetNightMode()    require("ui/uimanager"):setDirty(self) end
+    function widget:onApplyTheme()      require("ui/uimanager"):setDirty(self) end
+
+    return widget
+end
+
+-- ---------------------------------------------------------------------------
+-- Bar Injection API
+-- ---------------------------------------------------------------------------
+M.BarInjection = {}
+local _bi_registry       = {}
+local _bi_registry_order = {}
+
+local function _validateBI(desc)
+    if type(desc) ~= "table" then return "descriptor must be a table" end
+    if type(desc.id) ~= "string" or desc.id == "" then return "descriptor.id must be a non-empty string" end
+    if desc.widget_name == nil and type(desc.match) ~= "function" then return "descriptor must provide widget_name (string) or match (function)" end
+    if desc.widget_name ~= nil and type(desc.widget_name) ~= "string" then return "descriptor.widget_name must be a string" end
+    if desc.active_action_id ~= nil and type(desc.active_action_id) ~= "string" then return "descriptor.active_action_id must be a string when provided" end
+    if desc.get_active_action ~= nil and type(desc.get_active_action) ~= "function" then return "descriptor.get_active_action must be a function when provided" end
+    if desc.is_pageable ~= nil and type(desc.is_pageable) ~= "boolean" and type(desc.is_pageable) ~= "function" then return "descriptor.is_pageable must be boolean or nil" end
+    if desc.on_inject ~= nil and type(desc.on_inject) ~= "function" then return "descriptor.on_inject must be a function when provided" end
+    if desc.on_close ~= nil and type(desc.on_close) ~= "function" then return "descriptor.on_close must be a function when provided" end
+    return nil
+end
+
+function M.BarInjection.register(desc)
+    local err = _validateBI(desc)
+    if err then
+        logger.warn("sui_core: BarInjection.register() rejected:", err, "(id=", tostring(desc and desc.id), ")")
+        return
+    end
+    local id = desc.id
+    if not _bi_registry[id] then
+        _bi_registry_order[#_bi_registry_order + 1] = id
+        logger.dbg("sui_core: BarInjection registered descriptor id=", id)
+    else
+        logger.dbg("sui_core: BarInjection replaced descriptor id=", id)
+    end
+    _bi_registry[id] = desc
+end
+
+function M.BarInjection.unregister(id)
+    if not _bi_registry[id] then return end
+    _bi_registry[id] = nil
+    for i = #_bi_registry_order, 1, -1 do
+        if _bi_registry_order[i] == id then
+            table.remove(_bi_registry_order, i)
+            break
+        end
+    end
+    logger.dbg("sui_core: BarInjection unregistered id=", id)
+end
+
+function M.BarInjection.matchWidget(widget)
+    if not widget then return nil end
+    for _, id in ipairs(_bi_registry_order) do
+        local desc = _bi_registry[id]
+        if desc then
+            local matched = false
+            if type(desc.match) == "function" then
+                local ok, result = pcall(desc.match, widget)
+                matched = ok and result == true
+            elseif desc.widget_name ~= nil then
+                matched = (widget.name == desc.widget_name)
+            end
+            if matched then return desc end
+        end
+    end
+    return nil
+end
+
+function M.BarInjection.allIds()
+    local result = {}
+    for i, id in ipairs(_bi_registry_order) do
+        result[i] = id
+    end
+    return result
 end
 
 return M

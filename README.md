@@ -86,7 +86,10 @@ All features are accessible via **Menu → Tools → SimpleUI**
 
 1. Download this repository as a ZIP — click **Code → Download ZIP**
 2. Extract the folder and confirm it is named `simpleui.koplugin`
-3. Copy the folder to the `plugins/` directory on your KOReader device
+3. Copy the folder to the `plugins/` directory on your KOReader device:
+   * Kobo: `/.adds/koreader/plugins`
+   * Kindle: `/koreader/plugins`
+   * Android: `koreader/plugins` at the root of onboard storage.
 4. Restart KOReader
 5. Go to **Menu → Tools → SimpleUI** to enable and configure the plugin
 
@@ -107,26 +110,26 @@ SimpleUI has full translation support. The UI language is detected automatically
 | English | *(built-in)* | Complete |
 | Português (Brasil) | `locale/pt_BR.po` | Complete |
 | Português (Portugal) | `locale/pt_PT.po` | Complete |
-| Русский (Russian) | `locale/ru.po` | Partial (95.6% — 20 missing) |
-| 繁體中文 (Chinese Traditional) | `locale/zh_TW.po` | Partial (95.4% — 21 missing) |
-| Polski (Polish) | `locale/pl.po` | Partial (94.7% — 24 missing) |
-| Español | `locale/es.po` | Partial (93.8% — 28 missing) |
-| Български (Bulgarian) | `locale/bg.po` | Partial (93.8% — 28 missing) |
-| Čeština (Czech) | `locale/cs.po` | Partial (93.6% — 29 missing) |
-| 简体中文 (Chinese Simplified) | `locale/zh_CN.po` | Partial (92.9% — 32 missing) |
-| Svenska (Swedish) | `locale/sv.po` | Partial (92.7% — 33 missing) |
-| Türkçe (Turkish) | `locale/tr.po` | Partial (92.7% — 33 missing) |
-| Українська (Ukrainian) | `locale/uk.po` | Partial (92.7% — 33 missing) |
-| Français (French) | `locale/fr.po` | Partial (90.1% — 45 missing) |
-| Română (Romanian) | `locale/ro.po` | Partial (89.0% — 50 missing) |
-| Română (Moldova) | `locale/ro_MD.po` | Partial (89.0% — 50 missing) |
-| Italiano (Italian) | `locale/it_IT.po` | Partial (88.1% — 54 missing) |
-| Tiếng Việt (Vietnamese) | `locale/vi.po` | Partial (79.5% — 93 missing) |
-| Deutsch (German) | `locale/de.po` | Partial (76.2% — 108 missing) |
+| Русский (Russian) | `locale/ru.po` | Partial (76.8% — 132 missing) |
+| 繁體中文 (Chinese Traditional) | `locale/zh_TW.po` | Partial (76.1% — 136 missing) |
+| Polski (Polish) | `locale/pl.po` | Partial (75.6% — 139 missing) |
+| Español | `locale/es.po` | Partial (74.9% — 143 missing) |
+| Български (Bulgarian) | `locale/bg.po` | Partial (74.9% — 143 missing) |
+| Čeština (Czech) | `locale/cs.po` | Partial (74.7% — 144 missing) |
+| 简体中文 (Chinese Simplified) | `locale/zh_CN.po` | Partial (74.2% — 147 missing) |
+| Svenska (Swedish) | `locale/sv.po` | Partial (74.0% — 148 missing) |
+| Türkçe (Turkish) | `locale/tr.po` | Partial (74.0% — 148 missing) |
+| Українська (Ukrainian) | `locale/uk.po` | Partial (74.0% — 148 missing) |
+| Français (French) | `locale/fr.po` | Partial (71.9% — 160 missing) |
+| Română (Romanian) | `locale/ro.po` | Partial (71.0% — 165 missing) |
+| Română (Moldova) | `locale/ro_MD.po` | Partial (71.0% — 165 missing) |
+| Italiano (Italian) | `locale/it_IT.po` | Partial (70.3% — 169 missing) |
+| Tiếng Việt (Vietnamese) | `locale/vi.po` | Partial (63.4% — 208 missing) |
+| Deutsch (German) | `locale/de.po` | Partial (60.8% — 223 missing) |
 
 ### Adding a new language
 
-All 454 strings in the plugin are translatable. To add a new language:
+All 569 strings in the plugin are translatable. To add a new language:
 
 1. Copy `locale/simpleui.pot` to `locale/<lang>.po`, using the standard locale code for your language (examples: `de`, `fr`, `it`, `ja`)
 2. Open the file in any text editor or a dedicated PO editor such as [Poedit](https://poedit.net/)
@@ -152,15 +155,206 @@ The plugin first tries an exact match for the locale code (e.g. `pt_PT.po`), the
 
 ---
 
-## 🔧 Customising Quotes
+## 🔧 Customisation
 
-To add, remove or edit the Quote of the Day pool, open `desktop_modules/quotes.lua` inside the plugin folder. Each entry follows this format:
+### Custom Quote of the Day
 
-```lua
-{ q = "Quote text.", a = "Author Name", b = "Book Title (optional)" }
+You can supply your own quotes by placing a `.lua` file in the **custom quotes folder** on your device:
+
+```
+<KOReader settings dir>/simpleui/custom_quotes/
 ```
 
-Changes take effect the next time the Home Screen is opened.
+(`<KOReader settings dir>` is typically `/mnt/onboard/.adds/koreader/settings` on Kobo or `/mnt/us/koreader/settings` on Kindle.)
+
+The file must return a table of entries in this format:
+
+```lua
+return {
+    { q = "Quote text.", a = "Author Name", b = "Book Title (optional)" },
+    { q = "Another quote.", a = "Another Author" },
+}
+```
+
+Once the file is in place, go to **Menu → Tools → SimpleUI → Home Screen → Quote of the Day → Source → Custom** and select your file. Changes take effect the next time the Home Screen is opened.
+
+The `custom_quotes/` folder is created automatically on first run and is never touched by plugin updates.
+
+To add, remove or edit the **built-in** quote pool instead, open `desktop_modules/quotes.lua` inside the plugin folder and follow the same format.
+
+### Custom Quick-Action Icons
+
+You can use your own SVG icons for custom quick-action buttons. Place `.svg` files in the **custom icons folder**:
+
+```
+<KOReader settings dir>/simpleui/custom_icons/
+```
+
+They will appear in the icon picker when creating or editing a custom quick action (**Menu → Tools → SimpleUI → Quick Actions → Edit → Icon**).
+
+The `custom_icons/` folder is created automatically on first run and is never touched by plugin updates.
+
+---
+
+### Icon Packs
+
+An icon pack lets you replace multiple SimpleUI icons at once — titlebar buttons, pagination chevrons, navigation tab icons, and quick-action icons — with a single tap.
+
+#### Where to place packs
+
+```
+<KOReader settings dir>/simpleui/sui_icons/packs/
+```
+
+A pack can be either:
+- **A subfolder** containing icon files with the correct names (see below).
+- **A `.zip` file** containing those same files, either flat or inside a single root folder.
+
+You can place packs there manually, or use **Style → Icons → Icon Packs → Install pack from ZIP…** to browse to a `.zip` directly on your device.
+
+The `packs/` folder is created automatically on first run and is never touched by plugin updates.
+
+#### Applying a pack
+
+Go to **Menu → Tools → SimpleUI → Style → Icons → Icon Packs** and tap the pack you want. Icons are applied immediately to the live UI — no restart needed.
+
+Packs are **additive and partial**: only the slots covered by the pack are changed. Slots not included in a pack keep their current value (custom or default). To revert everything afterwards, use **Style → Icons → System Icons → Reset All System Icons**.
+
+#### File-name conventions
+
+Every file in the pack root must be an `.svg` or `.png`. The filename (without extension) determines which icon slot it fills:
+
+**SimpleUI titlebar buttons**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_menu.svg` | Menu button (right side of titlebar) |
+| `sui_search.svg` | Search button |
+| `sui_back.svg` | Back / return button |
+
+**Browse-by buttons (Library titlebar)**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_browse_normal.svg` | Browse button — default / all books view |
+| `sui_browse_author.svg` | Browse button — by author |
+| `sui_browse_series.svg` | Browse button — by series |
+| `sui_browse_tags.svg` | Browse button — by tags |
+
+**Native pagination chevrons**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_pager_prev.svg` | Previous page |
+| `sui_pager_next.svg` | Next page |
+| `sui_pager_first.svg` | First page |
+| `sui_pager_last.svg` | Last page |
+
+**Navpager arrows (Bottom Bar)**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_navpager_prev.svg` | Navpager previous arrow |
+| `sui_navpager_next.svg` | Navpager next arrow |
+
+**Collections widget**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_coll_back.svg` | Back / return arrow inside Collections |
+
+**Quick-action icons** (prefix `sui_action_`)
+
+| Filename | Description |
+|----------|-------------|
+| `sui_action_library.svg` | Library |
+| `sui_action_homescreen.svg` | Home Screen |
+| `sui_action_collections.svg` | Collections |
+| `sui_action_history.svg` | History |
+| `sui_action_continue.svg` | Continue Reading |
+| `sui_action_favorites.svg` | Favourites |
+| `sui_action_bookmark_browser.svg` | Bookmark Browser |
+| `sui_action_wifi_toggle.svg` | Wi-Fi toggle (On) |
+| `sui_action_wifi_toggle_off.svg` | Wi-Fi toggle (Off) |
+| `sui_action_frontlight.svg` | Brightness |
+| `sui_action_stats_calendar.svg` | Reading Stats |
+| `sui_action_power.svg` | Power menu |
+| `sui_action_browse_authors.svg` | Browse by Author |
+| `sui_action_browse_series.svg` | Browse by Series |
+| `sui_action_browse_tags.svg` | Browse by Tags |
+
+**Quick Actions Defaults**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_qa_folder.svg` | Default Quick Action icon (Folder) |
+| `sui_qa_plugin.svg` | Default Quick Action icon (Plugin) |
+| `sui_qa_system.svg` | Default Quick Action icon (System) |
+
+**Folder Covers**
+
+| Filename | Description |
+|----------|-------------|
+| `sui_fc_empty.svg` | Placeholder cover for empty folders |
+
+Files with names that do not match any of the above are silently ignored.
+
+#### Optional manifest (`pack.lua`)
+
+A pack can include a `pack.lua` file in its root to provide metadata and override the default filename conventions:
+
+```lua
+return {
+    name        = "Night Owl",          -- display name in the menu (default: folder name)
+    author      = "your-name",
+    version     = "1.0",
+    description = "Dark, rounded icons",
+
+    -- Optional: map a slot ID to an alternative filename inside the pack.
+    -- Useful if you want filenames that differ from the convention above.
+    map = {
+        sui_menu    = "hamburger.svg",
+        sui_pager_prev = "arrow-left.svg",
+    },
+}
+```
+
+If `pack.lua` is absent, the pack name shown in the menu is the folder name (or the zip stem).
+
+#### Typical pack structure
+
+```
+NightOwl/                       ← pack name (or NightOwl.zip)
+  pack.lua                      ← optional manifest
+  sui_menu.svg
+  sui_search.svg
+  sui_back.svg
+  sui_browse_normal.svg
+  sui_browse_author.svg
+  sui_browse_series.svg
+  sui_browse_tags.svg
+  sui_pager_prev.svg
+  sui_pager_next.svg
+  sui_pager_first.svg
+  sui_pager_last.svg
+  sui_navpager_prev.svg
+  sui_navpager_next.svg
+  sui_coll_back.svg
+  sui_action_library.svg
+  sui_action_collections.svg
+  sui_action_history.svg
+  sui_action_continue.svg
+  sui_action_frontlight.svg
+  sui_action_power.svg
+```
+
+All files are optional — a valid pack can contain as few as one icon.
+
+#### Notes for pack authors
+
+- Use `.svg` for best results; KOReader renders SVGs at any resolution. `.png` files work but may look blurry on high-DPI screens.
+- Icon paths are stored as absolute paths in settings. If you move or rename the pack folder after applying it, the icons will break until you re-apply the pack. Zip-installed packs are extracted to `packs/` and are therefore stable.
+- To share a pack, zip the folder (`NightOwl/`) and distribute the `.zip`.
 
 ---
 

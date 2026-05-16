@@ -28,12 +28,12 @@ local GITHUB_OWNER = "0xstillb"
 local GITHUB_REPO  = "simpleui.koplugin"
 local ASSET_NAME   = "simpleui.koplugin.zip"
 
-local AUTO_CHECK_INTERVAL = 24 * 3600  -- segundos entre checks automáticos
+local AUTO_CHECK_INTERVAL = 24 * 3600  -- seconds between automatic checks
 
 -- G_reader_settings keys — prefixed with "sui_upd_" to avoid collisions.
 local GS_LAST_CHECK = "sui_upd_last_check"  -- number (timestamp)
 local GS_HAS_UPDATE = "sui_upd_has_update"  -- boolean
-local GS_LATEST_VER = "sui_upd_latest_ver"  -- string sem "v"
+local GS_LATEST_VER = "sui_upd_latest_ver"  -- string without "v"
 local GS_DL_URL     = "sui_upd_dl_url"      -- string URL
 
 local _API_URL = string.format(
@@ -51,8 +51,8 @@ local M = {}
 -- Initialised lazily by _load_persisted_state().
 local _state_loaded = false
 local _has_update   = false
-local _latest_ver   = nil  -- string sem "v", ou nil
-local _dl_url       = nil  -- URL para o ZIP do asset, ou nil
+local _latest_ver   = nil  -- string without "v", or nil
+local _dl_url       = nil  -- URL for the asset ZIP, or nil
 
 -- Plugin directory — resolved once at module load time.
 local _plugin_dir = (debug.getinfo(1, "S").source or ""):match("^@(.+)/[^/]+$")
@@ -222,7 +222,7 @@ local function _httpGetToFile(url, dest_path)
         url     = url,
         method  = "GET",
         headers = { ["User-Agent"] = "KOReader-SimpleUI-Updater/2.0" },
-        sink    = ltn12.sink.file(fh),   -- stream direto para disco
+        sink    = ltn12.sink.file(fh),   -- stream directly to disk
         redirect = true,
     }))
 
@@ -257,7 +257,7 @@ local function _parseRelease(body)
 
     if not ok_j then
         -- Regex fallback for KOReader builds that lack the json module.
-        logger.warn("simpleui updater: módulo json indisponível, usando regex fallback")
+        logger.warn("simpleui updater: json module unavailable, using regex fallback")
         local function jsonStr(key)
             return body:match('"' .. key .. '"%s*:%s*"([^"]*)"')
         end
@@ -413,7 +413,7 @@ local function _applyUpdate(download_url, new_version)
         if not result or not result.success then
             local stage = result and result.stage or "unknown"
             local err   = result and result.err   or "unknown error"
-            logger.err("simpleui updater: falha em", stage, "-", err)
+            logger.err("simpleui updater: failed in", stage, "-", err)
             _toast(
                 stage == "download"
                     and (_("Download error: ") .. tostring(err))
@@ -464,12 +464,12 @@ local function _showUpdateDialog(release, current)
     local notes        = release.notes
 
     if not _versionGt(latest, current) then
-        logger.info("simpleui updater: já atualizado (" .. current .. ")")
+        logger.info("simpleui updater: already up to date (" .. current .. ")")
         _toast(string.format(_("Simple UI is up to date (%s)."), current))
         return
     end
 
-    logger.info("simpleui updater: nova versão disponível:", latest)
+    logger.info("simpleui updater: new version available:", latest)
 
     local header     = string.format(_("Simple UI %s is available!\nYou have %s."), latest, current)
     local notes_block = notes and ("\n\n" .. _("What's new:") .. "\n" .. notes) or ""
@@ -508,7 +508,7 @@ end
 local function _doNetworkCheck()
     local release = _doFetch()
     if release.error then
-        logger.warn("simpleui updater: erro na verificação:", release.error)
+        logger.warn("simpleui updater: check error:", release.error)
         return false, release.error
     end
 
@@ -559,7 +559,7 @@ function M.scheduleAutoCheck()
     if type(last) ~= "number" then last = 0 end
 
     if (now - last) < AUTO_CHECK_INTERVAL then
-        logger.dbg("simpleui updater: auto-check dentro do throttle — skip")
+        logger.dbg("simpleui updater: auto-check within throttle — skip")
         return
     end
 

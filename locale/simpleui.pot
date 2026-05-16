@@ -220,12 +220,16 @@ msgstr ""
 msgid "Back"
 msgstr ""
 
-#: desktop_modules/module_collections.lua:662
-msgid "Badge position: Bottom"
+#: desktop_modules/module_collections.lua:740
+msgid "Badge"
 msgstr ""
 
-#: desktop_modules/module_collections.lua:663
-msgid "Badge position: Top"
+#: sui_menu.lua:2278
+msgid "Badges"
+msgstr ""
+
+#: sui_menu.lua:2324
+msgid "Banner"
 msgstr ""
 
 #: desktop_modules/module_quick_actions.lua:433
@@ -572,6 +576,15 @@ msgstr ""
 msgid "Daily avg — Time"
 msgstr ""
 
+#: sui_menu.lua:2375
+#: sui_menu.lua:2379
+#: sui_menu.lua:2385
+#: sui_menu.lua:2391
+#: sui_menu.lua:2397
+#: sui_menu.lua:2403
+msgid "Dark"
+msgstr ""
+
 #: desktop_modules/module_clock.lua:534
 #: desktop_modules/module_clock.lua:535
 #: desktop_modules/module_clock.lua:543
@@ -762,8 +775,8 @@ msgstr ""
 msgid "Folder Shortcuts"
 msgstr ""
 
-#: sui_foldercovers.lua:676
-#: sui_browsemeta.lua:1100
+#: sui_foldercovers.lua:680
+#: sui_browsemeta.lua:925
 msgid "Folder cover"
 msgstr ""
 
@@ -978,6 +991,14 @@ msgstr ""
 #: sui_config.lua:134
 #: sui_config.lua:412
 #: sui_menu.lua:2114
+#: sui_menu.lua:2382
+#: sui_menu.lua:2388
+#: sui_menu.lua:2394
+#: sui_menu.lua:2400
+#: sui_menu.lua:2406
+msgid "Light"
+msgstr ""
+
 msgid "Library"
 msgstr ""
 
@@ -1061,6 +1082,10 @@ msgstr ""
 msgid "Navigation Bar"
 msgstr ""
 
+#: sui_menu.lua:2335
+msgid "Native"
+msgstr ""
+
 #: sui_menu.lua:451
 msgid "Navpager"
 msgstr ""
@@ -1085,6 +1110,7 @@ msgstr ""
 msgid "Never"
 msgstr ""
 
+#: sui_foldercovers.lua:1607
 #: desktop_modules/module_new_books.lua:180
 msgid "New"
 msgstr ""
@@ -1192,17 +1218,21 @@ msgstr ""
 msgid "No system actions found."
 msgstr ""
 
+#: sui_menu.lua:2346
+msgid "None"
+msgstr ""
+
 #: desktop_modules/module_clock.lua:56
 msgid "November"
 msgstr ""
 
-#: sui_menu.lua:2259
+#: sui_menu.lua:2282
 msgid "Number of Books in Folder"
 msgstr ""
 
 #: sui_menu.lua:1568
 #: sui_menu.lua:1582
-#: sui_menu.lua:2291
+#: sui_menu.lua:2330
 msgid "Number of Pages"
 msgstr ""
 
@@ -1352,6 +1382,14 @@ msgstr ""
 
 #: desktop_modules/module_currently.lua:943
 msgid "Progress bar style"
+msgstr ""
+
+#: sui_menu.lua:2384
+msgid "Progress"
+msgstr ""
+
+#: sui_menu.lua:2438
+msgid "New Book"
 msgstr ""
 
 #: sui_menu.lua:1541
@@ -1594,29 +1632,17 @@ msgstr ""
 msgid "Series"
 msgstr ""
 
-#: sui_menu.lua:2297
+#: sui_menu.lua:2357
 msgid "Series Index"
-msgstr ""
-
-#: sui_foldercovers.lua:620
-#: sui_foldercovers.lua:1185
-msgid "Series cover"
 msgstr ""
 
 #: sui_menu.lua:656
 msgid "Set"
 msgstr ""
 
-#: sui_foldercovers.lua:728
-msgid "Set folder cover…"
-msgstr ""
-
-#: sui_foldercovers.lua:717
-msgid "Set series cover…"
-msgstr ""
-
-#: sui_foldercovers.lua:722
-msgid "Set virtual folder cover…"
+#: sui_foldercovers.lua:788
+#: sui_browsemeta.lua:1099
+msgid "Set folder cover"
 msgstr ""
 
 #: sui_menu.lua:2069
@@ -2000,10 +2026,6 @@ msgstr ""
 msgid "Vertical space between the date (or clock) and the battery.\n100% is the default spacing."
 msgstr ""
 
-#: sui_browsemeta.lua:926
-msgid "Virtual folder cover"
-msgstr ""
-
 #: sui_menu.lua:1010
 msgid "Visible"
 msgstr ""
@@ -2235,3 +2257,589 @@ msgid "The maximum of %d tab has been reached. Remove one first."
 msgid_plural "The maximum of %d tabs has been reached. Remove one first."
 msgstr[0] ""
 msgstr[1] ""
+
+#: sui_menu.lua:2534
+msgid "Title and Author Below Covers"
+msgstr ""
+
+#: sui_menu.lua:2488
+msgid "Title only"
+msgstr ""
+
+#: sui_menu.lua:2508
+msgid "Title and Author"
+msgstr ""
+
+#: sui_menu.lua:2477
+msgid "Title strip disabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:2498
+msgid "Title strip enabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:2518
+msgid "Title and author strip enabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:1922
+msgid "Enable wallpaper"
+msgstr ""
+
+#: sui_menu.lua:1935
+msgid "Transparent status bar"
+msgstr ""
+
+#: sui_menu.lua:1957
+msgid "Transparent navigation bar"
+msgstr ""
+
+#: sui_menu.lua:1957
+msgid "Stretch to fill screen"
+msgstr ""
+
+#: sui_menu.lua:1972
+msgid "Rotate image"
+msgstr ""
+
+#: sui_menu.lua:1987
+msgid "Invert image colours in night mode"
+msgstr ""
+
+#: sui_menu.lua:2005
+msgid "Image opacity: %1%"
+msgstr ""
+
+#: sui_menu.lua:2015
+msgid "Image opacity"
+msgstr ""
+
+#: sui_menu.lua:2016
+msgid "Lower the opacity to improve readability."
+msgstr ""
+
+#: sui_menu.lua:2054
+msgid "No images found.\nDrop files into:\n%1"
+msgstr ""
+
+#: sui_menu.lua:2082
+msgid "Wallpaper"
+msgstr ""
+
+#: sui_menu.lua:2090
+msgid "Behaviour"
+msgstr ""
+
+# ── Presets ────────────────────────────────────────────────────────────────
+#: sui_menu.lua:2232
+msgid "Preset "%s" not found."
+msgstr ""
+
+#: sui_menu.lua:2245
+msgid "Save as new preset…"
+msgstr ""
+
+#: sui_menu.lua:2251
+msgid "Save preset"
+msgstr ""
+
+#: sui_menu.lua:2253
+msgid "Preset name"
+msgstr ""
+
+#: sui_menu.lua:2270
+msgid "Please enter a name for the preset."
+msgstr ""
+
+#: sui_menu.lua:2281
+msgid "Preset "%s" saved."
+msgstr ""
+
+#: sui_menu.lua:2288
+msgid "A preset named "%s" already exists.\nOverwrite it?"
+msgstr ""
+
+#: sui_menu.lua:2291
+#: sui_menu.lua:2326
+#: sui_menu.lua:2327
+msgid "Overwrite"
+msgstr ""
+
+#: sui_menu.lua:2309
+msgid "Update existing preset…"
+msgstr ""
+
+#: sui_menu.lua:2322
+msgid "Overwrite preset "%s" with the current homescreen settings?"
+msgstr ""
+
+#: sui_menu.lua:2331
+msgid "Preset "%s" updated."
+msgstr ""
+
+#: sui_menu.lua:2347
+msgid "Rename preset…"
+msgstr ""
+
+#: sui_menu.lua:2358
+msgid "Rename "%s""
+msgstr ""
+
+#: sui_menu.lua:2383
+msgid "A preset named "%s" already exists."
+msgstr ""
+
+#: sui_menu.lua:2412
+msgid "Delete preset…"
+msgstr ""
+
+#: sui_menu.lua:2423
+msgid "Delete preset "%s"?"
+msgstr ""
+
+
+#: sui_menu.lua:2299 #: sui_menu.lua:2779
+msgid "A preset named \"%s\" already exists.\nOverwrite it?"
+msgstr ""
+
+#: sui_menu.lua:936
+msgid "A restart is required to apply the new bar size across all layouts.\n\nRestart now?"
+msgstr ""
+
+#: sui_style.lua:71
+msgid "Back Button"
+msgstr ""
+
+#: sui_menu.lua:901
+msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_style.lua:86
+msgid "Browse Button (author)"
+msgstr ""
+
+#: sui_style.lua:80
+msgid "Browse Button (default)"
+msgstr ""
+
+#: sui_style.lua:92
+msgid "Browse Button (series)"
+msgstr ""
+
+#: sui_style.lua:98
+msgid "Browse Button (tags)"
+msgstr ""
+
+#: sui_menu.lua:1742
+msgid "Cannot place modules after Page 1 separator.\nPage 1 must always have at least 1 module."
+msgstr ""
+
+#: sui_menu.lua:1585
+msgid "Choose how many pages the homescreen has.\nEmpty pages stay empty. Modules keep their position."
+msgstr ""
+
+#: sui_menu.lua:2116
+msgid "Controls when the brief \"Closing book…\" notice is shown when leaving a book.\n\n• Always: shown whenever a book is closed, whether via the menu or a gesture.\n• Gesture Only: shown only when closing via a gesture (e.g. swipe); not shown when using the reader menu.\n• Never: the notice is never shown."
+msgstr ""
+
+#: sui_menu.lua:1240
+msgid "Custom Title Bar will be %s after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:1848
+msgid "Disable \"Lock Scale\" first to set a custom label scale."
+msgstr ""
+
+#: sui_style.lua:598
+msgid "Enable custom UI font"
+msgstr ""
+
+#: sui_menu.lua:1822
+msgid "Global scale for all modules.\nIndividual overrides in Module Settings take precedence.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:920
+msgid "Height of the bottom navigation bar.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:850
+msgid "Height of the top status bar.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:531
+msgid "Hides the pagination bar on the homescreen.\nNot available when Navpager is active."
+msgstr ""
+
+#: sui_menu.lua:2662 #: sui_menu.lua:2668
+msgid "Icon Presets"
+msgstr ""
+
+#: sui_menu.lua:2669
+msgid "Icon Presets  (%d)"
+msgstr ""
+
+#: sui_menu.lua:2666
+msgid "Icon Presets  [%s]"
+msgstr ""
+
+#: sui_menu.lua:1149
+msgid "Invalid arrangement.\nKeep items between the Left and Right separators."
+msgstr ""
+
+#: sui_menu.lua:734
+msgid "Invalid arrangement.\nKeep the Left, Center and Right separators in order."
+msgstr ""
+
+#: sui_style.lua:59
+msgid "Menu Button"
+msgstr ""
+
+#: sui_menu.lua:460
+msgid "Navpager enabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:2054
+msgid "No images found.\nDrop files into:\n%1"
+msgstr ""
+
+#: sui_menu.lua:2808
+msgid "Overwrite preset \"%s\" with the current icon settings?"
+msgstr ""
+
+#: sui_menu.lua:470
+msgid "Pagination bar hidden.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:449
+msgid "Pagination bar set to Default.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:556 #: sui_menu.lua:568 #: sui_menu.lua:580
+msgid "Pagination bar size will change after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:2478
+msgid "Presets"
+msgstr ""
+
+#: sui_menu.lua:2480
+msgid "Presets  (%d)"
+msgstr ""
+#: sui_menu.lua:2496
+msgid "Homepage Presets  (%d)"
+msgstr ""
+
+#: sui_menu.lua:2475
+msgid "Presets  [%s]"
+msgstr ""
+#: sui_menu.lua:2491
+msgid "Homepage Presets  [%s]"
+msgstr ""
+
+#: sui_menu.lua:2648
+msgid "Quick Actions Icons"
+msgstr ""
+
+#: sui_menu.lua:456
+msgid "Replaces the pagination bar with Prev/Next arrows at the edges of the bottom bar.\nThe arrows dim when there is no previous or next page.\nWith navpager active, as few as 1 tab and at most 4 tabs can be configured."
+msgstr ""
+
+#: sui_style.lua:336
+msgid "Reset All System Icons"
+msgstr ""
+
+#: sui_style.lua:605 #: sui_style.lua:668
+msgid "Restart to fully apply the UI font change."
+msgstr ""
+
+#: sui_menu.lua:2745
+msgid "Save icon preset"
+msgstr ""
+
+#: sui_menu.lua:3343
+msgid "Scale for the folder name overlay text.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:1821
+msgid "Scales all modules and labels together.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:1857
+msgid "Scales the section label text above each module.\n100% is the default size."
+msgstr ""
+
+#: sui_style.lua:65
+msgid "Search Button"
+msgstr ""
+
+#: sui_menu.lua:2554
+msgid "Show or hide the dedicated Simple UI tab in the menu bar.\nWhen hidden, Simple UI settings remain accessible via the main menu.\nTakes effect after a restart."
+msgstr ""
+
+#: sui_menu.lua:591
+msgid "Shows \"Page X of Y\" in the title bar subtitle when browsing the library, history or collections.\nNavpager enables this automatically.\nNot available when Navpager is active."
+msgstr ""
+
+#: sui_menu.lua:488
+msgid "Shows a row of dots at the bottom of the homescreen.\nThe active page dot is filled; the others are dimmed.\nAlways active when Navpager is selected."
+msgstr ""
+
+#: sui_menu.lua:2538
+msgid "Simple UI will be %s after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:978
+msgid "Size of the tab icons.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:998
+msgid "Size of the tab label text.\n100% is the default size."
+msgstr ""
+
+#: sui_menu.lua:956
+msgid "Space below the bottom navigation bar.\n100% is the default spacing."
+msgstr ""
+
+#: sui_menu.lua:2599
+msgid "Style"
+msgstr ""
+
+#: sui_menu.lua:2607 #: sui_menu.lua:2615
+msgid "System Icons"
+msgstr ""
+
+#: sui_menu.lua:2564
+msgid "The Simple UI settings tab will be %s after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:3408
+msgid "Title and author strip enabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:3367
+msgid "Title strip disabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:3388
+msgid "Title strip enabled.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:832
+msgid "Top Bar will be %s after restart.\n\nRestart now?"
+msgstr ""
+
+#: sui_menu.lua:2928 #: sui_menu.lua:2931
+msgid "UI Font"
+msgstr ""
+
+#: sui_menu.lua:2935
+msgid "UI Font  (default)"
+msgstr ""
+
+#: sui_menu.lua:2937
+msgid "UI Font  [%s]"
+msgstr ""
+
+#: sui_menu.lua:510
+msgid "Uses the standard KOReader pagination bar on the homescreen.\nNot available when Navpager is active."
+msgstr ""
+
+#: sui_menu.lua:2173
+msgid "When enabled, a notice is shown if the modules on a page are taller than the visible area.\nDisable this to silence the warning."
+msgstr ""
+
+#: sui_menu.lua:2161
+msgid "When enabled, long-pressing a section opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr ""
+
+#: sui_menu.lua:1042
+msgid "When enabled, long-pressing the bottom bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr ""
+
+#: sui_menu.lua:872
+msgid "When enabled, long-pressing the top bar opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
+msgstr ""
+
+#: sui_menu.lua:2104
+msgid "When enabled, opening the file browser after finishing or closing a book navigates to the folder the book is in, matching native KOReader behaviour.\nWhen disabled (default), SimpleUI always returns to the library root.\nThis option works independently of \"Start with Home Screen\"."
+msgstr ""
+
+#: sui_menu.lua:2494
+msgid "Homepage Presets"
+msgstr ""
+
+#: sui_menu.lua:2060
+msgid "Show wallpaper in File Manager"
+msgstr ""
+
+#: sui_menu.lua:2083
+msgid "Show wallpaper in Reader"
+msgstr ""
+
+msgid "Home Screen — Background"
+msgstr ""
+
+msgid "Bottom Bar — Background"
+msgstr ""
+
+msgid "Status Bar — Background"
+msgstr ""
+
+msgid "Home Screen — Text"
+msgstr ""
+
+msgid "Bottom Bar — Text and Icons"
+msgstr ""
+
+msgid "Status Bar — Text"
+msgstr ""
+
+msgid "Secondary / Dim Text"
+msgstr ""
+
+msgid "Separator Line"
+msgstr ""
+
+msgid "Accent / Active Color"
+msgstr ""
+
+msgid "Apply Palette…"
+msgstr ""
+
+msgid "Reset All Theme Colors"
+msgstr ""
+
+msgid "Theme Colors"
+msgstr ""
+
+msgid "Icon Packs"
+msgstr ""
+
+msgid "Icon Packs  (%d)"
+msgstr ""
+
+msgid "Install pack from ZIP…"
+msgstr ""
+
+msgid "Open packs folder"
+msgstr ""
+
+msgid "No packs found.\nPlace a folder or .zip in:\n%1"
+msgstr ""
+
+msgid "Pack \"%s\" installed.\nYou can now apply it from the list."
+msgstr ""
+
+msgid "Error installing pack:"
+msgstr ""
+
+msgid "[zip]"
+msgstr ""
+
+msgid "Pack \"%s\" applied.\n%d icons replaced."
+msgstr ""
+
+msgid "Error applying pack:"
+msgstr ""
+
+msgid "Pagination Chevrons"
+msgstr ""
+
+msgid "Pagination: Previous Page"
+msgstr ""
+
+msgid "Pagination: Next Page"
+msgstr ""
+
+msgid "Pagination: First Page"
+msgstr ""
+
+msgid "Pagination: Last Page"
+msgstr ""
+
+msgid "Collections: Back Button"
+msgstr ""
+
+msgid "Show wallpaper on all screens"
+msgstr ""
+
+msgid "Navpager Arrows"
+msgstr ""
+
+msgid "Navpager: Previous"
+msgstr ""
+
+msgid "Navpager: Next"
+msgstr ""
+
+msgid "Import preset…"
+msgstr ""
+
+msgid "Preset \"%s\" imported."
+msgstr ""
+
+msgid "Error importing preset: "
+msgstr ""
+
+msgid "Export preset…"
+msgstr ""
+
+msgid "Preset exported to:\n%s"
+msgstr ""
+
+msgid "Error exporting preset: "
+msgstr ""
+
+msgid "No export directory"
+msgstr ""
+
+msgid "Preset not found"
+msgstr ""
+
+msgid "LuaSettings module unavailable"
+msgstr ""
+
+msgid "Invalid preset file"
+msgstr ""
+
+msgid "Invalid data"
+msgstr ""
+
+msgid "Open import folder"
+msgstr ""
+
+msgid "No preset files found.\nPlace .lua files in:\n%1"
+msgstr ""
+
+msgid "Factory Reset"
+msgstr ""
+
+msgid "This will delete all Simple UI settings and restart KOReader.\nAre you sure?"
+msgstr ""
+
+msgid "Delete Settings"
+msgstr ""
+
+msgid "Cards - Transparent"
+msgstr ""
+
+msgid "Square Buttons"
+msgstr ""
+
+msgid "Square Buttons - Transparent"
+msgstr ""
+
+msgid "Default: Folder"
+msgstr ""
+
+msgid "Default: Plugin"
+msgstr ""
+
+msgid "Default: System"
+msgstr ""
+
+msgid "Folder Covers: Empty Folder"
+msgstr ""
+
+msgid "Reset All Quick Action Icons"
+msgstr ""

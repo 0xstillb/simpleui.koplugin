@@ -129,7 +129,7 @@ msgstr "Organiser"
 #: sui_menu.lua:1327
 #: desktop_modules/module_quick_actions.lua:305
 msgid "Arrange %s"
-msgstr "Organiser %s"
+msgstr ""
 
 #: sui_menu.lua:1049
 #: sui_menu.lua:1100
@@ -172,7 +172,7 @@ msgstr "Organiser la liste « À lire»"
 #: sui_menu.lua:199
 #: sui_menu.lua:209
 msgid "Arrange tabs"
-msgstr "Organiser les onglets"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:55
 msgid "August"
@@ -642,7 +642,7 @@ msgstr "Récupération des signets…"
 
 #: sui_quickactions.lua:622
 msgid "File Search"
-msgstr "Recherche de fichiers"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:443
 #: desktop_modules/module_quick_actions.lua:406
@@ -660,7 +660,7 @@ msgstr "Couvertures de dossiers"
 
 #: sui_menu.lua:2102
 msgid "Folder Name"
-msgstr "Nom du dossier"
+msgstr ""
 
 #: sui_menu.lua:2154
 msgid "Folder Name Text Size"
@@ -757,11 +757,11 @@ msgstr "Accueil"
 #: sui_menu.lua:1825
 #: sui_menu.lua:1943
 msgid "Home Screen"
-msgstr "Écran d'accueil"
+msgstr ""
 
 #: sui_bottombar.lua:1050
 msgid "Home folder"
-msgstr "Dossier principal"
+msgstr ""
 
 #: sui_bottombar.lua:1052
 msgid "Home folder + subfolders"
@@ -769,11 +769,11 @@ msgstr "Dossier principal + sous-dossiers"
 
 #: sui_homescreen.lua:1080
 msgid "Homescreen"
-msgstr "Écran d'accueil"
+msgstr ""
 
 #: sui_bottombar.lua:1362
 msgid "Homescreen not available."
-msgstr "Écran d'accueil indisponible."
+msgstr ""
 
 #: sui_quickactions.lua:761
 #: sui_quickactions.lua:765
@@ -974,11 +974,11 @@ Redémarrer maintenant ?"
 
 #: sui_quickactions.lua:488
 msgid "Nerd Font Icon"
-msgstr "Icône Nerd Font"
+msgstr ""
 
 #: sui_quickactions.lua:573
 msgid "Nerd Font symbol…"
-msgstr "Symbole Nerd Font…"
+msgstr ""
 
 #: sui_bottombar.lua:1454
 msgid "Network manager unavailable."
@@ -1234,7 +1234,7 @@ msgstr "Plugin indisponible : %s"
 
 #: sui_config.lua:143
 msgid "Power"
-msgstr "Alimentation"
+msgstr ""
 
 #: sui_bottombar.lua:288
 msgid "Prev"
@@ -1558,7 +1558,7 @@ msgstr "Afficher l'horloge"
 
 #: desktop_modules/module_clock.lua:488
 msgid "Show Date"
-msgstr "Afficher la date"
+msgstr ""
 
 #: sui_config.lua:1775
 msgid "Show section label"
@@ -1714,7 +1714,7 @@ msgstr "Erreur d'action système : %s"
 
 #: sui_menu.lua:949
 msgid "Tabs  (%d/%d — %d left)"
-msgstr "Onglets  (%d/%d — %d restants)"
+msgstr ""
 
 #: sui_menu.lua:947
 msgid "Tabs  (%d/%d — at limit)"
@@ -1769,7 +1769,7 @@ msgstr "Temps de lecture"
 #: desktop_modules/module_currently.lua:271
 #: desktop_modules/module_coverdeck.lua:78
 msgid "Time remaining"
-msgstr "Temps restant"
+msgstr ""
 
 #: sui_titlebar.lua:58
 #: desktop_modules/module_currently.lua:265
@@ -1889,7 +1889,7 @@ Indisponible quand le Navigateur est activé."
 
 #: sui_menu.lua:2232
 msgid "Version: %s"
-msgstr "Version : %s"
+msgstr ""
 
 #: sui_homescreen.lua:1746
 msgid "Vertical space above this module.
@@ -1957,7 +1957,7 @@ msgstr "WiFi indisponible sur cet appareil."
 
 #: sui_quickactions.lua:625
 msgid "Wikipedia Lookup"
-msgstr "Recherche sur Wikipédia"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:936
 msgid "With percentage"
@@ -1965,7 +1965,7 @@ msgstr "Avec pourcentage"
 
 #: desktop_modules/module_quote.lua:897
 msgid "Your highlights"
-msgstr "Vos surlignages"
+msgstr ""
 
 #: sui_updater.lua:410
 msgid "
@@ -2008,7 +2008,7 @@ msgstr "ex. BD…"
 
 #: sui_quickactions.lua:896
 msgid "e.g. Rakuyomi…"
-msgstr "ex. Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:869
 msgid "e.g. Sci-Fi…"
@@ -2027,7 +2027,7 @@ msgstr "activé"
 
 #: sui_quickactions.lua:490
 msgid "hex code, e.g. E001"
-msgstr "code hex, ex. E001"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "no streak"

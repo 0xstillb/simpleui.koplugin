@@ -21,8 +21,34 @@ local logger          = require("logger")
 local _ = require("sui_i18n").translate
 
 local Config = require("sui_config")
+local SUISettings = require("sui_store")
 
 local M = {}
+
+-- ---------------------------------------------------------------------------
+-- Theme color helpers
+-- Priority: transparent > statusbar_bg/fg role > bg/fg fallback > default.
+-- The "statusbar_bg/fg" roles fall back to "bg/fg" automatically inside
+-- SUIStyle.getThemeColor() via the _FALLBACKS chain.
+-- ---------------------------------------------------------------------------
+local function _getBarBg()
+    if SUISettings:isTrue("simpleui_statusbar_transparent") then return nil end
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("statusbar_bg")
+        if c then return c end
+    end
+    return Blitbuffer.COLOR_WHITE
+end
+
+local function _getBarFg()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("statusbar_fg")
+        if c then return c end
+    end
+    return Blitbuffer.COLOR_BLACK
+end
 
 -- ---------------------------------------------------------------------------
 -- Hardware capability flags — queried once per session, never change at runtime.
@@ -128,7 +154,7 @@ local _topbar_disk_time = 0
 local _topbar_ram_mb    = nil
 local _topbar_ram_time  = 0
 
--- Cached result of "navbar_topbar_enabled" setting.
+-- Cached result of "simpleui_topbar_enabled" setting.
 -- This setting is read on every timer tick (shouldRunTimer) and on every
 -- touch-zone registration. Caching it avoids repeated settings lookups on
 -- the hot path. Invalidated by invalidateDimCache() on any settings change.
@@ -238,7 +264,7 @@ function M.getTopbarInfo()
     end
 
     -- Brightness: single pcall wrapping the two-step lookup.
-    -- Mostra o valor quando ligado, ou "Off" quando desligado (igual ao patch).
+    -- Show the value when on, or "Off" when off (same as the patch).
     pcall(function()
         local pd = Device:getPowerDevice()
         if not pd then return end
@@ -255,7 +281,7 @@ function M.getTopbarInfo()
                 end
             end
         else
-            info.brightness_off = true  -- frontlight existe mas está desligado
+            info.brightness_off = true  -- frontlight exists but is off
         end
     end)
 
@@ -328,12 +354,12 @@ function M.buildTopbarWidget()
         end,
         wifi = function()
             if info.wifi then
-                return "\u{ECA8}", nil, true   -- ícone wifi ligado
+                return "\u{ECA8}", nil, true   -- wifi on icon
             elseif hwHasWifi() then
                 if Config.getWifiHideWhenOff() then
-                    return nil, nil             -- esconde quando desligado
+                    return nil, nil             -- hide when off
                 end
-                return "\u{ECA9}", nil, true   -- ícone wifi desligado
+                return "\u{ECA9}", nil, true   -- wifi off icon
             end
             return nil, nil
         end,
@@ -375,6 +401,7 @@ function M.buildTopbarWidget()
     local function buildSideGroup(order)
         local group = HorizontalGroup:new{}
         local first = true
+        local fg = _getBarFg()
         for _, key in ipairs(order) do
             if (tb_cfg.side[key] or "hidden") ~= "hidden" then
                 local builder = item_builders[key]
@@ -383,21 +410,21 @@ function M.buildTopbarWidget()
                     if icon or (label and label ~= "") then
                         if not first then
                             group[#group + 1] = TextWidget:new{
-                                text = "  ", face = face, fgcolor = Blitbuffer.COLOR_BLACK,
+                                text = "  ", face = face, fgcolor = fg,
                             }
                         end
                         if icon then
                             group[#group + 1] = TextWidget:new{
                                 text    = icon,
                                 face    = is_nerd and icon_face or face,
-                                fgcolor = Blitbuffer.COLOR_BLACK,
+                                fgcolor = fg,
                             }
                         end
                         if label and label ~= "" then
                             group[#group + 1] = TextWidget:new{
                                 text      = label,
                                 face      = face,
-                                fgcolor   = Blitbuffer.COLOR_BLACK,
+                                fgcolor   = fg,
                                 max_width = max_w or nil,
                             }
                         end
@@ -431,7 +458,7 @@ function M.buildTopbarWidget()
         end
     end
 
-    local show_swipe = (not center_has_items) and G_reader_settings:nilOrTrue("navbar_topbar_swipe_indicator")
+    local show_swipe = (not center_has_items) and SUISettings:nilOrTrue("simpleui_topbar_swipe_indicator")
     local center_w
     if center_has_items then
         center_w = CenterContainer:new{
@@ -444,7 +471,7 @@ function M.buildTopbarWidget()
             TextWidget:new{
                 text    = "\xef\xb9\x80",
                 face    = Font:getFace("cfont", M.TOPBAR_CHEVRON_FS()),
-                fgcolor = Blitbuffer.COLOR_BLACK,
+                fgcolor = _getBarFg(),
             },
         }
     end
@@ -457,7 +484,7 @@ function M.buildTopbarWidget()
     return FrameContainer:new{
         bordersize    = 0, padding = 0, margin = 0,
         padding_left  = side_m, padding_right = side_m,
-        background    = Blitbuffer.COLOR_WHITE,
+        background    = _getBarBg(),
         row,
     }
 end
@@ -477,7 +504,7 @@ function M.registerTouchZones(plugin, fm_self)
     end
 
     if _topbar_enabled_cache == nil then
-        _topbar_enabled_cache = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+        _topbar_enabled_cache = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     end
     if not _topbar_enabled_cache then return end
 
@@ -497,7 +524,7 @@ function M.registerTouchZones(plugin, fm_self)
             ges         = "hold_release",
             screen_zone = topbar_zone,
             handler = function(_ges)
-			if not G_reader_settings:nilOrTrue("navbar_topbar_settings_on_hold") then
+			if not SUISettings:nilOrTrue("simpleui_topbar_settings_on_hold") then
 				return true
 			end
 			 if not plugin._makeTopbarMenu then plugin:addToMainMenu({}) end
@@ -521,7 +548,7 @@ end
 -- for deciding whether to *reschedule* the recurring timer after a tick.
 local function shouldRefreshTopbar(plugin)
     if _topbar_enabled_cache == nil then
-        _topbar_enabled_cache = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+        _topbar_enabled_cache = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     end
     if not _topbar_enabled_cache then return false end
     -- Use package.loaded to avoid any pcall overhead; ReaderUI is only present

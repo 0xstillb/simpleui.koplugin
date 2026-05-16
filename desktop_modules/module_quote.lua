@@ -18,8 +18,11 @@ local Device         = require("device")
 
 local Font           = require("ui/font")
 
+local CenterContainer = require("ui/widget/container/centercontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan  = require("ui/widget/horizontalspan")
+local LeftContainer   = require("ui/widget/container/leftcontainer")
+local RightContainer  = require("ui/widget/container/rightcontainer")
 
 local GestureRange   = require("ui/gesturerange")
 
@@ -27,9 +30,9 @@ local GestureRange   = require("ui/gesturerange")
 -- Lazy-loaded at that point to avoid the cost at module-load time.
 -- local ConfirmBox = require("ui/widget/confirmbox")  ← moved to usage site
 
-local InputContainer = require("ui/widget/container/inputcontainer")
+local InputContainer   = require("ui/widget/container/inputcontainer")
 
-local TextBoxWidget  = require("ui/widget/textboxwidget")
+local TextBoxWidget    = require("ui/widget/textboxwidget")
 
 local VerticalGroup  = require("ui/widget/verticalgroup")
 
@@ -48,6 +51,7 @@ local Config       = require("sui_config")
 local UIManager       = require("ui/uimanager")
 
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 
 local PAD          = UI.PAD
 
@@ -93,8 +97,31 @@ local MAX_POOL_HIGHLIGHTS = 100
 
 
 
-local SETTING_SOURCE      = "quote_source"
-local SETTING_CUSTOM_FILE = "quote_custom_file"
+local SETTING_SOURCE      = "simpleui_quote_source"
+local SETTING_CUSTOM_FILE = "simpleui_quote_custom_file"
+local SETTING_ALIGN       = "simpleui_quote_align"
+
+-- ---------------------------------------------------------------------------
+-- Alignment setting helpers  (mirrors module_action_list)
+-- ---------------------------------------------------------------------------
+local _ALIGN_VALUES = { "left", "center", "right" }
+
+local function getAlignment(pfx)
+    local v = SUISettings:readSetting((pfx or "") .. SETTING_ALIGN)
+    for _, a in ipairs(_ALIGN_VALUES) do if a == v then return v end end
+    return "center"  -- default
+end
+
+local function setAlignment(pfx, val)
+    SUISettings:saveSetting((pfx or "") .. SETTING_ALIGN, val)
+end
+
+local function alignLabel(align)
+    if align == "left"  then return _("Left")  end
+    if align == "right" then return _("Right") end
+    return _("Center")
+end
+
 
 local lfs = require("libs/libkoreader-lfs")
 
@@ -102,30 +129,38 @@ local lfs = require("libs/libkoreader-lfs")
 
 local function getSource(pfx)
 
-    return G_reader_settings:readSetting((pfx or "") .. SETTING_SOURCE) or "quotes"
+    return SUISettings:readSetting((pfx or "") .. SETTING_SOURCE) or "quotes"
 
 end
 
 local function getCustomFile(pfx)
-    return G_reader_settings:readSetting((pfx or "") .. SETTING_CUSTOM_FILE) or ""
+    return SUISettings:readSetting((pfx or "") .. SETTING_CUSTOM_FILE) or ""
 end
 
--- Returns the absolute path to the plugin's desktop_modules/custom_quotes/ directory.
+-- Returns the absolute path to the sui_quotes directory.
+-- Since version X.X this lives outside the plugin folder
+-- (DataStorage/simpleui/sui_quotes/) so it survives plugin updates.
 local _CUSTOM_DIR
 local function customDir()
     if not _CUSTOM_DIR then
-        local info = debug.getinfo(1, "S")
-        local src  = info and info.source and info.source:match("^@(.+)$")
-        if src then
-            _CUSTOM_DIR = src:match("(.+)/[^/]+$") .. "/custom_quotes"
+        local ok_ds, DataStorage = pcall(require, "datastorage")
+        if ok_ds and DataStorage then
+            _CUSTOM_DIR = DataStorage:getSettingsDir() .. "/simpleui/sui_quotes"
         else
-            _CUSTOM_DIR = "desktop_modules/custom_quotes"
+            -- Fallback: old in-plugin location.
+            local info = debug.getinfo(1, "S")
+            local src  = info and info.source and info.source:match("^@(.+)$")
+            if src then
+                _CUSTOM_DIR = src:match("(.+)/[^/]+$") .. "/sui_quotes"
+            else
+                _CUSTOM_DIR = "desktop_modules/custom_quotes"
+            end
         end
     end
     return _CUSTOM_DIR
 end
 
--- Scans desktop_modules/custom_quotes/ for .lua files; returns a sorted list of filenames.
+-- Scans sui_quotes/ for .lua files; returns a sorted list of filenames.
 local function listCustomQuoteFiles()
     local dir   = customDir()
     local files = {}
@@ -227,10 +262,10 @@ local function loadCustomQuotes(filename)
     return nil
 end
 
-local _CUSTOM_DECK_KEY  = "quote_custom_deck_order"
-local _CUSTOM_POS_KEY   = "quote_custom_deck_pos"
-local _CUSTOM_COUNT_KEY = "quote_custom_deck_count"
-local _CUSTOM_FILE_KEY  = "quote_custom_deck_file"
+local _CUSTOM_DECK_KEY  = "simpleui_quote_custom_deck_order"
+local _CUSTOM_POS_KEY   = "simpleui_quote_custom_deck_pos"
+local _CUSTOM_COUNT_KEY = "simpleui_quote_custom_deck_count"
+local _CUSTOM_FILE_KEY  = "simpleui_quote_custom_deck_file"
 
 local function pickCustomQuote(pfx)
     local filename = getCustomFile(pfx)
@@ -238,10 +273,10 @@ local function pickCustomQuote(pfx)
     if not quotes or #quotes == 0 then return nil end
     local n = #quotes
 
-    local sf = G_reader_settings:readSetting(_CUSTOM_FILE_KEY)
-    local sc = G_reader_settings:readSetting(_CUSTOM_COUNT_KEY)
-    local sp = G_reader_settings:readSetting(_CUSTOM_POS_KEY)
-    local sr = G_reader_settings:readSetting(_CUSTOM_DECK_KEY)
+    local sf = SUISettings:readSetting(_CUSTOM_FILE_KEY)
+    local sc = SUISettings:readSetting(_CUSTOM_COUNT_KEY)
+    local sp = SUISettings:readSetting(_CUSTOM_POS_KEY)
+    local sr = SUISettings:readSetting(_CUSTOM_DECK_KEY)
 
     local deck, pos
     if sf == filename and type(sc) == "number" and sc == n
@@ -263,10 +298,10 @@ local function pickCustomQuote(pfx)
         pos = 1
     end
 
-    G_reader_settings:saveSetting(_CUSTOM_FILE_KEY,  filename)
-    G_reader_settings:saveSetting(_CUSTOM_DECK_KEY,  table.concat(deck, ","))
-    G_reader_settings:saveSetting(_CUSTOM_POS_KEY,   pos)
-    G_reader_settings:saveSetting(_CUSTOM_COUNT_KEY, n)
+    SUISettings:saveSetting(_CUSTOM_FILE_KEY,  filename)
+    SUISettings:saveSetting(_CUSTOM_DECK_KEY,  table.concat(deck, ","))
+    SUISettings:saveSetting(_CUSTOM_POS_KEY,   pos)
+    SUISettings:saveSetting(_CUSTOM_COUNT_KEY, n)
     return quotes[idx]
 end
 
@@ -278,11 +313,11 @@ end
 
 -- order are persisted in settings so the sequence survives restarts.
 
-local _DECK_KEY  = "quote_deck_order"
+local _DECK_KEY  = "simpleui_quote_deck_order"
 
-local _POS_KEY   = "quote_deck_pos"
+local _POS_KEY   = "simpleui_quote_deck_pos"
 
-local _COUNT_KEY = "quote_deck_count"
+local _COUNT_KEY = "simpleui_quote_deck_count"
 
 
 
@@ -308,11 +343,11 @@ end
 
 local function _saveDeck(deck, pos)
 
-    G_reader_settings:saveSetting(_DECK_KEY,  table.concat(deck, ","))
+    SUISettings:saveSetting(_DECK_KEY,  table.concat(deck, ","))
 
-    G_reader_settings:saveSetting(_POS_KEY,   pos)
+    SUISettings:saveSetting(_POS_KEY,   pos)
 
-    G_reader_settings:saveSetting(_COUNT_KEY, #deck)
+    SUISettings:saveSetting(_COUNT_KEY, #deck)
 
 end
 
@@ -320,11 +355,11 @@ end
 
 local function _loadDeck(n)
 
-    local count = G_reader_settings:readSetting(_COUNT_KEY)
+    local count = SUISettings:readSetting(_COUNT_KEY)
 
-    local pos   = G_reader_settings:readSetting(_POS_KEY)
+    local pos   = SUISettings:readSetting(_POS_KEY)
 
-    local raw   = G_reader_settings:readSetting(_DECK_KEY)
+    local raw   = SUISettings:readSetting(_DECK_KEY)
 
     -- Invalidate if quote count changed (user edited quotes.lua)
 
@@ -658,21 +693,21 @@ end
 
 -- separately so the two decks are independent.
 
-local _HL_DECK_KEY  = "quote_hl_deck_order"
+local _HL_DECK_KEY  = "simpleui_quote_hl_deck_order"
 
-local _HL_POS_KEY   = "quote_hl_deck_pos"
+local _HL_POS_KEY   = "simpleui_quote_hl_deck_pos"
 
-local _HL_COUNT_KEY = "quote_hl_deck_count"
+local _HL_COUNT_KEY = "simpleui_quote_hl_deck_count"
 
 
 
 local function _saveHlDeck(deck, pos)
 
-    G_reader_settings:saveSetting(_HL_DECK_KEY,  table.concat(deck, ","))
+    SUISettings:saveSetting(_HL_DECK_KEY,  table.concat(deck, ","))
 
-    G_reader_settings:saveSetting(_HL_POS_KEY,   pos)
+    SUISettings:saveSetting(_HL_POS_KEY,   pos)
 
-    G_reader_settings:saveSetting(_HL_COUNT_KEY, #deck)
+    SUISettings:saveSetting(_HL_COUNT_KEY, #deck)
 
 end
 
@@ -680,11 +715,11 @@ end
 
 local function _loadHlDeck(n)
 
-    local count = G_reader_settings:readSetting(_HL_COUNT_KEY)
+    local count = SUISettings:readSetting(_HL_COUNT_KEY)
 
-    local pos   = G_reader_settings:readSetting(_HL_POS_KEY)
+    local pos   = SUISettings:readSetting(_HL_POS_KEY)
 
-    local raw   = G_reader_settings:readSetting(_HL_DECK_KEY)
+    local raw   = SUISettings:readSetting(_HL_DECK_KEY)
 
     if type(count) ~= "number" or count ~= n
 
@@ -778,49 +813,36 @@ end
 
 
 
-local function buildWidget(inner_w, text_str, attr_str, face_quote, face_attr, vspan_gap)
+local function buildWidget(inner_w, text_str, attr_str, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
+
+ local function makeTBW(text, face, fgcolor, bold)
+        local args = {
+            text      = text,
+            face      = face,
+            bold      = bold,
+            width     = inner_w,
+            alignment = alignment or "center",
+            fgcolor   = fgcolor,
+        }
+
+        if has_wallpaper then
+            return UI.makeAlphaTextBox(args)
+        else
+            return TextBoxWidget:new(args)
+        end
+    end
 
     local vg = VerticalGroup:new{ align = "center" }
-
-    vg[#vg+1] = TextBoxWidget:new{
-
-        text      = text_str,
-
-        face      = face_quote,
-
-        fgcolor   = _CLR_TEXT_QUOTE,
-
-        width     = inner_w,
-
-        alignment = "center",
-
-    }
-
+    vg[#vg+1] = makeTBW(text_str, face_quote, clr_quote or _CLR_TEXT_QUOTE, nil)
     vg[#vg+1] = vspan_gap
-
-    vg[#vg+1] = TextBoxWidget:new{
-
-        text      = attr_str,
-
-        face      = face_attr,
-
-        fgcolor   = CLR_TEXT_SUB,
-
-        bold      = true,
-
-        width     = inner_w,
-
-        alignment = "center",
-
-    }
-
+    vg[#vg+1] = makeTBW(attr_str, face_attr,  clr_attr  or CLR_TEXT_SUB,    true)
     return vg
 
 end
 
 
 
-local function buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, pfx)
+local function buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, pfx, has_wallpaper, clr_quote, clr_attr, alignment)
 
     local q = pickCustomQuote(pfx)
 
@@ -828,13 +850,17 @@ local function buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, p
 
         return TextBoxWidget:new{
 
-            text    = _("No custom quotes found. Add a .lua file to the plugin\'s desktop_modules/custom_quotes/ folder and select it in Settings."),
+            text    = _("No custom quotes found. Add a .lua file to the plugin\'s sui_quotes/ folder and select it in Settings."),
 
             face    = face_quote,
 
-            fgcolor = CLR_TEXT_SUB,
+            fgcolor = clr_attr or CLR_TEXT_SUB,
+
+            bgcolor = nil,
 
             width   = inner_w,
+
+            alpha   = true,
 
         }
 
@@ -844,13 +870,13 @@ local function buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, p
 
     if q.b and q.b ~= "" then attr = attr .. ",  " .. q.b end
 
-    return buildWidget(inner_w, "“" .. q.q .. "”", attr, face_quote, face_attr, vspan_gap)
+    return buildWidget(inner_w, "“" .. q.q .. "”", attr, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
 end
 
 
 
-local function buildFromQuote(inner_w, face_quote, face_attr, vspan_gap)
+local function buildFromQuote(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
     local q = pickQuote()
 
@@ -862,9 +888,13 @@ local function buildFromQuote(inner_w, face_quote, face_attr, vspan_gap)
 
             face    = face_quote,
 
-            fgcolor = CLR_TEXT_SUB,
+            fgcolor = clr_attr or CLR_TEXT_SUB,
+
+            bgcolor = nil,
 
             width   = inner_w,
+
+            alpha   = true,
 
         }
 
@@ -874,13 +904,13 @@ local function buildFromQuote(inner_w, face_quote, face_attr, vspan_gap)
 
     if q.b and q.b ~= "" then attr = attr .. ",  " .. q.b end
 
-    return buildWidget(inner_w, "\u{201C}" .. q.q .. "\u{201D}", attr, face_quote, face_attr, vspan_gap)
+    return buildWidget(inner_w, "\u{201C}" .. q.q .. "\u{201D}", attr, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
 end
 
 
 
-local function buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
+local function buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
     local h = pickHighlight()
 
@@ -896,7 +926,7 @@ local function buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
 
             _("Your highlights"),
 
-            face_quote, face_attr, vspan_gap
+            face_quote, face_attr, vspan_gap, has_wallpaper
 
         ), nil
 
@@ -921,14 +951,14 @@ local function buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
     local TRAILING_QUOTES = '["\'\u{201D}\u{2019}\u{201E}\u{201A}\u{00BB}\u{203A}%s]+$'
     local text = h.text:gsub(LEADING_QUOTES, ''):gsub(TRAILING_QUOTES, '')
     text = text:gsub('^[\u{2014}\u{2013}]%s*', '')
-    return buildWidget(inner_w, "\u{201C}" .. text .. "\u{201D}", attr, face_quote, face_attr, vspan_gap),
+    return buildWidget(inner_w, "\u{201C}" .. text .. "\u{201D}", attr, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment),
            h.filepath, h.title, h.pos0, h.page
 
 end
 
 
 
-local function buildFromMixed(inner_w, face_quote, face_attr, vspan_gap)
+local function buildFromMixed(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
     local has_highlights = #getPool() > 0
 
@@ -938,21 +968,21 @@ local function buildFromMixed(inner_w, face_quote, face_attr, vspan_gap)
 
         if math.random(2) == 1 then
 
-            return buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
+            return buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
         else
 
-            return buildFromQuote(inner_w, face_quote, face_attr, vspan_gap), nil, nil, nil, nil
+            return buildFromQuote(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment), nil, nil, nil, nil
 
         end
 
     elseif has_highlights then
 
-        return buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
+        return buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment)
 
     else
 
-        return buildFromQuote(inner_w, face_quote, face_attr, vspan_gap), nil, nil, nil, nil
+        return buildFromQuote(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, clr_quote, clr_attr, alignment), nil, nil, nil, nil
 
     end
 
@@ -992,7 +1022,7 @@ function M.invalidateCache()
 
     -- Clear the highlight deck so it is rebuilt from the new pool.
 
-    G_reader_settings:delSetting(_HL_COUNT_KEY)
+    SUISettings:delSetting(_HL_COUNT_KEY)
 
     -- Clear the custom quotes cache so re-selection picks up any file changes.
     _custom_quotes_cache = nil; _custom_quotes_cache_file = nil
@@ -1019,13 +1049,21 @@ function M.build(w, ctx)
 
     local vspan_gap  = VerticalSpan:new{ width = quote_gap }
 
-
+    -- Theme: when fg is set use it for all text; otherwise fall back to module defaults.
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _clr_quote       = _theme_fg or _CLR_TEXT_QUOTE
+    local _clr_attr        = _theme_secondary or _theme_fg or CLR_TEXT_SUB
 
     local inner_w = w - PAD * 2
 
-    local source  = getSource(ctx and ctx.pfx)
+    local source    = getSource(ctx and ctx.pfx)
+    local alignment = getAlignment(ctx and ctx.pfx)
 
-    logger.warn("simpleui: quote: build source=" .. source)
+    local has_wallpaper = ctx and ctx.has_wallpaper
+
+    logger.warn("simpleui: quote: build source=" .. source .. " align=" .. alignment)
 
     local content
     local hl_filepath
@@ -1035,19 +1073,19 @@ function M.build(w, ctx)
 
     if source == "highlights" then
 
-        content, hl_filepath, hl_title, hl_pos0, hl_page = buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap)
+        content, hl_filepath, hl_title, hl_pos0, hl_page = buildFromHighlight(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, _clr_quote, _clr_attr, alignment)
 
     elseif source == "mixed" then
 
-        content, hl_filepath, hl_title, hl_pos0, hl_page = buildFromMixed(inner_w, face_quote, face_attr, vspan_gap)
+        content, hl_filepath, hl_title, hl_pos0, hl_page = buildFromMixed(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, _clr_quote, _clr_attr, alignment)
 
     elseif source == "custom" then
 
-        content = buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, ctx and ctx.pfx)
+        content = buildFromCustomQuote(inner_w, face_quote, face_attr, vspan_gap, ctx and ctx.pfx, has_wallpaper, _clr_quote, _clr_attr, alignment)
 
     else
 
-        content = buildFromQuote(inner_w, face_quote, face_attr, vspan_gap)
+        content = buildFromQuote(inner_w, face_quote, face_attr, vspan_gap, has_wallpaper, _clr_quote, _clr_attr, alignment)
 
     end
 
@@ -1055,11 +1093,31 @@ function M.build(w, ctx)
     -- background is fully transparent (the homescreen background shows through).
     -- Padding is replicated with VerticalSpan (top/bottom) and HorizontalSpan
     -- (left/right) since VerticalGroup has no padding property of its own.
+    -- The inner_row is wrapped in an alignment container so the text block
+    -- sits left / center / right within the full module width.
     local pad_span  = VerticalSpan:new{ width = PAD }
     local pad2_span = VerticalSpan:new{ width = PAD2 }
     local hpad      = HorizontalSpan:new{ width = PAD }
     local inner_row = HorizontalGroup:new{ hpad, content, hpad }
-    local frame = VerticalGroup:new{ align = "center", pad_span, inner_row, pad2_span }
+    local Geom = require("ui/geometry")
+    local inner_row_aligned
+    if alignment == "left" then
+        inner_row_aligned = LeftContainer:new{
+            dimen = Geom:new{ w = w, h = inner_row:getSize().h },
+            inner_row,
+        }
+    elseif alignment == "right" then
+        inner_row_aligned = RightContainer:new{
+            dimen = Geom:new{ w = w, h = inner_row:getSize().h },
+            inner_row,
+        }
+    else
+        inner_row_aligned = CenterContainer:new{
+            dimen = Geom:new{ w = w, h = inner_row:getSize().h },
+            inner_row,
+        }
+    end
+    local frame = VerticalGroup:new{ align = "center", pad_span, inner_row_aligned, pad2_span }
 
     local open_fn = ctx and ctx.open_fn
 
@@ -1211,7 +1269,7 @@ function M.getMenuItems(ctx_menu)
 
                     callback       = function()
 
-                        G_reader_settings:saveSetting(pfx .. SETTING_SOURCE, "quotes")
+                        SUISettings:saveSetting(pfx .. SETTING_SOURCE, "quotes")
 
                         refresh()
 
@@ -1231,7 +1289,7 @@ function M.getMenuItems(ctx_menu)
 
                     callback       = function()
 
-                        G_reader_settings:saveSetting(pfx .. SETTING_SOURCE, "highlights")
+                        SUISettings:saveSetting(pfx .. SETTING_SOURCE, "highlights")
 
                         M.invalidateCache()
 
@@ -1253,7 +1311,7 @@ function M.getMenuItems(ctx_menu)
 
                     callback       = function()
 
-                        G_reader_settings:saveSetting(pfx .. SETTING_SOURCE, "mixed")
+                        SUISettings:saveSetting(pfx .. SETTING_SOURCE, "mixed")
 
                         M.invalidateCache()
 
@@ -1278,7 +1336,7 @@ function M.getMenuItems(ctx_menu)
 
                         if #files == 0 then
                             subitems[#subitems + 1] = {
-                                text    = _lc("No .lua files found in custom_quotes/"),
+                                text    = _lc("No .lua files found in sui_quotes/"),
                                 enabled = false,
                             }
                         else
@@ -1293,8 +1351,8 @@ function M.getMenuItems(ctx_menu)
                                     end,
                                     keep_menu_open = true,
                                     callback       = function()
-                                        G_reader_settings:saveSetting(pfx .. SETTING_SOURCE,      "custom")
-                                        G_reader_settings:saveSetting(pfx .. SETTING_CUSTOM_FILE, _fname)
+                                        SUISettings:saveSetting(pfx .. SETTING_SOURCE,      "custom")
+                                        SUISettings:saveSetting(pfx .. SETTING_CUSTOM_FILE, _fname)
                                         M.invalidateCache()
                                         refresh()
                                     end,
@@ -1303,7 +1361,7 @@ function M.getMenuItems(ctx_menu)
                         end
 
                         subitems[#subitems + 1] = {
-                            text    = _lc("Place .lua files in the plugin's desktop_modules/custom_quotes/ folder"),
+                            text    = _lc("Place .lua files in the plugin's sui_quotes/ folder"),
                             enabled = false,
                         }
 
@@ -1317,6 +1375,32 @@ function M.getMenuItems(ctx_menu)
         },
 
         _makeScaleItem(ctx_menu),
+
+        {
+            text_func = function()
+                return _lc("Alignment") .. " — " .. alignLabel(getAlignment(pfx))
+            end,
+            sub_item_table = {
+                {
+                    text           = _lc("Left"),
+                    checked_func   = function() return getAlignment(pfx) == "left" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "left");   refresh() end,
+                },
+                {
+                    text           = _lc("Center"),
+                    checked_func   = function() return getAlignment(pfx) == "center" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "center"); refresh() end,
+                },
+                {
+                    text           = _lc("Right"),
+                    checked_func   = function() return getAlignment(pfx) == "right" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "right");  refresh() end,
+                },
+            },
+        },
 
     }
 

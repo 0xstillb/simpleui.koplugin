@@ -16,7 +16,7 @@ msgid "  Physical Books  (%d in %s)"
 msgstr "  Fyzické knihy  (%d v %s)"
 #: desktop_modules/module_reading_goals.lua:641
 msgid "  Set Goal  (%d min/day)"
-msgstr "  Nastavit cíl  (%d min/den)"
+msgstr ""
 #: desktop_modules/module_reading_goals.lua:620
 msgid "  Set Goal  (%s)"
 msgstr "  Nastavit cíl  (%s)"
@@ -73,10 +73,10 @@ msgid "Add to To Be Read"
 msgstr "Přidat do K přečtení"
 #: desktop_modules/module_reading_stats.lua:66
 msgid "All time — Books"
-msgstr "Celkem — Knihy"
+msgstr ""
 #: desktop_modules/module_reading_stats.lua:65
 msgid "All time — Time"
-msgstr "Celkem — Čas"
+msgstr ""
 #: desktop_modules/module_reading_goals.lua:609
 msgid "Annual Goal"
 msgstr "Roční cíl"
@@ -173,7 +173,7 @@ msgid "Below"
 msgstr "Dole"
 #: sui_quickactions.lua:619
 msgid "Book Info"
-msgstr "Informace o knize"
+msgstr ""
 #: sui_bottombar.lua:1029
 msgid "Bookmark browser"
 msgstr "Prohlížeč záložek"
@@ -211,7 +211,7 @@ msgid "Bottom Margin"
 msgstr "Spodní okraj"
 #: sui_menu.lua:866
 msgid "Bottom Margin — %d%%"
-msgstr "Spodní okraj — %d%%"
+msgstr ""
 #: sui_config.lua:141
 #: sui_config.lua:167
 msgid "Brightness"
@@ -236,7 +236,7 @@ msgid "Button Size"
 msgstr "Velikost tlačítka"
 #: sui_titlebar.lua:835
 msgid "By author"
-msgstr "Podle autora"
+msgstr ""
 #: sui_titlebar.lua:848
 msgid "By series"
 msgstr "Podle série"
@@ -297,7 +297,7 @@ msgid "Close"
 msgstr "Zavřít"
 #: sui_quickactions.lua:527
 msgid "Codepoint out of valid Unicode range (0–10FFFF)."
-msgstr "Kódový bod je mimo platný rozsah Unicode (0–10FFFF)."
+msgstr ""
 #: sui_quickactions.lua:943
 msgid "Collection"
 msgstr "Kolekce"
@@ -452,7 +452,7 @@ msgid "Dispatcher not available."
 msgstr "Dispatcher není k dispozici."
 #: sui_menu.lua:393
 msgid "Dot Pager"
-msgstr "Tečkovaný stránkovač"
+msgstr ""
 #: sui_updater.lua:437
 msgid "Download and install"
 msgstr "Stáhnout a nainstalovat"
@@ -461,7 +461,7 @@ msgid "Download error: "
 msgstr "Chyba při stahování: "
 #: sui_updater.lua:323
 msgid "Downloading Simple UI %s…"
-msgstr "Stahuje se Simple UI %s…"
+msgstr ""
 #: sui_quickactions.lua:1187
 msgid "Edit"
 msgstr "Upravit"
@@ -603,16 +603,16 @@ msgstr "Domů"
 #: sui_menu.lua:1825
 #: sui_menu.lua:1943
 msgid "Home Screen"
-msgstr "Domovská obrazovka"
+msgstr ""
 #: sui_bottombar.lua:1050
 msgid "Home folder"
-msgstr "Domovská složka"
+msgstr ""
 #: sui_bottombar.lua:1052
 msgid "Home folder + subfolders"
-msgstr "Domovská složka + podsložky"
+msgstr ""
 #: sui_homescreen.lua:1080
 msgid "Homescreen"
-msgstr "Domovská obrazovka"
+msgstr ""
 #: sui_bottombar.lua:1362
 msgid "Homescreen not available."
 msgstr "Domovská obrazovka není k dispozici."
@@ -623,7 +623,7 @@ msgstr "Ikona"
 #: sui_menu.lua:887
 #: sui_menu.lua:890
 msgid "Icon Size"
-msgstr "Velikost ikony"
+msgstr ""
 #: sui_menu.lua:888
 msgid "Icon Size — %d%%"
 msgstr "Velikost ikony — %d%%"
@@ -674,10 +674,10 @@ msgstr "Měřítko popisků"
 #: sui_menu.lua:907
 #: sui_menu.lua:910
 msgid "Label Size"
-msgstr "Velikost popisku"
+msgstr ""
 #: sui_menu.lua:908
 msgid "Label Size — %d%%"
-msgstr "Velikost popisku — %d%%"
+msgstr ""
 #: sui_menu.lua:1753
 msgid "Labels"
 msgstr "Popisky"
@@ -745,7 +745,7 @@ msgid "Modules"
 msgstr "Moduly"
 #: sui_menu.lua:1477
 msgid "Modules  (%d)"
-msgstr "Moduly  (%d)"
+msgstr ""
 #: desktop_modules/module_clock.lua:50
 msgid "Monday"
 msgstr "Pondělí"
@@ -773,7 +773,7 @@ msgstr "Navpager je zapnutý.\n"
 "Restartovat nyní?"
 #: sui_quickactions.lua:488
 msgid "Nerd Font Icon"
-msgstr "Ikona Nerd Font"
+msgstr ""
 #: sui_quickactions.lua:573
 msgid "Nerd Font symbol…"
 msgstr "Symbol Nerd Font…"
@@ -863,7 +863,7 @@ msgid "November"
 msgstr "Listopad"
 #: sui_menu.lua:2058
 msgid "Number of Books in Folder"
-msgstr "Počet knih ve složce"
+msgstr ""
 #: sui_menu.lua:1482
 #: sui_menu.lua:2090
 msgid "Number of Pages"
@@ -914,7 +914,7 @@ msgstr "Překryvy"
 #: sui_patches.lua:1759
 #: sui_homescreen.lua:1673
 msgid "Page %1 of %2"
-msgstr "Strana %1 z %2"
+msgstr ""
 #: sui_menu.lua:1948
 msgid "Pagination Bar"
 msgstr "Stránkovací lišta"
@@ -976,7 +976,7 @@ msgid "Plugin"
 msgstr "Plugin"
 #: sui_quickactions.lua:1287
 msgid "Plugin error: %s"
-msgstr "Chyba pluginu: %s"
+msgstr ""
 #: sui_quickactions.lua:1289
 msgid "Plugin not available: %s"
 msgstr "Plugin není k dispozici: %s"
@@ -1220,7 +1220,7 @@ msgid "Series Index"
 msgstr "Pořadí v sérii"
 #: sui_foldercovers.lua:589
 msgid "Series cover"
-msgstr "Obálka série"
+msgstr ""
 #: sui_menu.lua:571
 msgid "Set"
 msgstr "Nastavit"
@@ -1229,7 +1229,7 @@ msgid "Set folder cover…"
 msgstr "Nastavit obálku složky…"
 #: sui_foldercovers.lua:689
 msgid "Set series cover…"
-msgstr "Nastavit obálku série…"
+msgstr ""
 #: sui_foldercovers.lua:691
 msgid "Set virtual folder cover…"
 msgstr "Nastavit obálku virtuální složky…"
@@ -1243,7 +1243,7 @@ msgid "Settings on Long Tap"
 msgstr "Nastavení při dlouhém stisku"
 #: sui_menu.lua:2035
 msgid "Settings Tab"
-msgstr "Karta nastavení"
+msgstr ""
 #: sui_menu.lua:2036
 msgid "Show or hide the dedicated Simple UI tab in the menu bar.\nWhen hidden, Simple UI settings remain accessible via the main menu.\nTakes effect after a restart."
 msgstr "Zobrazí nebo skryje samostatnou kartu Simple UI v liště nabídek.\nJe-li skrytá, nastavení Simple UI zůstane dostupné přes hlavní nabídku.\nProjeví se po restartu."
@@ -1252,16 +1252,16 @@ msgid "The Simple UI settings tab will be %s after restart.\n\nRestart now?"
 msgstr "Karta nastavení Simple UI bude po restartu %s.\n\nRestartovat nyní?"
 #: desktop_modules/module_clock.lua:494
 msgid "Show Battery"
-msgstr "Zobrazit baterii"
+msgstr ""
 #: desktop_modules/module_clock.lua:482
 msgid "Show Clock"
-msgstr "Zobrazit hodiny"
+msgstr ""
 #: desktop_modules/module_clock.lua:488
 msgid "Show Date"
-msgstr "Zobrazit datum"
+msgstr ""
 #: sui_config.lua:1775
 msgid "Show section label"
-msgstr "Zobrazit popisek sekce"
+msgstr ""
 #: sui_menu.lua:504
 msgid "Shows \"Page X of Y\" in the title bar subtitle when browsing the library, history or collections.\n"
 "Navpager enables this automatically.\n"
@@ -1288,8 +1288,7 @@ msgstr "Simple UI"
 #: sui_updater.lua:407
 msgid "Simple UI %s is available!\n"
 "You have %s."
-msgstr "Je dostupné Simple UI %s!\n"
-"Máte %s."
+msgstr ""
 #: sui_updater.lua:357
 msgid "Simple UI %s successfully installed.\n"
 "\n"
@@ -1304,9 +1303,7 @@ msgstr "Simple UI je aktuální (%s)."
 msgid "Simple UI will be %s after restart.\n"
 "\n"
 "Restart now?"
-msgstr "Simple UI bude po restartu %s.\n"
-"\n"
-"Restartovat nyní?"
+msgstr ""
 #: sui_menu.lua:457
 #: sui_menu.lua:756
 #: sui_menu.lua:826
@@ -1350,7 +1347,7 @@ msgid "Start with"
 msgstr "Spustit s"
 #: sui_menu.lua:1835
 msgid "Start with Home Screen"
-msgstr "Spustit s domovskou obrazovkou"
+msgstr ""
 #: sui_bottombar.lua:1117
 #: sui_bottombar.lua:1402
 msgid "Statistics plugin not available."
@@ -1369,7 +1366,7 @@ msgid "Streak"
 msgstr "Série"
 #: sui_menu.lua:1180
 msgid "Sub-pages Buttons"
-msgstr "Tlačítka podstránek"
+msgstr ""
 #: desktop_modules/module_clock.lua:50
 msgid "Sunday"
 msgstr "Neděle"
@@ -1387,7 +1384,7 @@ msgid "Tabs  (%d/%d — %d left)"
 msgstr "Karty  (%d/%d — zbývá %d)"
 #: sui_menu.lua:947
 msgid "Tabs  (%d/%d — at limit)"
-msgstr "Karty  (%d/%d — na limitu)"
+msgstr ""
 #: sui_menu.lua:107
 msgid "Text"
 msgstr "Text"
@@ -1404,10 +1401,10 @@ msgstr "Text"
 #: desktop_modules/module_recent.lua:271
 #: desktop_modules/module_recent.lua:272
 msgid "Text Size"
-msgstr "Velikost textu"
+msgstr ""
 #: desktop_modules/module_reading_stats.lua:470
 msgid "Text Size — %d%%"
-msgstr "Velikost textu — %d%%"
+msgstr ""
 #: sui_menu.lua:109
 msgid "Text only"
 msgstr "Pouze text"
@@ -1415,7 +1412,7 @@ msgstr "Pouze text"
 #: desktop_modules/module_coverdeck.lua:715
 #: desktop_modules/module_coverdeck.lua:716
 msgid "Text size"
-msgstr "Velikost textu"
+msgstr ""
 #: sui_patches.lua:831
 msgid "The «To Be Read» collection cannot be renamed."
 msgstr "Kolekci «K přečtení» nelze přejmenovat."
@@ -1465,7 +1462,7 @@ msgid "Today"
 msgstr "Dnes"
 #: desktop_modules/module_reading_stats.lua:62
 msgid "Today — Pages"
-msgstr "Dnes — Stránky"
+msgstr ""
 #: desktop_modules/module_reading_stats.lua:61
 msgid "Today — Time"
 msgstr "Dnes — Čas"
@@ -1490,7 +1487,7 @@ msgstr "Horní lišta bude po restartu %s.\n"
 "Restartovat nyní?"
 #: sui_homescreen.lua:1743
 msgid "Top Margin  (%d%%)"
-msgstr "Horní okraj  (%d%%)"
+msgstr ""
 #: sui_menu.lua:925
 msgid "Top separator"
 msgstr "Horní oddělovač"
@@ -1511,7 +1508,7 @@ msgid "Uniformize Covers (2:3)"
 msgstr "Sjednotit obálky (2:3)"
 #: sui_updater.lua:377
 msgid "Update cancelled."
-msgstr "Aktualizace zrušena."
+msgstr ""
 #: sui_updater.lua:487
 msgid "Update check cancelled."
 msgstr "Kontrola aktualizací zrušena."
@@ -1570,7 +1567,7 @@ msgid "Wi-Fi"
 msgstr "Wi-Fi"
 #: sui_bottombar.lua:1462
 msgid "Wi-Fi off"
-msgstr "Wi-Fi vypnuta"
+msgstr ""
 #: sui_config.lua:166
 msgid "WiFi"
 msgstr "WiFi"
@@ -1579,7 +1576,7 @@ msgid "WiFi not available on this device."
 msgstr "WiFi není na tomto zařízení k dispozici."
 #: sui_quickactions.lua:625
 msgid "Wikipedia Lookup"
-msgstr "Vyhledat na Wikipedii"
+msgstr ""
 #: desktop_modules/module_currently.lua:936
 msgid "With percentage"
 msgstr "S procenty"
@@ -1595,7 +1592,7 @@ msgstr "\n"
 "Stáhnout a nainstalovat nyní?"
 #: desktop_modules/module_reading_stats.lua:66
 msgid "books finished"
-msgstr "dokončených knih"
+msgstr ""
 #: desktop_modules/module_reading_stats.lua:63
 msgid "daily avg (7 days)"
 msgstr "denní průměr (7 dní)"
@@ -1616,7 +1613,7 @@ msgid "disabled"
 msgstr "vypnuto"
 #: sui_quickactions.lua:850
 msgid "e.g. Comics…"
-msgstr "např. Komiksy…"
+msgstr ""
 #: sui_quickactions.lua:896
 msgid "e.g. Rakuyomi…"
 msgstr "např. Rakuyomi…"

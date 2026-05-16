@@ -11,12 +11,15 @@ local Geom            = require("ui/geometry")
 local TextWidget      = require("ui/widget/textwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
 local VerticalSpan    = require("ui/widget/verticalspan")
+local LeftContainer   = require("ui/widget/container/leftcontainer")
+local RightContainer  = require("ui/widget/container/rightcontainer")
 local Screen          = Device.screen
 local _ = require("sui_i18n").translate
 
 local UI           = require("sui_core")
 local UIManager    = require("ui/uimanager")
 local Config       = require("sui_config")
+local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local PAD2         = UI.PAD2
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -84,6 +87,25 @@ local SETTING_DATE      = "clock_date"       -- pfx .. "clock_date"      (defaul
 local SETTING_BATTERY   = "clock_battery"    -- pfx .. "clock_battery"   (default ON)
 local SETTING_DATE_GAP  = "clock_date_gap"   -- pfx .. "clock_date_gap"  (integer %, default 100)
 local SETTING_BATT_GAP  = "clock_batt_gap"   -- pfx .. "clock_batt_gap"  (integer %, default 100)
+local SETTING_ALIGN     = "clock_align"      -- pfx .. "clock_align"     (default "center")
+
+local ALIGN_VALUES = { "left", "center", "right" }
+
+local function getAlignment(pfx)
+    local v = SUISettings:readSetting(pfx .. SETTING_ALIGN)
+    for _, a in ipairs(ALIGN_VALUES) do if a == v then return v end end
+    return "center"  -- default
+end
+
+local function setAlignment(pfx, val)
+    SUISettings:saveSetting(pfx .. SETTING_ALIGN, val)
+end
+
+local function alignLabel(align, _lc)
+    if align == "left"  then return _lc("Left")  end
+    if align == "right" then return _lc("Right") end
+    return _lc("Center")
+end
 
 local ELEM_GAP_MIN  = 0
 local ELEM_GAP_MAX  = 300
@@ -95,29 +117,29 @@ local function _clampElemGap(n)
 end
 
 local function getDateGapPct(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_DATE_GAP)
+    local v = SUISettings:readSetting(pfx .. SETTING_DATE_GAP)
     local n = tonumber(v)
     return n and _clampElemGap(n) or ELEM_GAP_DEF
 end
 
 local function getBattGapPct(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_BATT_GAP)
+    local v = SUISettings:readSetting(pfx .. SETTING_BATT_GAP)
     local n = tonumber(v)
     return n and _clampElemGap(n) or ELEM_GAP_DEF
 end
 
 local function isClockEnabled(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_ON)
+    local v = SUISettings:readSetting(pfx .. SETTING_ON)
     return v ~= false   -- default ON
 end
 
 local function isDateEnabled(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_DATE)
+    local v = SUISettings:readSetting(pfx .. SETTING_DATE)
     return v ~= false   -- default ON
 end
 
 local function isBattEnabled(pfx)
-    local v = G_reader_settings:readSetting(pfx .. SETTING_BATTERY)
+    local v = SUISettings:readSetting(pfx .. SETTING_BATTERY)
     return v ~= false   -- default ON
 end
 
@@ -192,42 +214,59 @@ local function build(w, pfx, vspan_pool)
     local show_batt  = isBattEnabled(pfx)
     local inner_w    = w - PAD * 2
 
-    local vg = VerticalGroup:new{ align = "center" }
+    -- Theme: when fg is set, use it for sub-text; otherwise fall back to CLR_TEXT_SUB.
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local theme_fg         = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local theme_secondary  = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local sub_fg           = theme_secondary or theme_fg or CLR_TEXT_SUB
+
+    local align = getAlignment(pfx)
+    local ContainerClass = CenterContainer
+    if align == "left" then ContainerClass = LeftContainer
+    elseif align == "right" then ContainerClass = RightContainer end
+
+    local vg = VerticalGroup:new{ align = align }
+
+    local function wrapText(wgt)
+        if not wgt.dimen then wgt.dimen = wgt:getSize() end
+        return wgt
+    end
 
     -- Clock
     if show_clock then
-        vg[#vg+1] = CenterContainer:new{
+        vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = clock_w },
-            TextWidget:new{
-                text = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
-                face = Font:getFace("smallinfofont", clock_fs),
-                bold = true,
-            },
+            wrapText(UI.makeColoredText{
+                text    = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
+                face    = Font:getFace("smallinfofont", clock_fs),
+                bold    = true,
+                fgcolor = theme_fg,   -- nil → KOReader default (black); honours theme palette
+            }),
         }
     end
 
     if show_date then
         if #vg > 0 then vg[#vg+1] = _vspan(date_gap, vspan_pool) end
-        vg[#vg+1] = CenterContainer:new{
+        vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = date_h },
-            TextWidget:new{
+            wrapText(UI.makeColoredText{
                 text    = _localDate(),
                 face    = Font:getFace("smallinfofont", date_fs),
-                fgcolor = CLR_TEXT_SUB,
-            },
+                fgcolor = sub_fg,
+            }),
         }
     end
 
     if show_batt then
         if #vg > 0 then vg[#vg+1] = _vspan(batt_gap, vspan_pool) end
         local lvl, charging = _battInfo()
-        vg[#vg+1] = CenterContainer:new{
+        vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = batt_h },
-            TextWidget:new{
+            wrapText(UI.makeColoredText{
                 text    = _battText(lvl, charging),
                 face    = Font:getFace("smallinfofont", batt_fs),
-                fgcolor = CLR_TEXT_SUB,
-            },
+                fgcolor = sub_fg,
+            }),
         }
     end
 
@@ -258,13 +297,13 @@ end
 
 function M.setEnabled(pfx, on)
     if not on then
-        G_reader_settings:saveSetting(pfx .. SETTING_ON, false)
-        G_reader_settings:saveSetting(pfx .. SETTING_DATE, false)
-        G_reader_settings:saveSetting(pfx .. SETTING_BATTERY, false)
+        SUISettings:saveSetting(pfx .. SETTING_ON, false)
+        SUISettings:saveSetting(pfx .. SETTING_DATE, false)
+        SUISettings:saveSetting(pfx .. SETTING_BATTERY, false)
     else
-        G_reader_settings:saveSetting(pfx .. SETTING_ON, true)
-        G_reader_settings:saveSetting(pfx .. SETTING_DATE, true)
-        G_reader_settings:saveSetting(pfx .. SETTING_BATTERY, true)
+        SUISettings:saveSetting(pfx .. SETTING_ON, true)
+        SUISettings:saveSetting(pfx .. SETTING_DATE, true)
+        SUISettings:saveSetting(pfx .. SETTING_BATTERY, true)
     end
 end
 
@@ -503,7 +542,7 @@ function M.getMenuItems(ctx_menu)
     local _lc     = ctx_menu._
 
     local function toggle(key, current)
-        G_reader_settings:saveSetting(pfx .. key, not current)
+        SUISettings:saveSetting(pfx .. key, not current)
         refresh()
     end
 
@@ -528,6 +567,35 @@ function M.getMenuItems(ctx_menu)
         },
         _makeScaleItem(ctx_menu),
         {
+            text_func = function()
+                return _lc("Alignment") .. " — " .. alignLabel(getAlignment(pfx), _lc)
+            end,
+            separator      = true,
+            sub_item_table = {
+                {
+                    text           = _lc("Left"),
+                    radio          = true,
+                    checked_func   = function() return getAlignment(pfx) == "left" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "left"); refresh() end,
+                },
+                {
+                    text           = _lc("Center"),
+                    radio          = true,
+                    checked_func   = function() return getAlignment(pfx) == "center" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "center"); refresh() end,
+                },
+                {
+                    text           = _lc("Right"),
+                    radio          = true,
+                    checked_func   = function() return getAlignment(pfx) == "right" end,
+                    keep_menu_open = true,
+                    callback       = function() setAlignment(pfx, "right"); refresh() end,
+                },
+            },
+        },
+        {
             text_func      = function()
                 local pct = getDateGapPct(pfx)
                 return pct == ELEM_GAP_DEF
@@ -551,7 +619,7 @@ function M.getMenuItems(ctx_menu)
                     cancel_text   = _lc("Cancel"),
                     default_value = ELEM_GAP_DEF,
                     callback      = function(spin)
-                        G_reader_settings:saveSetting(pfx .. SETTING_DATE_GAP, _clampElemGap(spin.value))
+                        SUISettings:saveSetting(pfx .. SETTING_DATE_GAP, _clampElemGap(spin.value))
                         refresh()
                     end,
                 })
@@ -581,7 +649,7 @@ function M.getMenuItems(ctx_menu)
                     cancel_text   = _lc("Cancel"),
                     default_value = ELEM_GAP_DEF,
                     callback      = function(spin)
-                        G_reader_settings:saveSetting(pfx .. SETTING_BATT_GAP, _clampElemGap(spin.value))
+                        SUISettings:saveSetting(pfx .. SETTING_BATT_GAP, _clampElemGap(spin.value))
                         refresh()
                     end,
                 })

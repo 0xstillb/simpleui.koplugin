@@ -65,7 +65,7 @@ msgstr "%d%% leído"
 
 #: desktop_modules/module_reading_goals.lua:428
 msgid "%d/%d books"
-msgstr "%d/%d libros"
+msgstr ""
 
 msgid "%s TO GO"
 msgstr "Ir a %s"
@@ -101,7 +101,7 @@ msgstr "Total — Tiempo"
 
 #: desktop_modules/module_reading_goals.lua:585
 msgid "Annual Goal"
-msgstr "Objetivo anual"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:362
 msgid "Annual Reading Goal"
@@ -127,13 +127,13 @@ msgstr "Organizar"
 
 #: sui_menu.lua:1126
 msgid "Arrange %s"
-msgstr "Organizar %s"
+msgstr ""
 
 #: sui_menu.lua:840
 #: sui_menu.lua:891
 #: sui_menu.lua:906
 msgid "Arrange Buttons"
-msgstr "Reorganizar botones"
+msgstr ""
 
 #: desktop_modules/module_collections.lua:535
 #: desktop_modules/module_collections.lua:548
@@ -166,7 +166,7 @@ msgstr "Agosto"
 #: sui_foldercovers.lua:405
 #: desktop_modules/module_collections.lua:497
 msgid "Auto (first book)"
-msgstr "Auto (primer libro)"
+msgstr ""
 
 #: sui_titlebar.lua:54
 msgid "Back"
@@ -213,7 +213,7 @@ msgstr "Abajo"
 #: sui_bottombar.lua:736
 #: sui_menu.lua:618
 msgid "Bottom Bar"
-msgstr "Barra inferior"
+msgstr ""
 
 #: sui_menu.lua:644
 msgid "Bottom Bar Size"
@@ -225,16 +225,16 @@ msgstr "Es necesario reiniciar para aplicar el nuevo tamaño de la barra inferio
 
 #: sui_menu.lua:626
 msgid "Bottom Bar will be %s after restart.\n\nRestart now?"
-msgstr "La barra inferior será %s después de reiniciar.\n\n¿Reiniciar ahora?"
+msgstr ""
 
 #: sui_menu.lua:668
 #: sui_menu.lua:671
 msgid "Bottom Margin"
-msgstr "Margen Inferior"
+msgstr ""
 
 #: sui_menu.lua:669
 msgid "Bottom Margin — %d%%"
-msgstr "Margen Inferior — %d%%"
+msgstr ""
 
 #: sui_homescreen.lua:701
 msgid "Top Margin  (%d%%)"
@@ -349,7 +349,7 @@ msgstr "Continuar"
 
 #: desktop_modules/module_collections.lua:527
 msgid "Cover for \"%s\""
-msgstr "Portada de \"%s\""
+msgstr ""
 
 #: desktop_modules/module_collections.lua:564
 #: desktop_modules/module_collections.lua:566
@@ -388,7 +388,7 @@ msgstr "Personalizar texto"
 
 #: desktop_modules/module_reading_goals.lua:606
 msgid "Daily Goal"
-msgstr "Objetivo diario"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:398
 msgid "Daily Reading Goal"
@@ -396,11 +396,11 @@ msgstr "Objetivo de lectura al día"
 
 #: desktop_modules/module_reading_stats.lua:65
 msgid "Daily avg — Pages"
-msgstr "Promedio diario — Páginas"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:64
 msgid "Daily avg — Time"
-msgstr "Promedio diario — Tiempo"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:51
 msgid "December"
@@ -417,24 +417,24 @@ msgstr "Fecha"
 #: desktop_modules/module_quick_actions.lua:271
 #: desktop_modules/module_reading_goals.lua:565
 msgid "Default"
-msgstr "Predeterminado"
+msgstr ""
 
 #: sui_quickactions.lua:610
 #: sui_quickactions.lua:629
 msgid "Default (Folder)"
-msgstr "Predeterminado (Carpeta)"
+msgstr ""
 
 #: sui_quickactions.lua:656
 msgid "Default (Plugin)"
-msgstr "Predeterminado (Complemento)"
+msgstr ""
 
 #: sui_quickactions.lua:684
 msgid "Default (System)"
-msgstr "Predeterminado (Sistema)"
+msgstr ""
 
 #: desktop_modules/module_quote.lua:976
 msgid "Default Quotes"
-msgstr "Citas Predeterminadas"
+msgstr ""
 
 #: sui_quickactions.lua:955
 #: sui_quickactions.lua:960
@@ -451,11 +451,11 @@ msgstr "Buscar en el diccionario"
 
 #: sui_menu.lua:1025
 msgid "Digital Goal  (%s)"
-msgstr "Objetivo digital  (%s)"
+msgstr ""
 
 #: sui_menu.lua:1025
 msgid "Digital: %d books in %s"
-msgstr "Digital: %d libros en %s"
+msgstr ""
 
 #: sui_menu.lua:1384
 msgid "Disable \"Lock Scale\" first to set a custom label scale."
@@ -467,11 +467,11 @@ msgstr "Desactiva \"Escala bloqueada\" primero para establecer una escala por m�
 
 #: sui_config.lua:144
 msgid "Disk Usage"
-msgstr "Uso del disco"
+msgstr ""
 
 #: sui_quickactions.lua:1014
 msgid "Dispatcher not available."
-msgstr "Servicio no disponible."
+msgstr ""
 
 #: sui_quickactions.lua:945
 msgid "Edit"
@@ -508,7 +508,7 @@ msgstr "Febrero"
 
 #: sui_bottombar.lua:867
 msgid "Fetching bookmarks\xe2\x80\xa6"
-msgstr "Recuperando marcadores\xe2\x80\xa6"
+msgstr ""
 
 #: sui_quickactions.lua:407
 msgid "File Search"
@@ -526,7 +526,7 @@ msgstr "Carpeta"
 
 #: sui_menu.lua:1578
 msgid "Folder Covers"
-msgstr "Portadas de Carpetas"
+msgstr ""
 
 #: sui_menu.lua:1640
 msgid "Folder Name"
@@ -538,10 +538,10 @@ msgstr "Accesos Directos"
 
 #: sui_foldercovers.lua:436
 msgid "Folder cover"
-msgstr "Portada de carpeta"
+msgstr ""
 
 msgid "Folder not found:\n%s"
-msgstr "Carpeta no encontrada:\n%s"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:46
 msgid "Friday"
@@ -571,7 +571,7 @@ msgstr "Oculto"
 
 #: sui_menu.lua:1132
 msgid "Hide Text"
-msgstr "Ocultar Texto"
+msgstr ""
 
 #: sui_menu.lua:1702
 msgid "Hide selection underline"
@@ -591,7 +591,7 @@ msgstr "Historial"
 
 #: sui_bottombar.lua:1125
 msgid "History not available."
-msgstr "Historial no disponible."
+msgstr ""
 
 #: sui_config.lua:113
 msgid "Home"
@@ -603,23 +603,23 @@ msgstr "Inicio"
 #: sui_patches.lua:293
 #: sui_patches.lua:306
 msgid "Home Screen"
-msgstr "Pantalla de inicio"
+msgstr ""
 
 #: sui_bottombar.lua:907
 msgid "Home folder"
-msgstr "Carpeta de inicio"
+msgstr ""
 
 #: sui_bottombar.lua:909
 msgid "Home folder + subfolders"
-msgstr "Carpeta de inicio + subcarpetas"
+msgstr ""
 
 #: sui_homescreen.lua:446
 msgid "Homescreen"
-msgstr "Pantalla de inicio"
+msgstr ""
 
 #: sui_bottombar.lua:1144
 msgid "Homescreen not available."
-msgstr "Pantalla de inicio no disponible."
+msgstr ""
 
 #: sui_quickactions.lua:520
 #: sui_quickactions.lua:524
@@ -637,7 +637,7 @@ msgstr "Tamaño del icono  —  %d%%"
 
 #: sui_quickactions.lua:515
 msgid "Icon: Default"
-msgstr "Icono: Predeterminado"
+msgstr ""
 
 #: sui_menu.lua:101
 msgid "Icons"
@@ -657,7 +657,7 @@ msgstr "Organización inválida.\nMantén los separadores Izquierda, Centro y De
 
 #: sui_quickactions.lua:318
 msgid "Invalid input. Please enter 1–6 hexadecimal digits (0–9, A–F)."
-msgstr "Entrada inválida. Por favor, ingrese 1–6 dígitos hexadecimales (0–9, A–F)."
+msgstr ""
 
 #: desktop_modules/module_currently.lua:671
 #: sui_menu.lua:606
@@ -678,7 +678,7 @@ msgstr "Junio"
 
 #: sui_menu.lua:1392
 msgid "Label Scale"
-msgstr "Escala de etiquetas"
+msgstr ""
 
 #: sui_menu.lua:710
 #: sui_menu.lua:713
@@ -730,7 +730,7 @@ msgstr "Lista"
 
 #: sui_menu.lua:1338
 msgid "Lock Scale"
-msgstr "Bloquear Escala"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:49
 msgid "March"
@@ -807,7 +807,7 @@ msgstr "Módulos  (%d)"
 
 #: sui_menu.lua:1275
 msgid "Modules  (%d/%d — %d left)"
-msgstr "Módulos  (%d/%d — %d restantes)"
+msgstr ""
 
 #: sui_menu.lua:1274
 msgid "Modules  (%d/%d — at limit)"
@@ -819,7 +819,7 @@ msgstr "Lunes"
 
 #: desktop_modules/module_quote.lua:996
 msgid "My Highlights"
-msgstr "Mis Subrayados"
+msgstr ""
 
 #: sui_quickactions.lua:609
 #: sui_quickactions.lua:628
@@ -834,7 +834,7 @@ msgstr "Barra de navegación"
 
 #: sui_menu.lua:375
 msgid "Navpager"
-msgstr "Navegador de páginas"
+msgstr ""
 
 #: sui_menu.lua:397
 msgid "Navpager will be %s after restart.\n\nRestart now?"
@@ -842,15 +842,15 @@ msgstr "El navegador de páginas será %s después de reiniciar.\n\n¿Reiniciar 
 
 #: sui_quickactions.lua:268
 msgid "Nerd Font Icon"
-msgstr "Icono de Nerd Font"
+msgstr ""
 
 #: sui_quickactions.lua:358
 msgid "Nerd Font symbol…"
-msgstr "Símbolo de Nerd Font…"
+msgstr ""
 
 #: sui_bottombar.lua:1213
 msgid "Network manager unavailable."
-msgstr "Administrador de red no disponible."
+msgstr ""
 
 #: desktop_modules/module_new_books.lua:139
 msgid "New"
@@ -935,7 +935,7 @@ msgstr "Número de Libros en la Carpeta"
 
 #: sui_menu.lua:1634
 msgid "Number of Pages"
-msgstr "Número de Páginas"
+msgstr ""
 
 #: sui_menu.lua:494
 msgid "Number of Pages in Title Bar Always"
@@ -990,12 +990,12 @@ msgstr "Abre un libro para empezar"
 
 #: sui_menu.lua:1598
 msgid "Overlays"
-msgstr "Superposiciones"
+msgstr ""
 
 #: sui_patches.lua:1125
 #: sui_patches.lua:1239
 msgid "Page %1 of %2"
-msgstr "Página %1 de %2"
+msgstr ""
 
 #: sui_menu.lua:356
 msgid "Page number in title bar"
@@ -1027,14 +1027,14 @@ msgstr "Superposición de porcentaje en la cubierta"
 
 #: desktop_modules/module_currently.lua:524
 msgid "Percentage read"
-msgstr "Porcentaje leído"
+msgstr ""
 
 #: desktop_modules/module_recent.lua:276
 msgid "Percentage text"
 msgstr "Porcentaje del texto"
 
 msgid "Path is not a folder:\n%s"
-msgstr "La ruta no es una carpeta:\n%s"
+msgstr ""
 
 #: desktop_modules/module_reading_goals.lua:380
 msgid "Physical Books — %s"
@@ -1054,11 +1054,11 @@ msgstr "Plugin"
 
 #: sui_quickactions.lua:1021
 msgid "Plugin error: %s"
-msgstr "Error del plugin: %s"
+msgstr ""
 
 #: sui_quickactions.lua:1023
 msgid "Plugin not available: %s"
-msgstr "Plugin no disponible: %s"
+msgstr ""
 
 #: sui_config.lua:122
 msgid "Power"
@@ -1083,7 +1083,7 @@ msgstr "Acciones Rápidas"
 
 #: sui_menu.lua:1559
 msgid "Quick Actions  (%d/%d — %d left)"
-msgstr "Acciones Rápidas  (%d/%d — %d restantes)"
+msgstr ""
 
 #: sui_menu.lua:1557
 msgid "Quick Actions  (%d/%d — at limit)"
@@ -1276,11 +1276,11 @@ msgstr "Mostrar Batería"
 
 #: desktop_modules/module_clock.lua:454
 msgid "Show Clock"
-msgstr "Mostrar Reloj"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:378
 msgid "Show Date"
-msgstr "Mostrar Fecha"
+msgstr ""
 
 #: sui_menu.lua:364
 msgid "Shows \"Page X of Y\" in the title bar subtitle when browsing the library, history or collections.\nNavpager enables this automatically.\nNot available when Navpager is active."
@@ -1291,7 +1291,7 @@ msgid "Simple"
 msgstr "Simple"
 
 msgid "Show Labels"
-msgstr "Mostrar etiquetas"
+msgstr ""
 
 #: main.lua:381
 #: main.lua:394
@@ -1306,7 +1306,7 @@ msgstr "Simple UI se actualizó (%s → %s).\n\nSe recomienda reiniciar para apl
 
 #: sui_menu.lua:1523
 msgid "Simple UI will be %s after restart.\n\nRestart now?"
-msgstr "Simple UI será %s después de reiniciar.\n\n¿Reiniciar ahora?"
+msgstr ""
 
 #: sui_menu.lua:580
 #: sui_menu.lua:638
@@ -1357,7 +1357,7 @@ msgstr "Estadísticas"
 
 #: sui_menu.lua:1539
 msgid "Status Bar"
-msgstr "Barra de Estado"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:68
 msgid "Streak"
@@ -1377,7 +1377,7 @@ msgstr "Indicador de deslizamiento"
 
 #: sui_menu.lua:427
 msgid "Hide Wi-Fi icon when off"
-msgstr "Ocultar el icono de Wi-Fi cuando esté apagado"
+msgstr ""
 
 #: sui_quickactions.lua:706
 msgid "System Actions"
@@ -1389,7 +1389,7 @@ msgstr "Error de acción del sistema: %s"
 
 #: sui_menu.lua:752
 msgid "Tabs  (%d/%d — %d left)"
-msgstr "Pestañas  (%d/%d — %d restantes)"
+msgstr ""
 
 #: sui_menu.lua:750
 msgid "Tabs  (%d/%d — at limit)"
@@ -1443,7 +1443,7 @@ msgstr "Hoy"
 
 #: desktop_modules/module_reading_stats.lua:63
 msgid "Today — Pages"
-msgstr "Hoy — Páginas"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:62
 msgid "Today — Time"
@@ -1453,7 +1453,7 @@ msgstr "Hoy — Tiempo"
 #: sui_menu.lua:1616
 #: sui_menu.lua:1664
 msgid "Top"
-msgstr "Parte superior"
+msgstr ""
 
 #: sui_menu.lua:561
 #: sui_topbar.lua:473
@@ -1466,7 +1466,7 @@ msgstr "Tamaño de la barra superior"
 
 #: sui_menu.lua:569
 msgid "Top Bar will be %s after restart.\n\nRestart now?"
-msgstr "La barra superior será %s después de reiniciar.\n\n¿Reiniciar ahora?"
+msgstr ""
 
 #: sui_menu.lua:728
 msgid "Top separator"
@@ -1474,7 +1474,7 @@ msgstr "Separador superior"
 
 #: sui_menu.lua:1653
 msgid "Transparent"
-msgstr "Transparente"
+msgstr ""
 
 #: desktop_modules/module_clock.lua:45
 msgid "Tuesday"
@@ -1505,7 +1505,7 @@ msgstr "Wi-Fi"
 
 #: sui_bottombar.lua:1221
 msgid "Wi-Fi off"
-msgstr "Wi-Fi apagado"
+msgstr ""
 
 #: sui_config.lua:141
 msgid "WiFi"
@@ -1513,11 +1513,11 @@ msgstr "WiFi"
 
 #: sui_bottombar.lua:1208
 msgid "WiFi not available on this device."
-msgstr "WiFi no disponible en este dispositivo."
+msgstr ""
 
 #: sui_quickactions.lua:410
 msgid "Wikipedia Lookup"
-msgstr "Buscar en Wikipedia"
+msgstr ""
 
 #: desktop_modules/module_currently.lua:512
 msgid "With percentage"
@@ -1537,7 +1537,7 @@ msgstr "promedio diario (7 días)"
 
 #: desktop_modules/module_reading_stats.lua:69
 msgid "day streak"
-msgstr "racha diaria"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:69
 msgid "days streak"
@@ -1549,7 +1549,7 @@ msgstr "sin racha"
 
 #: sui_quickactions.lua:769
 msgid "default"
-msgstr "predeterminado"
+msgstr ""
 
 #: sui_menu.lua:395
 #: sui_menu.lua:569
@@ -1561,17 +1561,17 @@ msgstr "desactivado"
 
 #: sui_quickactions.lua:609
 msgid "e.g. Comics…"
-msgstr "p. ej.: Comics…"
+msgstr ""
 
 msgid "e.g. Books…"
-msgstr "p. ej.: Libros…"
+msgstr ""
 
 msgid "e.g. My Library"
-msgstr "p. ej.: Mi Biblioteca"
+msgstr ""
 
 #: sui_quickactions.lua:655
 msgid "e.g. Rakuyomi…"
-msgstr "p. ej.: Rakuyomi…"
+msgstr ""
 
 #: sui_quickactions.lua:628
 msgid "e.g. Sci-Fi…"
@@ -1579,7 +1579,7 @@ msgstr "p. ej.: Ciencia ficción…"
 
 #: sui_quickactions.lua:683
 msgid "e.g. Sleep, Refresh…"
-msgstr "p. ej.: Dormir, Actualizar…"
+msgstr ""
 
 #: sui_menu.lua:395
 #: sui_menu.lua:569
@@ -1600,7 +1600,7 @@ msgstr "oculto"
 #: sui_quickactions.lua:921
 #: sui_quickactions.lua:937
 msgid "not configured"
-msgstr "no configurado"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:62
 msgid "of reading today"
@@ -1608,7 +1608,7 @@ msgstr "de lectura (hoy)"
 
 #: desktop_modules/module_reading_stats.lua:66
 msgid "of reading, all time"
-msgstr "de lectura (total)"
+msgstr ""
 
 #: desktop_modules/module_reading_stats.lua:63
 msgid "pages read today"
@@ -1662,7 +1662,7 @@ msgstr "Barra de paginación configurada por defecto.\n\n¿Reiniciar ahora?"
 
 #: sui_menu.lua:367
 msgid "Navpager enabled.\n\nRestart now?"
-msgstr "Navegador de páginas activado.\n\n¿Reiniciar ahora?"
+msgstr ""
 
 #: sui_menu.lua:377
 msgid "Pagination bar hidden.\n\nRestart now?"
@@ -1723,7 +1723,7 @@ msgstr "Autor: %s"
 #: sui_homescreen.lua:407
 #: desktop_modules/module_quote.lua:950
 msgid "Open this file?"
-msgstr "¿Abrir este archivo?"
+msgstr ""
 
 #: sui_bottombar.lua:1638
 msgid "Sleep"
@@ -1735,11 +1735,11 @@ msgstr "Descargando Simple UI "
 
 #: sui_updater.lua:163
 msgid "Download error: "
-msgstr "Error al descargar: "
+msgstr ""
 
 #: sui_updater.lua:174
 msgid "Extraction error: "
-msgstr "Error al extraer: "
+msgstr ""
 
 #: sui_updater.lua:180
 msgid "Simple UI %s successfully installed.\n\nRestart KOReader to apply the update?"
@@ -1775,12 +1775,12 @@ msgstr "Simple UI %s está disponible!\nVersión actual: %s\n\nDescargar e insta
 
 #: sui_updater.lua:257
 msgid "Download and install"
-msgstr "Descargar e instalar"
+msgstr ""
 
 
 #: sui_menu.lua
 msgid "Return to Book Folder"
-msgstr "Volver a la Carpeta de Libros"
+msgstr ""
 
 #: sui_menu.lua
 msgid "When enabled, opening the file browser after finishing or closing a book navigates to the folder the book is in, matching native KOReader behaviour.\nWhen disabled (default), SimpleUI always returns to the library root."
@@ -1788,7 +1788,7 @@ msgstr "Cuando está habilitado, abrir el explorador de archivos después de ter
 
 #: sui_menu.lua
 msgid "Settings on Long Tap"
-msgstr "Ajustes al Mantener Pulsado"
+msgstr ""
 
 #: sui_menu.lua
 msgid "When enabled, long-pressing a section opens its settings menu.\nDisable this to prevent the settings menu from appearing on long tap."
@@ -1836,11 +1836,11 @@ msgstr "Agrupar libros por Series"
 
 #: sui_menu.lua
 msgid "Series Index"
-msgstr "Índice de Series"
+msgstr ""
 
 #: sui_foldercovers.lua
 msgid "Series cover"
-msgstr "Portada de Series"
+msgstr ""
 
 #: sui_foldercovers.lua
 msgid "Set series cover…"
@@ -1860,19 +1860,19 @@ msgid "Cover size  —  %d%%"
 msgstr "Tamaño de portada  —  %d%%"
 
 msgid "Fetching bookmarks…"
-msgstr "Cargando marcadores…"
+msgstr ""
 
 msgid "Labels  —  %d%%"
-msgstr "Etiquetas  —  %d%%"
+msgstr ""
 
 msgid "Modules  —  %d%%"
 msgstr "Módulos  —  %d%%"
 
 msgid "Scale  —  %d%%"
-msgstr "Escala  —  %d%%"
+msgstr ""
 
 msgid "Scale  —  %d%% / %d%%"
-msgstr "Escala  —  %d%% / %d%%"
+msgstr ""
 
 msgid "Size  —  %d%%"
 msgstr "Tamaño  —  %d%%"
@@ -1890,13 +1890,13 @@ msgid "Label"
 msgstr "Etiqueta"
 
 msgid "Show label"
-msgstr "Mostrar etiqueta"
+msgstr ""
 
 msgid "Overlay"
 msgstr "Superposición"
 
 msgid "Fetching bookmarks…"
-msgstr "Cargando marcadores…"
+msgstr ""
 
 msgid "(%d left)"
-msgstr "(%d restante)"
+msgstr ""

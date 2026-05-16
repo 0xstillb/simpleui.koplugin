@@ -1,7 +1,7 @@
 -- sui_homescreen.lua — SimpleUI fullscreen homescreen widget.
 -- Shown when the "Homescreen" tab is tapped. Shares module registry and module
 -- files with the Continue page but is fully independent: separate settings
--- prefix (navbar_homescreen_), separate caches, and its own lifecycle.
+-- prefix (simpleui_hs_), separate caches, and its own lifecycle.
 
 local Blitbuffer       = require("ffi/blitbuffer")
 local BD               = require("ui/bidi")
@@ -28,10 +28,212 @@ local N_               = require("sui_i18n").ngettext
 local T                = require("ffi/util").template
 local Config           = require("sui_config")
 local Registry         = require("desktop_modules/moduleregistry")
+local SUISettings = require("sui_store")
 local Event            = require("ui/event")
 local Screen           = Device.screen
 local UI               = require("sui_core")
 local Bottombar        = require("sui_bottombar")
+local ImageWidget      = require("ui/widget/imagewidget")
+local lfs              = require("libs/libkoreader-lfs")
+
+-- ---------------------------------------------------------------------------
+-- Look & Feel state — wallpaper background override
+--
+-- All settings live under the "simpleui_style_*" namespace.
+--
+
+local _style_bg_cache     = nil   -- cached ImageWidget for the current wallpaper
+local _style_bg_cache_w   = 0     -- screen width  at cache-creation time
+local _style_bg_cache_h   = 0     -- screen height at cache-creation time
+local _style_bg_cache_nm  = nil   -- Screen.night_mode value at cache-creation time
+
+-- Lazy reference to ffi/pic (used only for auto-rotate dimension probe).
+local _pic = nil
+local function _getPic()
+    if not _pic then
+        local ok, m = pcall(require, "ffi/pic")
+        if ok then _pic = m end
+    end
+    return _pic
+end
+
+-- Setting readers — centralised so _styleGetBgWidget stays readable.
+local function _wpStretch()    return SUISettings:isTrue("simpleui_style_wallpaper_stretch")       end
+local function _wpAutoRotate() return SUISettings:nilOrTrue("simpleui_style_wallpaper_autorotate") end
+local function _wpInvertNight() return SUISettings:isTrue("simpleui_style_wallpaper_invert_night") end
+local function _wpOpacity()    return SUISettings:readSetting("simpleui_style_wallpaper_opacity", 0) end
+
+-- Pure helper: tests whether (x, y) falls inside a ratio-defined zone.
+-- Defined at module level so it is created once and never re-allocated per
+-- gesture event (unlike a closure defined inside _fmGestureAction).
+local function _inZone(z, x, y, sw, sh)
+    if not z then return false end
+    return x >= z.ratio_x * sw and x < (z.ratio_x + z.ratio_w) * sw
+       and y >= z.ratio_y * sh and y < (z.ratio_y + z.ratio_h) * sh
+end
+
+-- Reusable candidate buffer for _fmGestureAction.
+-- Avoids allocating a new table on every gesture event.
+-- Entries 1..n are valid after a call; the rest are nil-cleared before returning.
+local _candidates = {}
+
+-- Returns DataStorage/simpleui/sui_wallpapers/, creating it if needed.
+local function _styleWallpapersDir()
+    local ok_ds, DataStorage = pcall(require, "datastorage")
+    local dir
+    if ok_ds and DataStorage then
+        dir = DataStorage:getSettingsDir() .. "/simpleui/sui_wallpapers"
+    else
+        local src = debug.getinfo(1, "S").source or ""
+        dir = (src:match("^@(.+/)[^/]+$") or "./") .. "sui_wallpapers"
+    end
+    if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
+    return dir
+end
+
+-- Returns the cached bg ImageWidget, or nil when unset.
+-- Cache is keyed on (path, screen w/h, night-mode state) — any change to those
+-- values triggers a rebuild. Setting changes (stretch, rotate, invert) always
+-- call _styleFreeBgCache() before _rebuildHomescreenLayout(), so the next
+-- _styleGetBgWidget() call always reflects the current options.
+--
+-- Stretch implementation note:
+-- KOReader's ImageWidget has no native "fill ignoring aspect ratio" mode —
+-- scale_factor=nil and scale_factor=0 both produce a proportional fit.
+-- True stretch is achieved by decoding the source image into a Blitbuffer and
+-- calling bb:scale(sw, sh), which scales X and Y independently.  The scaled
+-- bitmap is kept in _style_bg_cache_bb and freed together with the widget.
+local _style_bg_cache_bb = nil   -- pre-scaled Blitbuffer for stretch mode (or nil)
+
+local function _styleGetBgWidget()
+    if not SUISettings:isTrue("simpleui_style_wallpaper_enabled") then return nil end
+    local path = SUISettings:readSetting("simpleui_style_wallpaper")
+    if not path then return nil end
+
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
+    local nm     = Screen.night_mode and true or false
+
+    if _style_bg_cache
+       and _style_bg_cache_w  == sw
+       and _style_bg_cache_h  == sh
+       and _style_bg_cache_nm == nm
+    then
+        return _style_bg_cache
+    end
+
+    -- Dimensions or night-mode state changed — rebuild.
+    if _style_bg_cache    then _style_bg_cache:free()    end
+    if _style_bg_cache_bb then _style_bg_cache_bb:free() end
+    _style_bg_cache    = nil
+    _style_bg_cache_bb = nil
+
+    -- original_in_nightmode: true  = image is never inverted by KOReader.
+    --                         false = KOReader inverts the image in night mode.
+    local orig_nm = not _wpInvertNight()
+
+    -- Auto-rotate: probe image dimensions and pick a rotation_angle so the
+    -- image orientation best matches the current screen orientation.
+    local rotation_angle = 0
+    local img_w, img_h   = nil, nil
+    local pic = _getPic()
+    if pic then
+        local ok_d, doc = pcall(pic.openDocument, path)
+        if ok_d and doc then
+            img_w, img_h = doc.width, doc.height
+            doc:close()
+        end
+    end
+    if _wpAutoRotate() and img_w and img_h and img_w > 0 and img_h > 0 then
+        local img_landscape    = img_w > img_h
+        local screen_landscape = sw    > sh
+        if img_landscape ~= screen_landscape then
+            rotation_angle = G_reader_settings:isTrue("imageviewer_rotation_landscape_invert")
+                and -90 or 90
+        end
+    end
+
+    local widget_opts
+    if _wpStretch() and img_w and img_h and img_w > 0 and img_h > 0
+       and (img_w ~= sw or img_h ~= sh)
+    then
+        -- True stretch: decode the raw bitmap and scale it to exact screen
+        -- dimensions, distorting aspect ratio when necessary.
+        -- rotation_angle is applied manually so the dimension probe above
+        -- already accounts for it; we bake it into the bitmap here.
+        local eff_w, eff_h = sw, sh
+        if rotation_angle ~= 0 then eff_w, eff_h = sh, sw end
+
+        local ok_ri, RenderImage = pcall(require, "ui/renderimage")
+        if ok_ri and RenderImage then
+            -- Decode at native resolution (no max-bounds) so we get the raw
+            -- pixel data, then scale to exact eff_w×eff_h in one step.
+            -- Passing width/height to renderImageFile would do a proportional
+            -- fit first, producing a bitmap smaller than eff_w×eff_h, and
+            -- the subsequent :scale() call would then distort unevenly.
+            local ok_bb, raw_bb = pcall(RenderImage.renderImageFile, RenderImage,
+                path, false, nil, nil)
+            if ok_bb and raw_bb then
+                local ok_sc, scaled = pcall(function() return raw_bb:scale(eff_w, eff_h) end)
+                raw_bb:free()
+                if ok_sc and scaled then
+                    _style_bg_cache_bb = scaled
+                    widget_opts = {
+                        image                 = scaled,
+                        width                 = sw,
+                        height                = sh,
+                        scale_factor          = 1,  -- bitmap is already exact sw×sh
+                        file_do_cache         = false,
+                        alpha                 = true,
+                        original_in_nightmode = orig_nm,
+                        rotation_angle        = rotation_angle,
+                    }
+                end
+            end
+        end
+    end
+
+    -- Fallback (stretch decode failed, or stretch disabled, or dimensions match):
+    -- proportional fit via ImageWidget's built-in scaling.
+    if not widget_opts then
+        widget_opts = {
+            file                  = path,
+            width                 = sw,
+            height                = sh,
+            scale_factor          = 0,    -- proportional fit (letterbox/pillarbox)
+            file_do_cache         = false,
+            alpha                 = true,
+            original_in_nightmode = orig_nm,
+            rotation_angle        = rotation_angle,
+        }
+    end
+
+    local ok, w = pcall(ImageWidget.new, ImageWidget, widget_opts)
+    if ok and w then
+        _style_bg_cache    = w
+        _style_bg_cache_w  = sw
+        _style_bg_cache_h  = sh
+        _style_bg_cache_nm = nm
+        return w
+    end
+    -- Build failed — clean up any decoded bitmap.
+    if _style_bg_cache_bb then _style_bg_cache_bb:free(); _style_bg_cache_bb = nil end
+    _style_bg_cache_w  = 0
+    _style_bg_cache_h  = 0
+    _style_bg_cache_nm = nil
+    logger.warn("sui_style: cannot load wallpaper: " .. tostring(path))
+    return nil
+end
+
+-- Frees the cached bg widget and any associated decode buffer.
+local function _styleFreeBgCache()
+    if _style_bg_cache    then _style_bg_cache:free()    end
+    if _style_bg_cache_bb then _style_bg_cache_bb:free() end
+    _style_bg_cache    = nil
+    _style_bg_cache_bb = nil
+    _style_bg_cache_w  = 0
+    _style_bg_cache_h  = 0
+    _style_bg_cache_nm = nil
+end
 
 -- Lazy-loaded module references — loaded once on first use.
 local _SH = nil
@@ -56,11 +258,36 @@ local PAD                = UI.PAD
 local MOD_GAP            = UI.MOD_GAP
 local SIDE_PAD           = UI.SIDE_PAD
 local SECTION_LABEL_SIZE = 11
-local _CLR_TEXT_MID      = Blitbuffer.gray(0.45)
-local _DOT_COLOR_INACTIVE = Blitbuffer.gray(0.55)
+-- Static color defaults — overridden at render-time by theme roles when set.
+local _CLR_TEXT_MID_DEFAULT      = Blitbuffer.gray(0.45)
+local _DOT_COLOR_INACTIVE_DEFAULT = Blitbuffer.gray(0.55)
+
+-- Dynamic accessors so theme changes take effect on the next repaint without
+-- requiring a full rebuild.  Both fall back to the static defaults when no
+-- custom "text_secondary" role is configured.
+local function _getTextMid()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("text_secondary")
+        if c then return c end
+    end
+    return _CLR_TEXT_MID_DEFAULT
+end
+
+local function _getDotInactive()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("text_secondary")
+        if c then return c end
+    end
+    return _DOT_COLOR_INACTIVE_DEFAULT
+end
 
 -- Modules that render cover thumbnails — used to set the dithering hint.
-local _COVER_MOD_IDS = { collections=true, recent=true, currently=true, new_books=true, coverdeck=true, tbr=true }
+-- _COVER_MOD_IDS has been replaced by the declarative M.has_covers flag on
+-- each module.  Modules that carry cover bitmaps declare has_covers = true;
+-- the homescreen reads that flag instead of checking this hardcoded set.
+-- This comment is kept so git history remains searchable.
 
 -- ---------------------------------------------------------------------------
 -- DotWidget — defined once at file level; buildDotFooter() creates instances.
@@ -87,14 +314,14 @@ function DotWidget:paintTo(bb, x, y)
         if i == self.current_page then
             bb:paintCircle(cx, cy, dot_r, Blitbuffer.COLOR_BLACK)
         else
-            bb:paintCircle(cx, cy, dot_r, _DOT_COLOR_INACTIVE)
+            bb:paintCircle(cx, cy, dot_r, _getDotInactive())
         end
     end
 end
 
 -- Settings prefixes — homescreen is fully namespaced, independent from continue page.
-local PFX    = "navbar_homescreen_"
-local PFX_QA = "navbar_homescreen_quick_actions_"
+local PFX    = "simpleui_hs_"
+local PFX_QA = "simpleui_hs_qa_"
 
 -- Forward declaration needed so onCloseWidget() can reference it.
 local Homescreen = { _instance = nil }
@@ -123,18 +350,27 @@ local function sectionLabel(text, w)
     local fs        = math.max(8, math.floor(_BASE_SECTION_LABEL_SIZE * scale))
     local label_h   = math.max(8, math.floor(Screen:scaleBySize(16) * scale))
     local scale_pct = math.floor(scale * 100)
-    local key = text .. "|" .. w .. "|" .. scale_pct
+    -- Resolve theme fg color so labels honour the active palette.
+    -- The color pointer is included in the cache key so that a theme change
+    -- after the first render produces a fresh widget instead of reusing the
+    -- stale one (the cache is also invalidated on rebuildLayout, but this
+    -- guards against within-session theme switches without a full rebuild).
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    local _label_fg = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local color_key = _label_fg and tostring(_label_fg) or "default"
+    local key = text .. "|" .. w .. "|" .. scale_pct .. "|" .. color_key
     if not _label_cache[key] then
         _label_cache[key] = FrameContainer:new{
             bordersize = 0, padding = 0,
             padding_left = PAD, padding_right = PAD,
             padding_bottom = UI.LABEL_PAD_BOT,
-            TextWidget:new{
-                text   = text,
-                face   = Font:getFace("smallinfofont", fs),
-                bold   = true,
-                width  = w - PAD * 2,
-                height = label_h,
+            UI.makeColoredText{
+                text    = text,
+                face    = Font:getFace("smallinfofont", fs),
+                bold    = true,
+                fgcolor = _label_fg,   -- nil → KOReader default (black)
+                width   = w - PAD * 2,
+                height  = label_h,
             },
         }
     end
@@ -157,10 +393,10 @@ local function buildEmptyState(w, h)
             VerticalSpan:new{ width = _EMPTY_GAP },
             CenterContainer:new{
                 dimen = Geom:new{ w = w, h = _EMPTY_SUB_H },
-                TextWidget:new{
+                UI.makeColoredText{
                     text    = _("Open a book to get started"),
                     face    = Font:getFace("smallinfofont", _EMPTY_SUB_FS),
-                    fgcolor = _CLR_TEXT_MID,
+                    fgcolor = _getTextMid(),
                 },
             },
         },
@@ -287,6 +523,12 @@ local function buildChevronFooter(goto_fn)
         text = " ", text_font_bold = false, text_font_size = font_size,
         bordersize = 0, enabled = false,
     }
+
+    Bottombar.patchDimmedIcon(btn_first)
+    Bottombar.patchDimmedIcon(btn_prev)
+    Bottombar.patchDimmedIcon(btn_next)
+    Bottombar.patchDimmedIcon(btn_last)
+
     local page_info = HorizontalGroup:new{
         align = "center",
         btn_first, spacer, btn_prev, spacer,
@@ -301,6 +543,21 @@ local function buildChevronFooter(goto_fn)
             page_info,
         },
     }
+    -- Apply user-defined icon overrides for pagination chevrons.
+    -- Since these are SimpleUI-created Buttons (not IconButtons), we use
+    -- applyPaginationIcons which calls _applyNativeBtn (btn.icon + :init() path).
+    pcall(function()
+        local ok_ss, SS = pcall(require, "sui_style")
+        if not (ok_ss and SS and SS.applyPaginationIcons) then return end
+        -- Build a pseudo-widget with the four named fields that applyPaginationIcons expects.
+        local pseudo = {
+            page_info_first_chev = btn_first,
+            page_info_left_chev  = btn_prev,
+            page_info_right_chev = btn_next,
+            page_info_last_chev  = btn_last,
+        }
+        SS.applyPaginationIcons(pseudo)
+    end)
     return {
         widget    = chev_input,
         btn_first = btn_first,
@@ -524,13 +781,8 @@ function HomescreenWidget:init()
         local gt  = ges_event.ges
         local dir = ges_event.direction
 
-        local function inZone(z)
-            if not z then return false end
-            return x >= z.ratio_x * sw and x < (z.ratio_x + z.ratio_w) * sw
-               and y >= z.ratio_y * sh and y < (z.ratio_y + z.ratio_h) * sh
-        end
-
-        local candidates = {}
+        -- Use the module-level reusable buffer; reset it for this call.
+        local n = 0
 
         if gt == "swipe" then
             local is_diag = dir == "northeast" or dir == "northwest"
@@ -538,54 +790,54 @@ function HomescreenWidget:init()
             if is_diag then
                 local short_thresh = Screen:scaleBySize(300)
                 if ges_event.distance and ges_event.distance <= short_thresh then
-                    candidates[#candidates+1] = "short_diagonal_swipe"
+                    n = n + 1; _candidates[n] = "short_diagonal_swipe"
                 end
-            elseif inZone(_gz_left_edge) then
-                if     dir == "south" then candidates[#candidates+1] = "one_finger_swipe_left_edge_down"
-                elseif dir == "north" then candidates[#candidates+1] = "one_finger_swipe_left_edge_up"
+            elseif _inZone(_gz_left_edge, x, y, sw, sh) then
+                if     dir == "south" then n = n + 1; _candidates[n] = "one_finger_swipe_left_edge_down"
+                elseif dir == "north" then n = n + 1; _candidates[n] = "one_finger_swipe_left_edge_up"
                 end
-            elseif inZone(_gz_right_edge) then
-                if     dir == "south" then candidates[#candidates+1] = "one_finger_swipe_right_edge_down"
-                elseif dir == "north" then candidates[#candidates+1] = "one_finger_swipe_right_edge_up"
+            elseif _inZone(_gz_right_edge, x, y, sw, sh) then
+                if     dir == "south" then n = n + 1; _candidates[n] = "one_finger_swipe_right_edge_down"
+                elseif dir == "north" then n = n + 1; _candidates[n] = "one_finger_swipe_right_edge_up"
                 end
-            elseif inZone(_gz_top_edge) then
-                if     dir == "east" then candidates[#candidates+1] = "one_finger_swipe_top_edge_right"
-                elseif dir == "west" then candidates[#candidates+1] = "one_finger_swipe_top_edge_left"
+            elseif _inZone(_gz_top_edge, x, y, sw, sh) then
+                if     dir == "east" then n = n + 1; _candidates[n] = "one_finger_swipe_top_edge_right"
+                elseif dir == "west" then n = n + 1; _candidates[n] = "one_finger_swipe_top_edge_left"
                 end
-            elseif inZone(_gz_bot_edge) then
-                if     dir == "east" then candidates[#candidates+1] = "one_finger_swipe_bottom_edge_right"
-                elseif dir == "west" then candidates[#candidates+1] = "one_finger_swipe_bottom_edge_left"
+            elseif _inZone(_gz_bot_edge, x, y, sw, sh) then
+                if     dir == "east" then n = n + 1; _candidates[n] = "one_finger_swipe_bottom_edge_right"
+                elseif dir == "west" then n = n + 1; _candidates[n] = "one_finger_swipe_bottom_edge_left"
                 end
             end
 
         elseif gt == "tap" then
-            if     inZone(_gz_top_left)  then candidates[#candidates+1] = "tap_top_left_corner"
-            elseif inZone(_gz_top_right) then candidates[#candidates+1] = "tap_top_right_corner"
-            elseif inZone(_gz_bot_left)  then candidates[#candidates+1] = "tap_left_bottom_corner"
-            elseif inZone(_gz_bot_right) then candidates[#candidates+1] = "tap_right_bottom_corner"
+            if     _inZone(_gz_top_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "tap_top_left_corner"
+            elseif _inZone(_gz_top_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "tap_top_right_corner"
+            elseif _inZone(_gz_bot_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "tap_left_bottom_corner"
+            elseif _inZone(_gz_bot_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "tap_right_bottom_corner"
             end
 
         elseif gt == "hold" then
-            if     inZone(_gz_top_left)  then candidates[#candidates+1] = "hold_top_left_corner"
-            elseif inZone(_gz_top_right) then candidates[#candidates+1] = "hold_top_right_corner"
-            elseif inZone(_gz_bot_left)  then candidates[#candidates+1] = "hold_bottom_left_corner"
-            elseif inZone(_gz_bot_right) then candidates[#candidates+1] = "hold_bottom_right_corner"
+            if     _inZone(_gz_top_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "hold_top_left_corner"
+            elseif _inZone(_gz_top_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "hold_top_right_corner"
+            elseif _inZone(_gz_bot_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "hold_bottom_left_corner"
+            elseif _inZone(_gz_bot_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "hold_bottom_right_corner"
             end
 
         elseif gt == "double_tap" then
-            if     inZone(_gz_left_side)  then candidates[#candidates+1] = "double_tap_left_side"
-            elseif inZone(_gz_right_side) then candidates[#candidates+1] = "double_tap_right_side"
-            elseif inZone(_gz_top_left)   then candidates[#candidates+1] = "double_tap_top_left_corner"
-            elseif inZone(_gz_top_right)  then candidates[#candidates+1] = "double_tap_top_right_corner"
-            elseif inZone(_gz_bot_left)   then candidates[#candidates+1] = "double_tap_bottom_left_corner"
-            elseif inZone(_gz_bot_right)  then candidates[#candidates+1] = "double_tap_bottom_right_corner"
+            if     _inZone(_gz_left_side,  x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_left_side"
+            elseif _inZone(_gz_right_side, x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_right_side"
+            elseif _inZone(_gz_top_left,   x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_top_left_corner"
+            elseif _inZone(_gz_top_right,  x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_top_right_corner"
+            elseif _inZone(_gz_bot_left,   x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_bottom_left_corner"
+            elseif _inZone(_gz_bot_right,  x, y, sw, sh) then n = n + 1; _candidates[n] = "double_tap_bottom_right_corner"
             end
 
         elseif gt == "two_finger_tap" then
-            if     inZone(_gz_top_left)  then candidates[#candidates+1] = "two_finger_tap_top_left_corner"
-            elseif inZone(_gz_top_right) then candidates[#candidates+1] = "two_finger_tap_top_right_corner"
-            elseif inZone(_gz_bot_left)  then candidates[#candidates+1] = "two_finger_tap_bottom_left_corner"
-            elseif inZone(_gz_bot_right) then candidates[#candidates+1] = "two_finger_tap_bottom_right_corner"
+            if     _inZone(_gz_top_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "two_finger_tap_top_left_corner"
+            elseif _inZone(_gz_top_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "two_finger_tap_top_right_corner"
+            elseif _inZone(_gz_bot_left,  x, y, sw, sh) then n = n + 1; _candidates[n] = "two_finger_tap_bottom_left_corner"
+            elseif _inZone(_gz_bot_right, x, y, sw, sh) then n = n + 1; _candidates[n] = "two_finger_tap_bottom_right_corner"
             end
 
         elseif gt == "two_finger_swipe" then
@@ -595,7 +847,7 @@ function HomescreenWidget:init()
                 northeast = "two_finger_swipe_northeast", northwest = "two_finger_swipe_northwest",
                 southeast = "two_finger_swipe_southeast", southwest = "two_finger_swipe_southwest",
             }
-            if map[dir] then candidates[#candidates+1] = map[dir] end
+            if map[dir] then n = n + 1; _candidates[n] = map[dir] end
 
         elseif gt == "multiswipe" then
             local orig_sendEvent = UIManager.sendEvent
@@ -606,20 +858,21 @@ function HomescreenWidget:init()
             return true
 
         elseif gt == "spread" then
-            candidates[#candidates+1] = "spread_gesture"
+            n = n + 1; _candidates[n] = "spread_gesture"
         elseif gt == "pinch" then
-            candidates[#candidates+1] = "pinch_gesture"
+            n = n + 1; _candidates[n] = "pinch_gesture"
         elseif gt == "rotate" then
-            if     dir == "cw"  then candidates[#candidates+1] = "rotate_cw"
-            elseif dir == "ccw" then candidates[#candidates+1] = "rotate_ccw"
+            if     dir == "cw"  then n = n + 1; _candidates[n] = "rotate_cw"
+            elseif dir == "ccw" then n = n + 1; _candidates[n] = "rotate_ccw"
             end
         end
 
-        if #candidates == 0 then return end
+        if n == 0 then return end
 
         local gestures_fm = g.gestures
         local ges_name
-        for _, name in ipairs(candidates) do
+        for i = 1, n do
+            local name = _candidates[i]
             if gestures_fm and gestures_fm[name] ~= nil then
                 ges_name = name
                 break
@@ -627,9 +880,12 @@ function HomescreenWidget:init()
         end
         -- Fall back to the first candidate; gestureAction() is a no-op when
         -- no action is configured, preserving future default-action support.
-        if not ges_name and #candidates > 0 then
-            ges_name = candidates[1]
+        if not ges_name then
+            ges_name = _candidates[1]
         end
+
+        -- Clear the reusable buffer so stale entries never leak into the next call.
+        for i = 1, n do _candidates[i] = nil end
 
         if ges_name then
             local orig_sendEvent = UIManager.sendEvent
@@ -928,7 +1184,6 @@ function HomescreenWidget:init()
     -- Real content is built in onShow() once _navbar_content_h is set.
     self[1] = FrameContainer:new{
         bordersize = 0, padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
         dimen      = Geom:new{ w = sw, h = sh },
         VerticalSpan:new{ width = sh },
     }
@@ -945,7 +1200,7 @@ function HomescreenWidget:init()
             return nil
         end
 
-        local topbar_on  = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+        local topbar_on  = SUISettings:nilOrTrue("simpleui_topbar_enabled")
         local zone_ratio_h
         if topbar_on then
             local ok_tb, Topbar   = pcall(require, "sui_topbar")
@@ -1118,19 +1373,44 @@ function HomescreenWidget:_initLayout()
     local body = VerticalGroup:new{ align = "left" }
     self._body = body
 
+    -- Module widgets are transparent by default (no background field set), so
+    -- the device/screen background colour shows through when no wallpaper is
+    -- active.  When a wallpaper is set we simply paint it behind the widget
+    -- tree via a paintTo override — no conditional background juggling needed.
+    local _lf_bg = _styleGetBgWidget()
+
     local content_widget = FrameContainer:new{
-        bordersize = 0, padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen      = Geom:new{ w = inner_w, h = content_h },
+        bordersize   = 0, padding = 0,
+        padding_left = side_off, padding_right = side_off,
+        dimen        = Geom:new{ w = sw, h = content_h },
         body,
     }
     local outer = FrameContainer:new{
-        bordersize   = 0, padding = 0,
-        padding_left = side_off, padding_right = side_off,
-        background   = Blitbuffer.COLOR_WHITE,
-        dimen        = Geom:new{ w = sw, h = content_h },
+        bordersize = 0, padding = 0,
+        dimen      = Geom:new{ w = sw, h = content_h },
         content_widget,
     }
+
+    -- _styleGetBgWidget() already creates the ImageWidget with height=sh
+    -- (full screen), so when bars_transparent is active the wallpaper
+    -- automatically bleeds behind the topbar and bottombar with no extra
+    -- work needed here.  We just paint it at (x, y) as usual.
+    if _lf_bg then
+        local _orig_paintTo = content_widget.paintTo
+        local _bg           = _lf_bg
+        function content_widget:paintTo(bb, x, y)
+            -- Always paint from y=0 so the wallpaper is anchored at the top
+            -- and covers the full screen area.
+            _bg:paintTo(bb, x, 0)
+            -- Opacity: 0 = fully opaque (no lighten), 1-99 = fade toward white.
+            -- lightenRect is a cheap in-place blitbuffer op — safe on e-ink.
+            local opacity = _wpOpacity()
+            if opacity and opacity > 0 then
+                bb:lightenRect(x, 0, Screen:getWidth(), Screen:getHeight(), opacity / 100)
+            end
+            _orig_paintTo(self, bb, x, y)
+        end
+    end
 
     -- Navigation callback shared by both footer types.
     local self_ref = self
@@ -1181,36 +1461,36 @@ function HomescreenWidget:_buildCtx()
                 scale       = Config.getModuleScale("currently", PFX),
                 thumb_scale = Config.getThumbScale("currently", PFX),
                 lbl_scale   = Config.getItemLabelScale("currently", PFX),
-                bar_style   = G_reader_settings:readSetting(PFX .. "currently_bar_style") or "with_pct",
-                stats_style = G_reader_settings:readSetting(PFX .. "currently_stats_style") or "default",
-                elem_order  = G_reader_settings:readSetting(PFX .. "currently_elem_order"),
+                bar_style   = SUISettings:readSetting(PFX .. "currently_bar_style") or "with_pct",
+                stats_style = SUISettings:readSetting(PFX .. "currently_stats_style") or "default",
+                elem_order  = SUISettings:readSetting(PFX .. "currently_elem_order"),
                 show = {
-                    title    = G_reader_settings:nilOrTrue(PFX .. "currently_show_title"),
-                    author   = G_reader_settings:nilOrTrue(PFX .. "currently_show_author"),
-                    progress = G_reader_settings:nilOrTrue(PFX .. "currently_show_progress"),
-                    percent  = G_reader_settings:nilOrTrue(PFX .. "currently_show_percent"),
-                    days     = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_days"),
-                    time     = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_time"),
-                    remain   = G_reader_settings:nilOrTrue(PFX .. "currently_show_book_remaining"),
+                    title    = SUISettings:nilOrTrue(PFX .. "currently_show_title"),
+                    author   = SUISettings:nilOrTrue(PFX .. "currently_show_author"),
+                    progress = SUISettings:nilOrTrue(PFX .. "currently_show_progress"),
+                    percent  = SUISettings:nilOrTrue(PFX .. "currently_show_percent"),
+                    days     = SUISettings:nilOrTrue(PFX .. "currently_show_book_days"),
+                    time     = SUISettings:nilOrTrue(PFX .. "currently_show_book_time"),
+                    remain   = SUISettings:nilOrTrue(PFX .. "currently_show_book_remaining"),
                 },
             },
             coverdeck = {
                 scale         = Config.getModuleScale("coverdeck", PFX),
                 thumb_scale   = Config.getThumbScale("coverdeck", PFX),
                 lbl_scale     = Config.getItemLabelScale("coverdeck", PFX),
-                source        = G_reader_settings:readSetting(PFX .. "flow_recent_source") or "recent",
-                title_pos     = G_reader_settings:readSetting(PFX .. "coverdeck_title_pos") or "below",
-                show_finished = G_reader_settings:readSetting(PFX .. "coverdeck_show_finished") == true,
+                source        = SUISettings:readSetting(PFX .. "flow_recent_source") or "recent",
+                title_pos     = SUISettings:readSetting(PFX .. "coverdeck_title_pos") or "below",
+                show_finished = SUISettings:readSetting(PFX .. "coverdeck_show_finished") == true,
                 show = {
-                    title    = G_reader_settings:nilOrTrue(PFX .. "flow_show_title"),
-                    author   = G_reader_settings:nilOrTrue(PFX .. "flow_show_author"),
-                    progress = G_reader_settings:nilOrTrue(PFX .. "flow_show_progress"),
-                    percent  = G_reader_settings:nilOrTrue(PFX .. "flow_show_percent"),
-                    days     = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_days"),
-                    time     = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_time"),
-                    remain   = G_reader_settings:nilOrTrue(PFX .. "flow_show_book_remaining"),
+                    title    = SUISettings:nilOrTrue(PFX .. "flow_show_title"),
+                    author   = SUISettings:nilOrTrue(PFX .. "flow_show_author"),
+                    progress = SUISettings:nilOrTrue(PFX .. "flow_show_progress"),
+                    percent  = SUISettings:nilOrTrue(PFX .. "flow_show_percent"),
+                    days     = SUISettings:nilOrTrue(PFX .. "flow_show_book_days"),
+                    time     = SUISettings:nilOrTrue(PFX .. "flow_show_book_time"),
+                    remain   = SUISettings:nilOrTrue(PFX .. "flow_show_book_remaining"),
                 },
-                elem_order    = G_reader_settings:readSetting(PFX .. "coverdeck_elem_order"),
+                elem_order    = SUISettings:readSetting(PFX .. "coverdeck_elem_order"),
             },
         }
         self._cfg_cache = cfg
@@ -1230,10 +1510,10 @@ function HomescreenWidget:_buildCtx()
                 local max_recent = 5
                 local show_finished =
                     (mod_r  and Registry.isEnabled(mod_r,  PFX) and
-                        G_reader_settings:readSetting(PFX .. "recent_show_finished") == true)
+                        SUISettings:readSetting(PFX .. "recent_show_finished") == true)
                     or
                     (mod_cd and Registry.isEnabled(mod_cd, PFX) and
-                        G_reader_settings:readSetting(PFX .. "coverdeck_show_finished") == true)
+                        SUISettings:readSetting(PFX .. "coverdeck_show_finished") == true)
                 self._cached_books_state = SH.prefetchBooks(show_c, show_r, max_recent, show_finished)
                 if Config.cover_extraction_pending then
                     self:_scheduleCoverPoll()
@@ -1253,6 +1533,22 @@ function HomescreenWidget:_buildCtx()
     local wants_stats = (mod_rg and Registry.isEnabled(mod_rg, PFX))
         or (mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX))
 
+    -- Scan external modules that declare M.needs = { db=true, stats=true, books=true }.
+    -- Built-ins have their requirements encoded in the explicit checks below; this
+    -- loop only fires for modules not in the MODULES list (zero cost when no
+    -- external modules are registered).
+    local ext_needs_db    = false
+    local ext_needs_stats = false
+    local ext_needs_books = false
+    for _, mod in ipairs(Registry.list()) do
+        if mod.needs and Registry.isEnabled(mod, PFX) then
+            if mod.needs.db    then ext_needs_db    = true end
+            if mod.needs.stats then ext_needs_stats = true end
+            if mod.needs.books then ext_needs_books = true end
+        end
+    end
+    if ext_needs_stats then wants_stats = true end
+
     -- Determine whether the coverdeck needs DB access (i.e. at least one stat
     -- beyond "percent" is visible).  "percent" comes from prefetched metadata
     -- and never requires a DB query.
@@ -1261,15 +1557,15 @@ function HomescreenWidget:_buildCtx()
         (cd_cfg and cd_cfg.show and
             (cd_cfg.show.book_days or cd_cfg.show.book_time or cd_cfg.show.book_remaining))
         or (not (cd_cfg and cd_cfg.show) and (
-            G_reader_settings:nilOrTrue(PFX .. "flow_show_book_days") or
-            G_reader_settings:nilOrTrue(PFX .. "flow_show_book_time") or
-            G_reader_settings:nilOrTrue(PFX .. "flow_show_book_remaining"))))
+            SUISettings:nilOrTrue(PFX .. "flow_show_book_days") or
+            SUISettings:nilOrTrue(PFX .. "flow_show_book_time") or
+            SUISettings:nilOrTrue(PFX .. "flow_show_book_remaining"))))
 
     -- "currently" always needs the DB when active (all its stats are DB-backed).
     -- The "recent" module (mod_r) shows no DB-backed stats, so it is excluded.
-    local wants_db = show_c or coverdeck_needs_db or wants_stats
+    local wants_db = show_c or coverdeck_needs_db or wants_stats or ext_needs_db
 
-    if wants_db and not self._db_conn then
+    if wants_db and not self._db_conn and not self._db_sync_guard then
         self._db_conn = Config.openStatsDB()
     end
 
@@ -1277,11 +1573,12 @@ function HomescreenWidget:_buildCtx()
     -- needs_books: true only when reading_goals is active, OR reading_stats is
     -- active and "total_books" is among the selected stat items.  When false,
     -- SP.get() skips the sidecar scan (up to 200 DS.open calls) entirely.
-    local needs_books = false
+    -- External modules that declare M.needs.books = true also trigger this.
+    local needs_books = ext_needs_books
     if mod_rg and Registry.isEnabled(mod_rg, PFX) then
         needs_books = true
     elseif mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX) then
-        local rs_items = G_reader_settings:readSetting(PFX .. "reading_stats_items") or {}
+        local rs_items = SUISettings:readSetting(PFX .. "reading_stats_items") or {}
         for _, id in ipairs(rs_items) do
             if id == "total_books" then needs_books = true; break end
         end
@@ -1309,7 +1606,7 @@ function HomescreenWidget:_buildCtx()
     -- reuse it directly rather than repeating the visibility logic here.
     local coverdeck_center_stats = nil
     if coverdeck_needs_db and self._db_conn then
-        local saved_center_fp = G_reader_settings:readSetting(PFX .. "flow_recent_fp")
+        local saved_center_fp = SUISettings:readSetting(PFX .. "flow_recent_fp")
         local center_fp = saved_center_fp or (bs.recent_fps and bs.recent_fps[1])
         local pe = center_fp and bs.prefetched_data and bs.prefetched_data[center_fp]
         local center_md5 = type(pe) == "table" and pe.partial_md5_checksum
@@ -1331,9 +1628,9 @@ function HomescreenWidget:_buildCtx()
         local c_cfg = cfg and cfg.currently
         local needs_bstats = (c_cfg and (c_cfg.show.days or c_cfg.show.time or c_cfg.show.remain))
             or (not c_cfg and (
-                G_reader_settings:nilOrTrue(PFX .. "currently_show_book_days") or
-                G_reader_settings:nilOrTrue(PFX .. "currently_show_book_time") or
-                G_reader_settings:nilOrTrue(PFX .. "currently_show_book_remaining")))
+                SUISettings:nilOrTrue(PFX .. "currently_show_book_days") or
+                SUISettings:nilOrTrue(PFX .. "currently_show_book_time") or
+                SUISettings:nilOrTrue(PFX .. "currently_show_book_remaining")))
         if needs_bstats then
             local pe_c  = bs.prefetched_data and bs.prefetched_data[bs.current_fp]
             local c_md5 = type(pe_c) == "table" and pe_c.partial_md5_checksum
@@ -1376,6 +1673,7 @@ function HomescreenWidget:_buildCtx()
         _show_r                = show_r,
         _has_content           = (bs.current_fp and show_c) or (#bs.recent_fps > 0 and show_r),
         cfg                    = cfg,
+        has_wallpaper          = (_styleGetBgWidget() ~= nil),
     }
 end
 
@@ -1391,8 +1689,8 @@ function HomescreenWidget:_updateFooter(current_page, total_pages, topbar_on)
 
     local navpager_on   = Config.isNavpagerEnabled()
     local dot_pager_on  = Config.isDotPagerEnabled()
-    local pag_visible   = G_reader_settings:nilOrTrue("navbar_pagination_visible")
-    local hs_pag_hidden = G_reader_settings:isTrue("navbar_homescreen_pagination_hidden")
+    local pag_visible   = SUISettings:nilOrTrue("simpleui_bar_pagination_visible")
+    local hs_pag_hidden = SUISettings:isTrue("simpleui_hs_pagination_hidden")
 
     local show_bar = not hs_pag_hidden
         and total_pages > 1 and (navpager_on or pag_visible or dot_pager_on)
@@ -1465,14 +1763,14 @@ end
 -- single function knows which module was held (no per-module closure needed).
 -- ---------------------------------------------------------------------------
 function HomescreenWidget:_onHoldModRelease(wrapper)
-    if not G_reader_settings:nilOrTrue("navbar_homescreen_settings_on_hold") then
+    if not SUISettings:nilOrTrue("simpleui_hs_settings_on_hold") then
         return true
     end
     local mod = wrapper._sui_mod
     local hs  = wrapper._sui_hs
     if not mod or not hs then return true end
     local Topbar   = require("sui_topbar")
-    local topbar_h = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+    local topbar_h = SUISettings:nilOrTrue("simpleui_topbar_enabled")
                      and Topbar.TOTAL_TOP_H() or 0
     local _lc = _
     UI.showSettingsMenu(
@@ -1538,7 +1836,7 @@ function HomescreenWidget:_makeModWrapper(mod, widget, inner_w)
             },
         }
         function w:onHoldMod()
-            if not G_reader_settings:nilOrTrue("navbar_homescreen_settings_on_hold") then
+            if not SUISettings:nilOrTrue("simpleui_hs_settings_on_hold") then
                 return
             end
             return true
@@ -1593,7 +1891,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                 if mod and Registry.isEnabled(mod, PFX) then
                     page_mods[#page_mods + 1] = mod
                     mod_gaps[mod_id] = Config.getModuleGapPx(mod_id, PFX, MOD_GAP)
-                    if mod_id == "currently" or mod_id == "recent" or mod_id == "coverdeck" then
+                    if mod.is_book_mod then
                         has_book_mod = true
                     end
                 end
@@ -1602,7 +1900,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
         end
         if #pages_of_mods == 0 then pages_of_mods[1] = {} end
 
-        local chosen_pages = G_reader_settings:readSetting(PFX .. "homescreen_num_pages")
+        local chosen_pages = SUISettings:readSetting(PFX .. "homescreen_num_pages")
         if chosen_pages and chosen_pages > #pages_of_mods then
             for _ = #pages_of_mods + 1, chosen_pages do
                 pages_of_mods[#pages_of_mods + 1] = {}
@@ -1628,7 +1926,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                     end
                     table.insert(pages_of_mods[1], insert_at, cd)
                     mod_gaps["coverdeck"] = Config.getModuleGapPx("coverdeck", PFX, MOD_GAP)
-                    has_book_mod = true
+                    if cd.is_book_mod then has_book_mod = true end
                 end
             end
         end
@@ -1673,9 +1971,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
 
     body:clear()
 
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
-    local top_pad   = topbar_on and MOD_GAP or (MOD_GAP * 2)
-    body[#body+1] = self:_vspan(top_pad)
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
 
     self._header_body_idx   = nil
     self._header_inner_w    = inner_w
@@ -1753,7 +2049,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
 
         if is_spread then
             for _, mod in ipairs(cur_page_mods) do
-                if _COVER_MOD_IDS[mod.id] then page_has_covers = true end
+                if mod.has_covers then page_has_covers = true end
                 local ok_w, widget = pcall(mod.build, col_w, ctx)
                 if not ok_w or not widget then
                     logger.warn("simpleui homescreen: build failed for "
@@ -1763,7 +2059,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                 end
             end
             for _, mod in ipairs(right_page_mods) do
-                if _COVER_MOD_IDS[mod.id] then page_has_covers = true end
+                if mod.has_covers then page_has_covers = true end
                 local ok_w, widget = pcall(mod.build, col_w, ctx)
                 if not ok_w or not widget then
                     logger.warn("simpleui homescreen: build failed for "
@@ -1775,7 +2071,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
         else
             local col_mods = {}
             for _, mod in ipairs(cur_page_mods) do
-                if _COVER_MOD_IDS[mod.id] then page_has_covers = true end
+                if mod.has_covers then page_has_covers = true end
                 col_mods[#col_mods + 1] = mod
             end
             local n_col    = #col_mods
@@ -1802,8 +2098,14 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
             for _, entry in ipairs(entries) do
                 local mod    = entry.mod
                 local widget = entry.widget
-                if col_first then col_first = false
-                else col_body[#col_body+1] = self:_vspan(mod_gaps[mod.id] or MOD_GAP) end
+                if col_first then
+                    col_first = false
+                    local gap_px = mod_gaps[mod.id] or MOD_GAP
+                    local initial_pad = topbar_on and gap_px or (gap_px + MOD_GAP)
+                    col_body[#col_body+1] = self:_vspan(initial_pad)
+                else
+                    col_body[#col_body+1] = self:_vspan(mod_gaps[mod.id] or MOD_GAP)
+                end
                 if mod.label then col_body[#col_body+1] = sectionLabel(mod.label, col_w) end
                 local has_menu   = type(mod.getMenuItems) == "function"
                 local entry_widget = has_menu
@@ -1811,7 +2113,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                     or  widget
                 col_body[#col_body+1] = entry_widget
                 -- Record slot for per-module cover poll (only for cover modules).
-                if _COVER_MOD_IDS[mod.id] and type(mod.updateCovers) == "function" then
+                if mod.has_covers and type(mod.updateCovers) == "function" then
                     self._cover_mod_slots[mod.id] = {
                         mod    = mod,
                         widget = widget,  -- raw widget with _cover_slots attached
@@ -1885,7 +2187,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
         -- Portrait single-column layout.
         self._clock_landscape_factor = nil
         for _, mod in ipairs(cur_page_mods) do
-            if _COVER_MOD_IDS[mod.id] then page_has_covers = true end
+            if mod.has_covers then page_has_covers = true end
             local ok_w, widget = pcall(mod.build, inner_w, ctx)
             if not ok_w then
                 logger.warn("simpleui homescreen: build failed for "
@@ -1893,6 +2195,9 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
             elseif widget then
                 if first_mod then
                     first_mod = false
+                    local gap_px = mod_gaps[mod.id] or MOD_GAP
+                    local initial_pad = topbar_on and gap_px or (gap_px + MOD_GAP)
+                    body[#body+1] = self:_vspan(initial_pad)
                 else
                     local gap_px = mod_gaps[mod.id] or MOD_GAP
                     body[#body+1] = self:_vspan(gap_px)
@@ -1914,7 +2219,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
                     body[#body+1] = widget
                 end
                 -- Record slot for per-module cover poll (only for cover modules).
-                if _COVER_MOD_IDS[mod.id] and type(mod.updateCovers) == "function" then
+                if mod.has_covers and type(mod.updateCovers) == "function" then
                     self._cover_mod_slots[mod.id] = {
                         mod    = mod,
                         widget = widget,
@@ -1930,7 +2235,13 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
         self._db_conn = nil
     end
 
-    if empty_widget then body[#body+1] = empty_widget end
+    if empty_widget then
+        if first_mod then
+            local top_pad = topbar_on and MOD_GAP or (MOD_GAP * 2)
+            body[#body+1] = self:_vspan(top_pad)
+        end
+        body[#body+1] = empty_widget
+    end
 
     -- Dithering hint for e-ink: UIManager checks widget.dithered on setDirty
     -- to trigger a full pixel refresh cycle (avoids ghosting on cover bitmaps).
@@ -1961,7 +2272,7 @@ function HomescreenWidget:_updatePage(keep_cache, books_only, stats_only)
     -- Warn when module heights overflow the visible area (portrait only).
     -- Skipped when the user has disabled the warning in settings.
     if not is_landscape
-       and G_reader_settings:nilOrTrue("navbar_homescreen_overflow_warn") then
+       and SUISettings:nilOrTrue("simpleui_hs_overflow_warn") then
         local total_body_h = 0
         for i = 1, #body do
             local ok, sz = pcall(function() return body[i]:getSize() end)
@@ -2072,6 +2383,8 @@ function HomescreenWidget:_refreshImmediate(keep_cache)
         self._cached_books_state = nil
         self._enabled_mods_cache = nil
         self._ctx_cache          = nil
+            self._cfg_cache          = nil
+            Homescreen._cfg_cache    = nil
     end
     if not self._navbar_container then return end
     self:_updatePage(keep_cache or false)
@@ -2219,6 +2532,46 @@ function HomescreenWidget:onClose()
     return true
 end
 
+-- Close our SQLite connection before the Statistics plugin's sync runs.
+-- When SQLite is in WAL mode (the default on capable devices), a connection
+-- held open during the sync corrupts the diff that SyncService.onSync uses
+-- to detect deleted records: the WAL read-snapshot makes newly-written rows
+-- invisible to the merge query, so they are incorrectly treated as "deleted
+-- on this device" and stripped from the income_db before upload.  The result
+-- is permanent, silent data loss on all synced devices.
+--
+-- Closing the connection here (synchronously, before returning false) is
+-- necessary but not sufficient: ReaderStatistics:onSyncBookStats defers the
+-- actual sync to UIManager:nextTick, so any repaint scheduled between this
+-- handler and that tick could call _buildCtx and reopen _db_conn with a new
+-- WAL snapshot that again hides the just-written rows.
+--
+-- _db_sync_guard prevents _buildCtx from reopening the connection during
+-- that window.  tickAfterNext schedules the guard clear for two ticks after
+-- this one — the sync runs in tick N+1 (nextTick) and is fully blocking, so
+-- tick N+2 is guaranteed to run only after SyncService.sync has returned.
+-- The guard clear also invalidates _ctx_cache so the next render fetches
+-- fresh data from the updated DB.
+--
+-- Returning false lets the event propagate to ReaderStatistics as normal.
+function HomescreenWidget:onSyncBookStats()
+    if self._db_conn then
+        pcall(function() self._db_conn:close() end)
+        self._db_conn = nil
+    end
+    self._db_sync_guard = true
+    local self_ref = self
+    UIManager:tickAfterNext(function()
+        UIManager:nextTick(function()
+            if Homescreen._instance ~= self_ref then return end
+            self_ref._db_sync_guard = false
+            self_ref._ctx_cache     = nil
+            self_ref:_refresh(false)
+        end)
+    end)
+    return false  -- do not consume; Statistics plugin must still handle this
+end
+
 function HomescreenWidget:onSuspend()
     self._suspended = true
     if self._cover_poll_timer then
@@ -2242,11 +2595,28 @@ function HomescreenWidget:onSetRotationMode(mode)
     local RUI = package.loaded["apps/reader/readerui"]
     if RUI and RUI.instance then return end
 
-    local new_w = Screen:getWidth()
-    local new_h = Screen:getHeight()
-    if new_w == (self._layout_sw or new_w) and new_h == (self._layout_content_h or new_h) then
-        return
-    end
+    -- HomescreenWidget is on top of the UIManager stack, so broadcastEvent
+    -- delivers SetRotationMode here *before* FileManager:onSetRotationMode runs.
+    -- Screen:setRotationMode() has therefore not been called yet -- Screen:getWidth()
+    -- and Screen:getHeight() still return the pre-rotation dimensions, causing the
+    -- original size-based guard to always match (no change detected) and silently
+    -- abort the rebuild.
+    --
+    -- Fix: use the 'mode' argument to detect an orientation change instead.
+    -- LinuxFB constants: portraits are even (0, 2), landscapes are odd (1, 3).
+    -- A flip in the low bit means layout dimensions will swap -> rebuild needed.
+    -- Same-family flips (e.g. 0 <-> 180 portrait inversion) leave dimensions
+    -- unchanged, so they don't need a rebuild.
+    local current_mode = Screen:getRotationMode()
+    if mode == current_mode then return end
+    local current_is_landscape = (current_mode % 2) == 1
+    local new_is_landscape     = (mode      % 2) == 1
+    if current_is_landscape == new_is_landscape then return end
+
+    -- Free the wallpaper cache now, before closing. The new HomescreenWidget
+    -- created by the rotation-reopen path will call _styleGetBgWidget() with
+    -- the post-rotation Screen dimensions and get a freshly sized ImageWidget.
+    _styleFreeBgCache()
 
     UI.invalidateDimCache()
 
@@ -2395,5 +2765,225 @@ end
 Homescreen.invalidateLabelCache = invalidateLabelCache
 
 Homescreen.PAGE_BREAK_ID = HS_PAGE_BREAK_ID
+
+-- ---------------------------------------------------------------------------
+-- Look & Feel public API (consumed by sui_menu.lua)
+-- ---------------------------------------------------------------------------
+
+-- Rebuild the homescreen layout from scratch (calls _initLayout) so that
+-- background transparency and wallpaper take effect immediately.
+local function _rebuildHomescreenLayout()
+    local hs_inst = Homescreen._instance
+    if not hs_inst or not hs_inst._navbar_container then return end
+
+    hs_inst._cached_books_state = nil
+    hs_inst._enabled_mods_cache = nil
+    hs_inst._ctx_cache          = nil
+    hs_inst._cfg_cache          = nil
+    Homescreen._cfg_cache       = nil
+
+    local overlap = hs_inst:_initLayout()
+    local old = hs_inst._navbar_container[1]
+    if old and old.overlap_offset then
+        overlap.overlap_offset = old.overlap_offset
+    end
+    hs_inst._navbar_container[1] = overlap
+    hs_inst:_updatePage(true)
+    UIManager:setDirty(hs_inst, "ui")
+end
+
+function Homescreen.styleGetWallpaper()
+    return SUISettings:readSetting("simpleui_style_wallpaper")
+end
+
+function Homescreen.styleSetWallpaper(path)
+    SUISettings:saveSetting("simpleui_style_wallpaper", path)
+    if not path then
+        SUISettings:saveSetting("simpleui_statusbar_transparent", false)
+        SUISettings:saveSetting("simpleui_navbar_transparent", false)
+        SUISettings:saveSetting("simpleui_wallpaper_show_in_fm", false)
+    end
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+-- ---------------------------------------------------------------------------
+-- Transparent bars — split into two independent settings.
+-- Migration: if the old unified "simpleui_bars_transparent" key is present
+-- we copy its value to both new keys once, then delete the legacy key so
+-- it doesn't interfere on subsequent launches.
+-- ---------------------------------------------------------------------------
+do
+    local legacy = "simpleui_bars_transparent"
+    if SUISettings:get(legacy) ~= nil then
+        local v = SUISettings:isTrue(legacy)
+        SUISettings:saveSetting("simpleui_statusbar_transparent", v)
+        SUISettings:saveSetting("simpleui_navbar_transparent",    v)
+        SUISettings:del(legacy)
+    end
+end
+
+function Homescreen.styleStatusbarTransparent()
+    if not Homescreen.styleGetWallpaperEnabled() or not Homescreen.styleGetWallpaper() then return false end
+    return SUISettings:isTrue("simpleui_statusbar_transparent")
+end
+
+function Homescreen.styleSetStatusbarTransparent(on)
+    SUISettings:saveSetting("simpleui_statusbar_transparent", on and true or false)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleNavbarTransparent()
+    if not Homescreen.styleGetWallpaperEnabled() or not Homescreen.styleGetWallpaper() then return false end
+    return SUISettings:isTrue("simpleui_navbar_transparent")
+end
+
+function Homescreen.styleSetNavbarTransparent(on)
+    SUISettings:saveSetting("simpleui_navbar_transparent", on and true or false)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleGetWallpapersDir()
+    return _styleWallpapersDir()
+end
+
+function Homescreen.styleScanWallpapers()
+    local dir     = _styleWallpapersDir()
+    local items   = {}
+    local exts    = { jpg=true, jpeg=true, png=true, bmp=true, gif=true }
+    if lfs.attributes(dir, "mode") == "directory" then
+        for fname in lfs.dir(dir) do
+            local ext = fname:match("%.([^%.]+)$")
+            if ext and exts[ext:lower()] then
+                items[#items + 1] = {
+                    label = fname:match("^(.+)%.[^%.]+$") or fname,
+                    path  = dir .. "/" .. fname,
+                }
+            end
+        end
+        table.sort(items, function(a, b) return a.label:lower() < b.label:lower() end)
+    end
+    return items
+end
+
+-- ---------------------------------------------------------------------------
+-- Night-mode hook — free the wallpaper cache whenever night mode is toggled
+-- so the next _styleGetBgWidget() call rebuilds with the correct inversion
+-- state (original_in_nightmode reflects the new setting).
+-- ---------------------------------------------------------------------------
+local _orig_UIManager_ToggleNightMode = UIManager.ToggleNightMode
+function UIManager:ToggleNightMode()
+    _orig_UIManager_ToggleNightMode(self)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+local _orig_UIManager_SetNightMode = UIManager.SetNightMode
+if _orig_UIManager_SetNightMode then
+    function UIManager:SetNightMode(nightmode)
+        _orig_UIManager_SetNightMode(self, nightmode)
+        _styleFreeBgCache()
+        _rebuildHomescreenLayout()
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Public API — wallpaper options (consumed by sui_menu.lua)
+-- ---------------------------------------------------------------------------
+
+--- Returns the cached background ImageWidget (or nil).
+--- Consumed by sui_patches.lua to paint the wallpaper into FM and fullscreen overlay surfaces.
+function Homescreen.styleGetBgWidget()
+    return _styleGetBgWidget()
+end
+
+--- Returns the stored wallpaper opacity (0 = fully opaque, 1-99 = fade toward white).
+--- Consumed by sui_patches.lua paint helpers.
+function Homescreen.styleGetWallpaperOpacityValue()
+    return _wpOpacity()
+end
+
+--- fullscreen overlays (Collections, History, etc.).
+function Homescreen.styleGetWallpaperShowInFM()
+    if not Homescreen.styleGetWallpaperEnabled() or not Homescreen.styleGetWallpaper() then return false end
+    return SUISettings:isTrue("simpleui_wallpaper_show_in_fm")
+end
+function Homescreen.styleSetWallpaperShowInFM(on)
+    SUISettings:saveSetting("simpleui_wallpaper_show_in_fm", on and true or false)
+end
+
+function Homescreen.styleGetWallpaperEnabled()
+    return SUISettings:isTrue("simpleui_style_wallpaper_enabled")
+end
+function Homescreen.styleSetWallpaperEnabled(on)
+    local is_on = on ~= false and true or false
+    SUISettings:saveSetting("simpleui_style_wallpaper_enabled", is_on)
+    if not is_on then
+        SUISettings:saveSetting("simpleui_statusbar_transparent", false)
+        SUISettings:saveSetting("simpleui_navbar_transparent", false)
+        SUISettings:saveSetting("simpleui_wallpaper_show_in_fm", false)
+    end
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleGetWallpaperStretch()
+    return _wpStretch()
+end
+function Homescreen.styleSetWallpaperStretch(on)
+    SUISettings:saveSetting("simpleui_style_wallpaper_stretch", on ~= false and true or false)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleGetWallpaperAutoRotate()
+    return _wpAutoRotate()
+end
+function Homescreen.styleSetWallpaperAutoRotate(on)
+    SUISettings:saveSetting("simpleui_style_wallpaper_autorotate", on ~= false and true or false)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleGetWallpaperInvertNight()
+    return _wpInvertNight()
+end
+function Homescreen.styleSetWallpaperInvertNight(on)
+    SUISettings:saveSetting("simpleui_style_wallpaper_invert_night", on and true or false)
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
+
+function Homescreen.styleGetWallpaperOpacity()
+    return _wpOpacity()
+end
+function Homescreen.styleSetWallpaperOpacity(val)
+    SUISettings:saveSetting("simpleui_style_wallpaper_opacity", math.max(0, math.min(99, val or 0)))
+    -- Opacity is applied at paint-time (not baked into the ImageWidget cache),
+    -- but a setDirty alone is not sufficient when called from a SpinWidget
+    -- callback — the homescreen instance may not be in the foreground repaint
+    -- queue at that point.  Use the same _rebuildHomescreenLayout() path as
+    -- every other wallpaper setter so the change is always visible immediately.
+    _rebuildHomescreenLayout()
+end
+
+--- Frees the internal wallpaper widget cache.
+--- Must be called after changing the simpleui_style_* keys directly
+--- in SUISettings (e.g. after applying a preset), so that the next paint
+--- rebuilds the ImageWidget with the new wallpaper.
+function Homescreen.styleFreeBgCache()
+    _styleFreeBgCache()
+end
+
+--- Full layout rebuild — frees the wallpaper cache and rebuilds the layout
+--- (dimensions, bar overlaps, positioning) before invalidating the screen.
+--- Must be called after applying a preset that might change the wallpaper,
+--- the transparent bars, or any other option that affects the layout.
+function Homescreen.rebuildLayout()
+    _styleFreeBgCache()
+    _rebuildHomescreenLayout()
+end
 
 return Homescreen

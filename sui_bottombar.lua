@@ -29,6 +29,7 @@ local logger          = require("logger")
 local _ = require("sui_i18n").translate
 
 local Config = require("sui_config")
+local SUISettings = require("sui_store")
 
 -- Lazy reference to sui_quickactions — single source of truth for QA resolution
 -- and execution.  Loaded on first use to avoid a circular require at startup.
@@ -81,19 +82,61 @@ end
 
 local M = {}
 
--- Bar colors.
+-- Bar colors — static defaults used when no theme override is set.
 M.COLOR_INACTIVE_TEXT = Blitbuffer.gray(0.55)
 M.COLOR_SEPARATOR     = Blitbuffer.gray(0.7)
 
--- Returns the separator colour: transparent when the user has hidden it.
+-- Returns the separator colour: respects the theme "separator" role, then
+-- transparent when the user has hidden it, then the default grey.
 local function _sepColor()
-    if G_reader_settings:isTrue("navbar_hide_separator") then
+    if SUISettings:isTrue("simpleui_bar_hide_separator") then
         return Blitbuffer.COLOR_WHITE
+    end
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("separator")
+        if c then return c end
     end
     return M.COLOR_SEPARATOR
 end
 -- Public accessor used by sui_core.lua to draw the full-width separator line.
 function M.sepColor() return _sepColor() end
+
+-- ---------------------------------------------------------------------------
+-- Theme color helpers
+-- Priority: transparent > bottombar_bg/fg role > bg/fg fallback > default.
+-- The "bottombar_bg/fg" roles fall back to "bg/fg" automatically inside
+-- SUIStyle.getThemeColor() via the _FALLBACKS chain.
+-- ---------------------------------------------------------------------------
+local function _getBarBg()
+    if SUISettings:isTrue("simpleui_navbar_transparent") then return nil end
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("bottombar_bg")
+        if c then return c end
+    end
+    return Blitbuffer.COLOR_WHITE
+end
+
+local function _getBarFg()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("bottombar_fg")
+        if c then return c end
+    end
+    return Blitbuffer.COLOR_BLACK
+end
+
+-- Returns the color for inactive/dim nav items, respecting the theme
+-- "text_secondary" role and falling back to the static default.
+local function _getInactiveColor()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("text_secondary")
+        if c then return c end
+    end
+    return M.COLOR_INACTIVE_TEXT
+end
 
 -- ---------------------------------------------------------------------------
 -- Dimension cache — computed once, invalidated on screen resize or size change.
@@ -125,7 +168,7 @@ local function _getIconScalePct()
     return _cached("icon_scale_pct", function() return Config.getIconScalePct() end)
 end
 local function _getLabelScalePct()
-    return _cached("label_scale_pct", function() return Config.getLabelScalePct() end)
+    return _cached("label_scale_pct", function() return Config.getNavbarLabelScalePct() end)
 end
 local function _getBottomMarginPct()
     return _cached("bot_margin_pct", function() return Config.getBottomMarginPct() end)
@@ -140,7 +183,6 @@ function M.invalidateDimCache()
     _dim             = {}
     _vspan_icon_top  = nil
     _vspan_icon_txt  = nil
-    _old_touch_zones = nil
 end
 
 function M.BAR_H()       return _cached("bar_h",   function() return math.floor(Screen:scaleBySize(96) * _getNavbarScale()) end) end
@@ -154,10 +196,18 @@ function M.INDIC_H()     return _cached("indic_h", function() return math.floor(
 function M.TOP_SP()      return _cached("top_sp",  function() return Screen:scaleBySize(2)  end) end
 function M.BOT_SP()      return _cached("bot_sp",  function() return math.floor(Screen:scaleBySize(12) * _getBottomMarginPct() / 100) end) end
 function M.SIDE_M()      return _cached("side_m",  function() return Screen:scaleBySize(24) end) end
-function M.SEP_H()       return _cached("sep_h",   function() return Screen:scaleBySize(1)  end) end
+function M.SEP_H()
+    return _cached("sep_h", function()
+        -- Se as barras forem transparentes E o separador estiver oculto, a altura passa a 0 píxeis!
+        if SUISettings:isTrue("simpleui_navbar_transparent") and SUISettings:isTrue("simpleui_bar_hide_separator") then
+            return 0
+        end
+        return Screen:scaleBySize(1)
+    end)
+end
 
 function M.TOTAL_H()
-    if not G_reader_settings:nilOrTrue("navbar_enabled") then return 0 end
+    if not SUISettings:nilOrTrue("simpleui_bar_enabled") then return 0 end
     return M.BAR_H() + M.TOP_SP() + M.BOT_SP()
 end
 
@@ -171,7 +221,7 @@ end
 -- getPaginationFontSize when both are called in the same render pass.
 local function _getPaginationKey()
     return _cached("pag_key", function()
-        return G_reader_settings:readSetting("navbar_pagination_size") or "s"
+        return SUISettings:readSetting("simpleui_bar_pagination_size") or "s"
     end)
 end
 
@@ -195,6 +245,38 @@ local _PAGINATION_BTN_NAMES = {
     "page_info_first_chev", "page_info_last_chev",
 }
 
+function M.patchDimmedIcon(btn)
+    if not btn then return end
+    local lw = btn.label_widget or btn.image
+    if not lw or lw._sui_dim_patched then return end
+    lw._sui_dim_patched = true
+    local orig_lw_pt = lw.paintTo
+    local Blitbuffer = require("ffi/blitbuffer")
+    lw.paintTo = function(self_lw, bb, x, y)
+        if not btn.enabled then
+            local sz = self_lw:getSize()
+            local w, h = sz.w, sz.h
+            if w > 0 and h > 0 then
+                local tmp_bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+                tmp_bb:fill(Blitbuffer.COLOR_WHITE)
+                
+                local saved_dim = self_lw.dim
+                local saved_orig_nm = self_lw.original_in_nightmode
+                self_lw.dim = nil
+                self_lw.original_in_nightmode = true
+                
+                local fg = _getInactiveColor()
+                require("sui_core").paintWithAlphaMask(self_lw, bb, x, y, w, h, fg, orig_lw_pt)
+
+                self_lw.dim = saved_dim
+                self_lw.original_in_nightmode = saved_orig_nm
+                return
+            end
+        end
+        orig_lw_pt(self_lw, bb, x, y)
+    end
+end
+
 function M.resizePaginationButtons(widget, icon_size)
     pcall(function()
         for _i, name in ipairs(_PAGINATION_BTN_NAMES) do
@@ -203,12 +285,21 @@ function M.resizePaginationButtons(widget, icon_size)
                 btn.icon_width  = icon_size
                 btn.icon_height = icon_size
                 btn:init()
+                M.patchDimmedIcon(btn)
             end
         end
         local txt = widget.page_info_text
         if txt then
             txt.text_font_size = M.getPaginationFontSize()
             txt:init()
+        end
+    end)
+    -- Apply any user-defined icon overrides for the pagination chevrons.
+    -- This is called at every layout/rotation so overrides survive rebuilds.
+    pcall(function()
+        local ok_ss, SS = pcall(require, "sui_style")
+        if ok_ss and SS and SS.applyPaginationIcons then
+            SS.applyPaginationIcons(widget)
         end
     end)
 end
@@ -235,6 +326,7 @@ end
 function M.buildTabCell(action_id, active, tab_w, mode)
     local action = Config.getActionById(action_id)
     local vg     = VerticalGroup():new{ align = "center" }
+    local fg     = _getBarFg()
 
     if not _vspan_icon_top then _vspan_icon_top = VerticalSpan():new{ width = M.ICON_TOP_SP() } end
     vg[#vg + 1] = _vspan_icon_top
@@ -250,7 +342,7 @@ function M.buildTabCell(action_id, active, tab_w, mode)
                 TextWidget():new{
                     text    = nerd_char,
                     face    = Font():getFace("symbols", math.floor(icon_sz * 0.6)),
-                    fgcolor = Blitbuffer.COLOR_BLACK,
+                    fgcolor = fg,
                     padding = 0,
                 },
             }
@@ -273,7 +365,8 @@ function M.buildTabCell(action_id, active, tab_w, mode)
         vg[#vg + 1] = TextWidget():new{
             text    = action.label,
             face    = Font():getFace("cfont", M.LABEL_FS()),
-            fgcolor = active and Blitbuffer.COLOR_BLACK or M.COLOR_INACTIVE_TEXT,
+            fgcolor = fg,
+            bold    = active or false,
         }
     end
 
@@ -287,40 +380,92 @@ function M.buildTabCell(action_id, active, tab_w, mode)
         vg,
     }
 
-    -- The active indicator is pinned to the very top of the cell via OverlapGroup,
+-- The active indicator is pinned to the very top of the cell via OverlapGroup,
     -- independent of the vertical centering of the content.
-    local indic_color = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
-    local indic = LineWidget():new{
-        dimen      = Geom():new{ w = tab_w, h = M.INDIC_H() },
-        background = indic_color,
-        overlap_offset = { 0, 0 },
-    }
-
-    return OverlapGroup():new{
+    local og = OverlapGroup():new{
         allow_mirroring = false,
         dimen           = Geom():new{ w = tab_w, h = M.BAR_H() },
         content,
-        indic,
     }
+
+    if active then
+        og[#og + 1] = LineWidget():new{
+            dimen          = Geom():new{ w = tab_w, h = M.INDIC_H() },
+            background     = fg,   -- active underline tracks fg
+            overlap_offset = { 0, 0 },
+        }
+    elseif not SUISettings:isTrue("simpleui_navbar_transparent") then
+        og[#og + 1] = LineWidget():new{
+            dimen          = Geom():new{ w = tab_w, h = M.INDIC_H() },
+            background     = _getBarBg() or Blitbuffer.COLOR_WHITE,
+            overlap_offset = { 0, 0 },
+        }
+    end
+
+    return og
 end
 
 -- Builds a navpager arrow cell (Prev or Next).
 -- `enabled`  — false → dimmed (no prev/next page exists).
 -- `is_prev`  — true → left arrow, false → right arrow.
-local _NAVPAGER_COLOR_ACTIVE  = Blitbuffer.COLOR_BLACK
-local _NAVPAGER_COLOR_DIMMED  = nil  -- initialised lazily (grey(0.75))
-
-local function _navpagerColor()
-    if not _NAVPAGER_COLOR_DIMMED then
-        _NAVPAGER_COLOR_DIMMED = Blitbuffer.gray(0.75)
+-- Active navpager arrow color: reads theme "accent" (or bottombar_fg fallback)
+-- at call-time so live updates work.
+local function _navpagerColorActive()
+    local ok, SUIStyle = pcall(require, "sui_style")
+    if ok and SUIStyle then
+        local c = SUIStyle.getThemeColor("accent")
+        if c then return c end
     end
-    return _NAVPAGER_COLOR_DIMMED
+    return _getBarFg()
+end
+
+-- Dimmed navpager arrow: respects "text_secondary" theme role.
+local function _navpagerColor()
+    return _getInactiveColor()
+end
+
+local function _makeColoredIcon(file, size, fgcolor)
+    local inner = ImageWidget():new{
+        file    = file,
+        width   = size,
+        height  = size,
+        is_icon = true,
+        alpha   = true,
+        original_in_nightmode = true, -- previne a inversão nativa do ImageWidget
+    }
+    local widget = require("ui/widget/container/widgetcontainer"):new{}
+    widget.dimen = Geom():new{ w = size, h = size }
+    widget._inner = inner
+    widget._fg = fgcolor
+
+    function widget:getSize() return self.dimen end
+    function widget:paintTo(bb, x, y)
+        self.dimen.x, self.dimen.y = x, y
+        local w, h = self.dimen.w, self.dimen.h
+        if w <= 0 or h <= 0 then return end
+        
+        require("sui_core").paintWithAlphaMask(self._inner, bb, x, y, w, h, self._fg)
+    end
+    function widget:free()
+        if self._inner then self._inner:free(); self._inner = nil end
+    end
+    function widget:onToggleNightMode() require("ui/uimanager"):setDirty(self) end
+    function widget:onSetNightMode()    require("ui/uimanager"):setDirty(self) end
+    function widget:onApplyTheme()      require("ui/uimanager"):setDirty(self) end
+
+    return widget
 end
 
 function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
     local icon_file = is_prev and Config.ICON.nav_prev or Config.ICON.nav_next
     local label     = is_prev and _("Prev") or _("Next")
-    local color     = enabled and _NAVPAGER_COLOR_ACTIVE or _navpagerColor()
+    local color     = enabled and _navpagerColorActive() or _navpagerColor()
+
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    if ok_ss and SUIStyle then
+        local override = SUIStyle.getIcon(is_prev and "sui_navpager_prev" or "sui_navpager_next")
+        if override then icon_file = override end
+    end
 
     local vg = VerticalGroup():new{ align = "center" }
 
@@ -332,15 +477,7 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
     local iw, tw
 
     if mode == "icons" or mode == "both" then
-        -- dim is read at paintTo time — set directly, no paintTo override needed.
-        iw = ImageWidget():new{
-            file    = icon_file,
-            width   = M.ICON_SZ(),
-            height  = M.ICON_SZ(),
-            is_icon = true,
-            alpha   = true,
-            dim     = not enabled or nil,
-        }
+        iw = _makeColoredIcon(icon_file, M.ICON_SZ(), color)
         vg[#vg + 1] = iw
     end
 
@@ -366,25 +503,29 @@ function M.buildNavpagerArrowCell(is_prev, enabled, tab_w, mode)
         vg,
     }
 
-    -- Arrow cells never have an active indicator; pin a white (invisible)
+-- Arrow cells never have an active indicator; pin a white (invisible)
     -- LineWidget to the top for visual consistency with buildTabCell.
-    local indic = LineWidget():new{
-        dimen          = Geom():new{ w = tab_w, h = M.INDIC_H() },
-        background     = Blitbuffer.COLOR_WHITE,
-        overlap_offset = { 0, 0 },
-    }
-
+    -- (Omitted when simpleui_bars_transparent is true to reveal the wallpaper).
     local og = OverlapGroup():new{
         allow_mirroring = false,
         dimen           = Geom():new{ w = tab_w, h = M.BAR_H() },
         content,
-        indic,
     }
+
+    if not SUISettings:isTrue("simpleui_navbar_transparent") then
+        og[#og + 1] = LineWidget():new{
+            dimen          = Geom():new{ w = tab_w, h = M.INDIC_H() },
+            background     = _getBarBg() or Blitbuffer.COLOR_WHITE,
+            overlap_offset = { 0, 0 },
+        }
+    end
+
     -- Annotate with mutable-widget handles and current enabled state.
     -- updateNavpagerArrows reads these directly — O(1), no tree traversal.
     og._arrow_image   = iw
     og._arrow_text    = tw
     og._arrow_enabled = enabled
+    
     return og
 end
 
@@ -417,16 +558,37 @@ function M.updateNavpagerArrows(widget, has_prev, has_next)
     local function _apply(cc, enabled)
         if cc._arrow_enabled == enabled then return end
         cc._arrow_enabled = enabled
+        local color = enabled and _navpagerColorActive() or dimmed
         if cc._arrow_image then
-            cc._arrow_image.dim = not enabled or nil
+            cc._arrow_image._fg = color
         end
         if cc._arrow_text then
-            cc._arrow_text.fgcolor = enabled and _NAVPAGER_COLOR_ACTIVE or dimmed
+            cc._arrow_text.fgcolor = color
         end
     end
     _apply(prev_cc, has_prev)
     _apply(next_cc, has_next)
     return true
+end
+
+-- Shared helper to assemble the final FrameContainer for all bottom bar variants.
+local function _buildBarContainer(hg_args, is_navpager)
+    local fc = FrameContainer():new{
+        bordersize      = 0,
+        padding         = 0,
+        padding_left    = M.SIDE_M(),
+        padding_right   = M.SIDE_M(),
+        padding_bottom  = M.BOT_SP(),
+        margin          = 0,
+        background      = _getBarBg(),
+        HorizontalGroup():new(hg_args),
+    }
+
+    if is_navpager then
+        fc._navpager_has_arrows = true
+    end
+    
+    return fc
 end
 
 -- Assembles the full bottom bar FrameContainer from all tab cells.
@@ -452,15 +614,7 @@ function M.buildBarWidget(active_action_id, tab_config, num_tabs, mode)
         hg_args[#hg_args + 1] = M.buildTabCell(action_id, action_id == active_action_id, widths[i], mode)
     end
 
-    return FrameContainer():new{
-        bordersize    = 0,
-        padding       = 0,
-        padding_left  = side_m,
-        padding_right = side_m,
-        margin        = 0,
-        background    = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup():new(hg_args),
-    }
+    return _buildBarContainer(hg_args, false)
 end
 
 -- Navpager-mode bar with explicit has_prev / has_next flags.
@@ -496,18 +650,7 @@ function M.buildBarWidgetWithArrows(active_action_id, tab_config, mode, has_prev
     -- Next arrow
     hg_args[#hg_args + 1] = M.buildNavpagerArrowCell(false, has_next, widths[total_n], mode)
 
-    -- Tag so updateNavpagerArrows knows whether this bar has arrows.
-    local fc = FrameContainer():new{
-        bordersize    = 0,
-        padding       = 0,
-        padding_left  = side_m,
-        padding_right = side_m,
-        margin        = 0,
-        background    = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup():new(hg_args),
-    }
-    fc._navpager_has_arrows = true
-    return fc
+    return _buildBarContainer(hg_args, true)
 end
 
 -- Builds a bottom bar identical to buildBarWidget but with a keyboard-focus
@@ -515,48 +658,43 @@ end
 -- Used by the navbar keyboard navigation mode.
 -- Falls back to plain buildBarWidget when navpager is active or kbfocus_idx is nil.
 function M.buildBarWidgetWithKeyFocus(active_action_id, tab_config, kbfocus_idx, num_tabs, mode)
-	if not kbfocus_idx or Config.isNavpagerEnabled() then
-		return M.buildBarWidget(active_action_id, tab_config, num_tabs, mode)
-	end
-	num_tabs = num_tabs or Config.getNumTabs()
-	mode     = mode     or Config.getNavbarMode()
-	local screen_w = Screen:getWidth()
-	local side_m   = M.SIDE_M()
-	local usable_w = screen_w - side_m * 2
-	local widths   = M.getTabWidths(num_tabs, usable_w)
-	local hg_args  = { align = "top" }
-	local bw       = Screen:scaleBySize(3)
-	for i = 1, num_tabs do
-		local action_id = tab_config[i]
-		local cell = M.buildTabCell(action_id, action_id == active_action_id, widths[i], mode)
-		if i == kbfocus_idx then
-			local tw    = widths[i]
-			local tab_h = M.BAR_H()
-			cell = OverlapGroup():new{
-				dimen = Geom():new{ w = tw, h = tab_h },
-				cell,
-				LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK },
-				LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, tab_h - bw} },
-				LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK },
-				LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = Blitbuffer.COLOR_BLACK, overlap_offset = {tw - bw, 0} },
-			}
-		end
-		hg_args[#hg_args + 1] = cell
-	end
-	return FrameContainer():new{
-		bordersize    = 0,
-		padding       = 0,
-		padding_left  = side_m,
-		padding_right = side_m,
-		margin        = 0,
-		background    = Blitbuffer.COLOR_WHITE,
-		HorizontalGroup():new(hg_args),
-	}
+    if not kbfocus_idx or Config.isNavpagerEnabled() then
+        return M.buildBarWidget(active_action_id, tab_config, num_tabs, mode)
+    end
+    num_tabs = num_tabs or Config.getNumTabs()
+    mode     = mode     or Config.getNavbarMode()
+    local screen_w = Screen:getWidth()
+    local side_m   = M.SIDE_M()
+    local usable_w = screen_w - side_m * 2
+    local widths   = M.getTabWidths(num_tabs, usable_w)
+    local hg_args  = { align = "top" }
+    local bw       = Screen:scaleBySize(3)
+    
+    for i = 1, num_tabs do
+        local action_id = tab_config[i]
+        local cell = M.buildTabCell(action_id, action_id == active_action_id, widths[i], mode)
+        if i == kbfocus_idx then
+            local tw    = widths[i]
+            local tab_h = M.BAR_H()
+            local kbfg  = _getBarFg()
+            cell = OverlapGroup():new{
+                dimen = Geom():new{ w = tw, h = tab_h },
+                cell,
+                LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = kbfg },
+                LineWidget():new{ dimen = Geom():new{ w = tw, h = bw },    background = kbfg, overlap_offset = {0, tab_h - bw} },
+                LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = kbfg },
+                LineWidget():new{ dimen = Geom():new{ w = bw, h = tab_h }, background = kbfg, overlap_offset = {tw - bw, 0} },
+            }
+        end
+        hg_args[#hg_args + 1] = cell
+    end
+
+    return _buildBarContainer(hg_args, false)
 end
 
 -- Swaps the bar widget inside an already-wrapped widget, preserving overlap_offset.
 function M.replaceBar(widget, new_bar, tabs)
-    if not G_reader_settings:nilOrTrue("navbar_enabled") then
+    if not SUISettings:nilOrTrue("simpleui_bar_enabled") then
         if widget and tabs then widget._navbar_tabs = tabs end
         return
     end
@@ -567,7 +705,7 @@ function M.replaceBar(widget, new_bar, tabs)
         logger.err("simpleui: replaceBar called without _navbar_bar_idx — widget not initialised.")
         return
     end
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     if widget._navbar_bar_idx_topbar_on ~= nil and widget._navbar_bar_idx_topbar_on ~= topbar_on then
         logger.warn("simpleui: replaceBar — bar_idx out of sync, skipping.")
         return
@@ -595,7 +733,7 @@ function M.registerTouchZones(plugin, fm_self)
     local tabs_snap = Config.loadTabConfig()
     local screen_w  = Screen:getWidth()
     local screen_h  = Screen:getHeight()
-    local navbar_on = G_reader_settings:nilOrTrue("navbar_enabled")
+    local navbar_on = SUISettings:nilOrTrue("simpleui_bar_enabled")
     -- Full navbar strip height (separator + bar + bottom padding) — must match
     -- wrapWithNavbar / TOTAL_H so touch targets cover the entire bottom region.
     -- Using BAR_H() alone leaves the top separator and bottom safe-area bands
@@ -860,12 +998,12 @@ function M.registerTouchZones(plugin, fm_self)
                 end
             end
             -- Held anywhere else on the bar → open settings menu.
-			if not G_reader_settings:nilOrTrue("navbar_bottombar_settings_on_hold") then
+			if not SUISettings:nilOrTrue("simpleui_bar_settings_on_hold") then
 				return true
 			end
 			if not plugin._makeNavbarMenu then plugin:addToMainMenu({}) end
             local UI_mod     = require("sui_core")
-            local topbar_on  = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+            local topbar_on  = SUISettings:nilOrTrue("simpleui_topbar_enabled")
             local top_offset = topbar_on and require("sui_topbar").TOTAL_TOP_H() or 0
             UI_mod.showSettingsMenu(_("Bottom Bar"), plugin._makeNavbarMenu,
                 top_offset, screen_h, M.TOTAL_H())
@@ -896,16 +1034,10 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.onTabTap(plugin, action_id, fm_self)
-    -- Action-only tabs: open their dialog/action without changing the active tab.
-    -- The indicator stays on whatever tab was active before the tap.
-    -- _ACTION_ONLY is the single authoritative list — same one used by
-    -- setActiveAndRefreshFM so the two sites can never drift.
+    -- Action-only tabs: fire their action without changing the active tab.
+    -- Delegated entirely to QA.execute — no action-specific knowledge needed here.
     if _ACTION_ONLY[action_id] then
-        if     action_id == "power"            then M.showPowerDialog(plugin)
-        elseif action_id == "wifi_toggle"      then M.doWifiToggle(plugin)
-        elseif action_id == "frontlight"       then M.showFrontlightDialog()
-        elseif action_id == "bookmark_browser" then M.showBookmarkBrowserSourceDialog(plugin.ui)
-        end
+        _QA().execute(action_id, { plugin = plugin, fm = fm_self })
         return
     end
 
@@ -971,21 +1103,10 @@ end
 M.setActiveAndRefreshFM = setActiveAndRefreshFM
 
 -- ---------------------------------------------------------------------------
--- classify_action: returns true when the action is "in-place" (executes
--- without opening a new fullscreen view) and must NOT close the homescreen.
--- Returns false for navigation actions that open a different screen.
+-- _isInPlaceAction: fully delegated to QA.isInPlace — single authority.
 -- ---------------------------------------------------------------------------
 local function _isInPlaceAction(action_id)
-    if action_id == "wifi_toggle"      then return true end
-    if action_id == "frontlight"       then return true end
-    if action_id == "power"            then return true end
-    if action_id == "stats_calendar"   then return true end
-    if action_id == "bookmark_browser" then return true end
-    if action_id:match("^custom_qa_%d+$") then
-        -- Delegate to sui_quickactions — single source of truth for QA config.
-        return _QA().isInPlaceCustomQA(action_id)
-    end
-    return false
+    return _QA().isInPlace(action_id)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1119,18 +1240,14 @@ local function _executeInPlace(action_id, plugin, fm)
     local stack   = UI_mod.getWindowStack()
     local hs_idx  = nil
 
-    -- bookmark_browser and power open asynchronous widgets (ButtonDialog →
-    -- BookmarkBrowser, or PowerDialog) that outlive this function call.
-    -- Sinking the HS now and restoring it immediately after would restore the
-    -- stack before the user interacts with those widgets, breaking the paint
-    -- order when they close (FM appears instead of HS, or BookmarkBrowser
-    -- closes back to HS instead of staying open). Skip the sink/restore for
-    -- these actions — their dialogs float on top of the HS naturally.
+    -- bookmark_browser and power open asynchronous widgets that outlive this
+    -- function call. Skip the HS sink/restore for those — their dialogs float
+    -- on top of the HS naturally. All other synchronous in-place actions (wifi,
+    -- frontlight, stats, dispatcher, plugin) need the sink so FM plugins receive
+    -- events. QA.isInPlace already ensures only those reach this path.
     local needs_stack_sink = action_id ~= "bookmark_browser"
                           and action_id ~= "power"
 
-    -- Sink the HS to position 1 so FM plugins receive events normally.
-    -- Only needed for synchronous in-place actions (wifi, frontlight, etc.).
     if needs_stack_sink and hs_inst then
         for i, entry in ipairs(stack) do
             if entry.widget == hs_inst then hs_idx = i; break end
@@ -1141,41 +1258,9 @@ local function _executeInPlace(action_id, plugin, fm)
         end
     end
 
-    if action_id == "wifi_toggle" then
-        M.doWifiToggle(plugin)
+    -- Fully delegated to QA.execute — no action-specific knowledge here.
+    _QA().execute(action_id, { plugin = plugin, fm = fm, show_unavailable = showUnavailable })
 
-    elseif action_id == "frontlight" then
-        M.showFrontlightDialog()
-
-    elseif action_id == "power" then
-        M.showPowerDialog(plugin)
-
-    elseif action_id == "stats_calendar" then
-        local ok, err = pcall(function()
-            UIManager:broadcastEvent(require("ui/event"):new("ShowCalendarView"))
-        end)
-        if not ok then showUnavailable(_("Statistics plugin not available.")) end
-
-    elseif action_id == "bookmark_browser" then
-        -- Show the source-selection ButtonDialog floating above the homescreen.
-        -- The HS is not sunk (see needs_stack_sink above) so the dialog appears
-        -- on top of the HS and BookmarkBrowser:show() also opens above the HS.
-        -- When the user cancels, closing the dialog reveals the HS correctly.
-        local _bb_ui = fm
-        local ok_rui, ReaderUI = pcall(require, "apps/reader/readerui")
-        if ok_rui and ReaderUI and ReaderUI.instance then
-            _bb_ui = ReaderUI.instance
-        end
-        M.showBookmarkBrowserSourceDialog(_bb_ui)
-
-    elseif action_id:match("^custom_qa_%d+$") then
-        -- Delegate to sui_quickactions — single source of truth for QA execution.
-        _QA().executeCustomQA(action_id, fm, showUnavailable)
-    end
-
-    -- Restore HS to its original position and repaint to reflect any changes
-    -- from the action (e.g. nightmode inversion, frontlight level update).
-    -- Only restore when we actually sank the HS earlier.
     if needs_stack_sink and hs_inst and hs_idx and hs_idx > 1 then
         for i, entry in ipairs(stack) do
             if entry.widget == hs_inst then
@@ -1256,21 +1341,16 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
             home = Device.home_dir
         end
         if not home then return false end
-        -- If we are inside a virtual series folder, exit it first.
+        -- If we are inside a virtual series folder, exit it first via the
+        -- public API (avoids direct access to internal series-view state).
         -- Virtual folders keep fc.path pointing at the real parent directory,
         -- so the fc.path == home check below would incorrectly treat a virtual
         -- folder whose parent is the home dir as "already at home" and call
         -- refreshPath(), which re-enters the virtual folder instead of closing it.
-        local in_virtual = fc.item_table and fc.item_table._sg_is_series_view
+        local ok_fc_mod, FC_mod = pcall(require, "sui_foldercovers")
+        local in_virtual = ok_fc_mod and FC_mod.isInSeriesView and FC_mod.isInSeriesView(fc)
         if in_virtual then
-            -- Clear the virtual-folder flag so changeToPath (and the patched
-            -- refreshPath) won't try to restore the series view.
-            -- The patched changeToPath in sui_foldercovers will take the
-            -- "else" branch (normal filesystem navigation) and clear
-            -- _sg_current automatically, since _sg_is_series_view is now false.
-            fc.item_table._sg_is_series_view = false
-            -- Clear the back-button flag used by the title bar.
-            fc._simpleui_has_go_up = false
+            FC_mod.exitSeriesView(fc)
         end
         if fc.path == home and not in_virtual then
             -- Already at home (and not in a virtual folder). Always go to
@@ -1367,143 +1447,16 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         UIManager:setDirty(fm, "ui")
     end
 
-    if action_id == "home" then
-        local live_fm = plugin.ui or fm
-        if not _goHome(live_fm) then
-            -- No valid home directory found — repaint whatever is showing.
-            if live_fm.file_chooser then
-                UIManager:setDirty(live_fm, "partial")
-            end
-        end
-
-    elseif action_id == "collections" then
-        if fm.collections then fm.collections:onShowCollList()
-        else showUnavailable(_("Collections not available.")) end
-
-    elseif action_id == "history" then
-        local ok = pcall(function() fm.history:onShowHist() end)
-        if not ok then showUnavailable(_("History not available.")) end
-
-    elseif action_id == "homescreen" then
-        local ok_hs, HS = pcall(require, "sui_homescreen")
-        if ok_hs and HS and type(HS.show) == "function" then
-            -- QA taps from the homescreen must NOT go through _onTabTap:
-            -- _onTabTap calls replaceBar(fm) which schedules a full FM repaint,
-            -- and that repaint fires after the homescreen closes and interferes
-            -- with dispatcher_action widgets that try to open on top of the FM.
-            -- Call navigate directly with fm as the target — no bar replacement.
-            -- plugin.ui and loadTabConfig() are resolved at tap time, not at open
-            -- time, so FM reinits or tab config changes while the HS is open are
-            -- always picked up correctly.
-            --
-            -- Page-restore logic:
-            --   • If _current_page is set and > 1, the HS was closed because the
-            --     user navigated into a collection or folder from a module (the
-            --     patchUIManagerShow close path sets _navbar_closing_intentionally
-            --     so onCloseWidget preserves the page). In this case restore the
-            --     saved page so the user lands back on the same HS page.
-            --   • If already_active is true the user tapped the home tab while
-            --     already on the homescreen (i.e. they are on page 2+ of the HS
-            --     itself) → go to page 1 as a "go home" gesture.
-            --   • Otherwise (fresh open from another tab, no saved page) → page 1.
-            local saved_page = HS._current_page or 1
-            logger.dbg("simpleui navigate: homescreen saved_page=", saved_page, "already_active=", already_active)
-            if already_active then
-                -- User is on a non-home page of the HS and tapped the tab again → page 1.
-                HS._current_page = 1
-            elseif saved_page > 1 then
-                -- Returning from a collection/folder opened via a module → restore page.
-                -- Leave HS._current_page as-is; the widget will pick it up in show().
-            else
-                HS._current_page = 1
-            end
-            local on_qa_tap = function(aid)
-                plugin:_navigate(aid, plugin.ui, Config.loadTabConfig(), false)
-            end
-            local on_goal_tap = plugin._goalTapCallback or nil
-            HS.show(on_qa_tap, on_goal_tap)
-        else
-            showUnavailable(_("Homescreen not available."))
-        end
-
-    elseif action_id == "favorites" then
-        if fm.collections then fm.collections:onShowColl()
-        else showUnavailable(_("Favorites not available.")) end
-
-    elseif action_id == "bookmark_browser" then
-        -- Show the source-selection ButtonDialog floating on top of whatever
-        -- is currently visible. Delegates to the shared helper.
-        local _bb_ui = fm
-        local ok_rui, ReaderUI = pcall(require, "apps/reader/readerui")
-        if ok_rui and ReaderUI and ReaderUI.instance then
-            _bb_ui = ReaderUI.instance
-        end
-        M.showBookmarkBrowserSourceDialog(_bb_ui)
-
-    elseif action_id == "continue" then
-        local RH = package.loaded["readhistory"] or require("readhistory")
-        local fp = RH and RH.hist and RH.hist[1] and RH.hist[1].file
-        if fp then
-            -- ReaderUI is always present — use package.loaded fast path to
-            -- avoid pcall overhead. require() itself is cached after first load.
-            local ReaderUI = package.loaded["apps/reader/readerui"]
-                or require("apps/reader/readerui")
-            ReaderUI:showReader(fp)
-        else
-            showUnavailable(_("No book in history."))
-        end
-
-    elseif action_id == "stats_calendar" then
-        -- broadcastEvent reaches all widgets on the stack (including fm.statistics
-        -- which is a registered FM plugin) regardless of which widget is on top.
-        -- This works from the bottom bar, from QA in the Homescreen, and from
-        -- any injected fullscreen widget. Using broadcastEvent directly avoids
-        -- the Dispatcher's context checks which can silently no-op when the
-        -- Homescreen is the top widget.
-        local ok, err = pcall(function()
-            UIManager:broadcastEvent(require("ui/event"):new("ShowCalendarView"))
-        end)
-        if not ok then showUnavailable(_("Statistics plugin not available.")) end
-        return
-
-    elseif action_id == "wifi_toggle" then
-        M.doWifiToggle(plugin); return
-
-    elseif action_id == "browse_authors" or action_id == "browse_series"
-            or action_id == "browse_tags" then
-        local bm_mode = (action_id == "browse_authors") and "author"
-                     or (action_id == "browse_series")  and "series"
-                     or "tags"
-        local ok_bm, BM = pcall(_BM)
-        if not (ok_bm and BM) then
-            showUnavailable(_("Browse by Authors/Series/Tags not available."))
-            return
-        end
-        if not BM.isEnabled() then
-            showUnavailable(_("Enable 'Browse by Author / Series / Tags' in the library menu first."))
-            return
-        end
-        local live_fm = plugin.ui or fm
-        local fc = live_fm and live_fm.file_chooser
-        if not fc then return end
-        if already_active then
-            -- Re-tap: return to the virtual root (top of Authors/Series list,
-            -- page 1, up button hidden) without leaving the virtual tree.
-            BM.navigateToRoot(fc, live_fm, bm_mode)
-        else
-            BM.navigateTo(live_fm, bm_mode)
-        end
-        return
-
-    else
-        if action_id:match("^custom_qa_%d+$") then
-            -- dispatcher_action and plugin_method are handled by _executeInPlace
-            -- when the HS is open (caught by _isInPlaceAction above). This branch
-            -- only runs when the HS is already closed (e.g. tap from the FM bar).
-            -- Delegate to sui_quickactions — single source of truth for QA execution.
-            _QA().executeCustomQA(action_id, fm, showUnavailable)
-        end
-    end
+    -- Fully delegated to QA.execute.
+    -- ctx carries everything the descriptor closures need:
+    --   plugin, fm, show_unavailable, already_active.
+    -- The homescreen descriptor handles its own page-restore logic internally.
+    _QA().execute(action_id, {
+        plugin         = plugin,
+        fm             = fm,
+        show_unavailable = showUnavailable,
+        already_active = already_active,
+    })
 end
 
 -- ---------------------------------------------------------------------------
@@ -1611,7 +1564,7 @@ function M.rebuildAllNavbars(plugin)
     local tabs      = Config.loadTabConfig()
     local num_tabs  = Config.getNumTabs()
     local mode      = Config.getNavbarMode()
-    local topbar_on = G_reader_settings:nilOrTrue("navbar_topbar_enabled")
+    local topbar_on = SUISettings:nilOrTrue("simpleui_topbar_enabled")
     local stack     = UI.getWindowStack()  -- read once for the entire operation
 
     -- Build topbar once and reuse across all widgets — it is identical for all.
@@ -1727,6 +1680,11 @@ function M.rewrapAllWidgets(plugin)
                 end)
             end
         end
+
+            local ok_p, Patches = pcall(require, "sui_patches")
+            if ok_p and Patches and Patches.injectWallpaperIntoFullscreenWidget then
+                pcall(Patches.injectWallpaperIntoFullscreenWidget, w)
+            end
 
         plugin:_registerTouchZones(w)
         -- Resize the pagination chevrons to match Simple UI settings.

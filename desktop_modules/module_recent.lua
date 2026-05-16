@@ -33,6 +33,7 @@ end
 
 local Config       = require("sui_config")
 local UI           = require("sui_core")
+local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local PAD2         = UI.PAD2
 local MOD_GAP      = UI.MOD_GAP
@@ -47,16 +48,16 @@ local SETTING_OVERLAY       = "recent_show_overlay"    -- pfx .. this; default O
 local SETTING_SHOW_FINISHED = "recent_show_finished"   -- pfx .. this; default OFF
 
 local function showProgress(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_PROGRESS) ~= false
+    return SUISettings:readSetting(pfx .. SETTING_PROGRESS) ~= false
 end
 local function showText(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_TEXT) ~= false
+    return SUISettings:readSetting(pfx .. SETTING_TEXT) ~= false
 end
 local function showOverlay(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_OVERLAY) == true
+    return SUISettings:readSetting(pfx .. SETTING_OVERLAY) == true
 end
 local function showFinished(pfx)
-    return G_reader_settings:readSetting(pfx .. SETTING_SHOW_FINISHED) == true
+    return SUISettings:readSetting(pfx .. SETTING_SHOW_FINISHED) == true
 end
 
 
@@ -67,6 +68,8 @@ M.name        = _("Recent Books")
 M.label       = _("Recent Books")
 M.enabled_key = "recent"
 M.default_on  = false
+M.has_covers  = true   -- activates e-ink dithering and cover poll
+M.is_book_mod = true   -- suppresses empty-state when active
 
 -- Called by teardown (via _PLUGIN_MODULES flush) to drop the cached reference
 -- to module_books_shared so a hot update picks up fresh code on next load.
@@ -82,6 +85,13 @@ function M.build(w, ctx)
     local lbl_scale   = Config.getItemLabelScale("recent", ctx.pfx)
     local D           = SH.getDims(scale, thumb_scale)
     local pct_fs = math.max(8, math.floor(_BASE_RB_PCT_FS * scale * lbl_scale))
+
+    -- Theme colors
+    local ok_ss, SUIStyle  = pcall(require, "sui_style")
+    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
+    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _CLR_DARK_EFF    = _theme_fg or Blitbuffer.COLOR_BLACK
+    local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
 
     local cols    = math.min(#ctx.recent_fps, 5)
     local cw      = D.RECENT_W
@@ -126,11 +136,11 @@ function M.build(w, ctx)
                 radius      = badge_r,
                 CenterContainer:new{
                     dimen = Geom:new{ w = badge_d, h = badge_d },
-                    TextWidget:new{
+                    UI.makeColoredText{
                         text    = string.format(_("%d%%"), pct_int),
                         face    = pct_face,
                         bold    = true,
-                        fgcolor = Blitbuffer.COLOR_BLACK,
+                        fgcolor = _CLR_DARK_EFF,
                     },
                 },
             }
@@ -160,11 +170,11 @@ function M.build(w, ctx)
 
         if draw_text then
             cell[#cell+1] = SH.vspan(draw_progress and D.RB_GAP2 or D.RB_GAP1, ctx.vspan_pool)
-            cell[#cell+1] = TextWidget:new{
+            cell[#cell+1] = UI.makeColoredText{
                 text      = string.format(_("%d%% Read"), math.floor((bd.percent or 0) * 100 + 0.5)),
                 face      = pct_face,
                 bold      = true,
-                fgcolor   = CLR_TEXT_SUB,
+                fgcolor   = CLR_TEXT_SUB_EFF,
                 width     = cw,
                 alignment = "center",
             }
@@ -204,10 +214,10 @@ function M.build(w, ctx)
             cell_widget = OverlapGroup:new{
                 dimen = Geom:new{ w = cw, h = cell_h },
                 tappable,
-                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = Blitbuffer.COLOR_BLACK },
-                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = Blitbuffer.COLOR_BLACK, overlap_offset = {0, cell_h - bw} },
-                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = Blitbuffer.COLOR_BLACK },
-                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = Blitbuffer.COLOR_BLACK, overlap_offset = {cw - bw, 0} },
+                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = _CLR_DARK_EFF },
+                LineWidget:new{ dimen = Geom:new{ w = cw, h = bw },    background = _CLR_DARK_EFF, overlap_offset = {0, cell_h - bw} },
+                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = _CLR_DARK_EFF },
+                LineWidget:new{ dimen = Geom:new{ w = bw, h = cell_h }, background = _CLR_DARK_EFF, overlap_offset = {cw - bw, 0} },
             }
         end
 
@@ -316,7 +326,7 @@ function M.getMenuItems(ctx_menu)
             enabled_func   = function() return not showOverlay(pfx) end,
             keep_menu_open = true,
             callback       = function()
-                G_reader_settings:saveSetting(pfx .. SETTING_PROGRESS, not showProgress(pfx))
+                SUISettings:saveSetting(pfx .. SETTING_PROGRESS, not showProgress(pfx))
                 refresh()
             end,
         },
@@ -326,7 +336,7 @@ function M.getMenuItems(ctx_menu)
             enabled_func   = function() return not showOverlay(pfx) end,
             keep_menu_open = true,
             callback       = function()
-                G_reader_settings:saveSetting(pfx .. SETTING_TEXT, not showText(pfx))
+                SUISettings:saveSetting(pfx .. SETTING_TEXT, not showText(pfx))
                 refresh()
             end,
         },
@@ -335,7 +345,7 @@ function M.getMenuItems(ctx_menu)
             checked_func   = function() return showOverlay(pfx) end,
             keep_menu_open = true,
             callback       = function()
-                G_reader_settings:saveSetting(pfx .. SETTING_OVERLAY, not showOverlay(pfx))
+                SUISettings:saveSetting(pfx .. SETTING_OVERLAY, not showOverlay(pfx))
                 refresh()
             end,
         },
@@ -344,7 +354,7 @@ function M.getMenuItems(ctx_menu)
             checked_func   = function() return showFinished(pfx) end,
             keep_menu_open = true,
             callback       = function()
-                G_reader_settings:saveSetting(pfx .. SETTING_SHOW_FINISHED, not showFinished(pfx))
+                SUISettings:saveSetting(pfx .. SETTING_SHOW_FINISHED, not showFinished(pfx))
                 refresh()
             end,
         },

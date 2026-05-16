@@ -2,7 +2,8 @@
 -- Plugin-wide constants, action catalogue, tab/topbar configuration,
 -- custom Quick Actions and settings migration.
 
-local G_reader_settings = G_reader_settings
+local G_reader_settings = G_reader_settings  -- KOReader core settings (kept for system keys)
+local SUISettings       = require("sui_store")
 local logger            = require("logger")
 local _ = require("sui_i18n").translate
 
@@ -124,7 +125,7 @@ M.ICON = {
 M.CUSTOM_ICON            = M.ICON.custom
 M.CUSTOM_PLUGIN_ICON     = M.ICON.plugin
 M.CUSTOM_DISPATCHER_ICON = M.ICON.ko_settings
-M.DEFAULT_NUM_TABS       = 4
+M.DEFAULT_NUM_TABS       = 5
 M.MAX_TABS               = 6        -- standard mode limit
 M.MAX_TABS_NAVPAGER      = 4        -- navpager mode limit
 M.MAX_LABEL_LEN          = 20
@@ -132,7 +133,7 @@ M.MAX_CUSTOM_QA          = 24
 -- When the navpager is enabled the bar always shows exactly this many centre tabs.
 M.NAVPAGER_CENTER_TABS   = 4
 
-M.DEFAULT_TABS = { "home", "collections", "history", "continue", "favorites" }
+M.DEFAULT_TABS = { "home", "wifi_toggle", "homescreen", "history", "power" }
 
 -- Fallback tab IDs used when a duplicate 'home' is detected.
 M.NON_HOME_DEFAULTS = {}
@@ -198,7 +199,7 @@ local TOPBAR_CUSTOM_TEXT_MAX = 32
 M.TOPBAR_CUSTOM_TEXT_MAX = TOPBAR_CUSTOM_TEXT_MAX
 
 function M.getTopbarCustomText()
-    return G_reader_settings:readSetting("navbar_topbar_custom_text") or ""
+    return SUISettings:get("simpleui_topbar_custom_text") or ""
 end
 
 function M.setTopbarCustomText(s)
@@ -217,12 +218,12 @@ function M.setTopbarCustomText(s)
     else
         s = ""
     end
-    G_reader_settings:saveSetting("navbar_topbar_custom_text", s)
+    SUISettings:set("simpleui_topbar_custom_text", s)
 end
 
 -- Returns the normalised topbar config, migrating legacy formats when needed.
 function M.getTopbarConfig()
-    local raw = G_reader_settings:readSetting("navbar_topbar_config")
+    local raw = SUISettings:get("simpleui_topbar_config")
     local cfg = { side = {}, order_left = {}, order_right = {}, order_center = {}, show = {}, order = {} }
     if type(raw) == "table" then
         if type(raw.side) == "table" then
@@ -278,7 +279,7 @@ function M.getTopbarConfig()
 end
 
 function M.saveTopbarConfig(cfg)
-    G_reader_settings:saveSetting("navbar_topbar_config", cfg)
+    SUISettings:set("simpleui_topbar_config", cfg)
     M.invalidateTopbarConfigCache()
     -- Also invalidate topbar.lua's own local config cache so that
     -- buildTopbarWidget() uses the new config immediately on the next rebuild.
@@ -323,7 +324,7 @@ end
 
 function M.loadTabConfig()
     if _tabs_cache then return _tabs_cache end
-    local cfg = G_reader_settings:readSetting("navbar_tabs")
+    local cfg = SUISettings:get("simpleui_bar_tabs")
     local result = {}
     local min_tabs = M.isNavpagerEnabled() and 1 or 2
     if type(cfg) == "table" and #cfg >= min_tabs and #cfg <= M.effectiveMaxTabs() then
@@ -347,7 +348,7 @@ end
 
 function M.saveTabConfig(tabs)
     _tabs_cache = nil
-    G_reader_settings:saveSetting("navbar_tabs", tabs)
+    SUISettings:set("simpleui_bar_tabs", tabs)
 end
 
 function M.getNumTabs()
@@ -362,14 +363,14 @@ local _navbar_mode_cache = nil
 
 function M.getNavbarMode()
     if not _navbar_mode_cache then
-        _navbar_mode_cache = G_reader_settings:readSetting("navbar_mode") or "both"
+        _navbar_mode_cache = SUISettings:get("simpleui_bar_mode") or "both"
     end
     return _navbar_mode_cache
 end
 
 function M.saveNavbarMode(mode)
     _navbar_mode_cache = nil
-    G_reader_settings:saveSetting("navbar_mode", mode)
+    SUISettings:set("simpleui_bar_mode", mode)
 end
 
 function M._ensureHomePresent(tabs)
@@ -416,10 +417,10 @@ M.wifi_broadcast_self = nil
 
 -- Hide the Wi-Fi icon when Wi-Fi is off (instead of showing the off icon).
 function M.getWifiHideWhenOff()
-    return G_reader_settings:isTrue("navbar_topbar_wifi_hide_when_off")
+    return SUISettings:isTrue("simpleui_topbar_wifi_hide_when_off")
 end
 function M.setWifiHideWhenOff(v)
-    G_reader_settings:saveSetting("navbar_topbar_wifi_hide_when_off", v)
+    SUISettings:set("simpleui_topbar_wifi_hide_when_off", v)
 end
 
 function M.homeLabel()
@@ -458,15 +459,19 @@ local function deviceHasWifi()
 end
 
 function M.wifiIcon()
+    local QA = package.loaded["sui_quickactions"] or require("sui_quickactions")
+    local icon_on  = QA.getDefaultActionIcon("wifi_toggle") or M.ICON.ko_wifi_on
+    local icon_off = QA.getDefaultActionIcon("wifi_toggle_off") or M.ICON.ko_wifi_off
+
     if M.wifi_optimistic ~= nil then
-        return M.wifi_optimistic and M.ICON.ko_wifi_on or M.ICON.ko_wifi_off
+        return M.wifi_optimistic and icon_on or icon_off
     end
-    if not deviceHasWifi() then return M.ICON.ko_wifi_off end
+    if not deviceHasWifi() then return icon_off end
     local NetworkMgr = getNetworkMgr()
-    if not NetworkMgr then return M.ICON.ko_wifi_off end
+    if not NetworkMgr then return icon_off end
     local ok_state, wifi_on = pcall(function() return NetworkMgr:isWifiOn() end)
-    if ok_state and wifi_on then return M.ICON.ko_wifi_on end
-    return M.ICON.ko_wifi_off
+    if ok_state and wifi_on then return icon_on end
+    return icon_off
 end
 
 -- Mutable sentinel reused on every bar rebuild for wifi_toggle.
@@ -564,7 +569,7 @@ function M.isNerdIcon(icon_value)
 end
 
 function M.migrateOldCustomSlots()
-    if G_reader_settings:readSetting("navbar_custom_qa_migrated_v1") then return end
+    if SUISettings:get("simpleui_cqa_migrated_v1") then return end
     local id_map  = {}
     local qa_list = M.getCustomQAList()
     local qa_set  = {}
@@ -572,7 +577,7 @@ function M.migrateOldCustomSlots()
 
     for slot = 1, 4 do
         local old_id = "custom_" .. slot
-        local cfg    = G_reader_settings:readSetting("navbar_custom_" .. slot)
+        local cfg    = SUISettings:get("simpleui_custom_" .. slot)
         if type(cfg) == "table" and (cfg.path or cfg.collection) then
             local new_id = M.nextCustomQAId()
             M.saveCustomQAConfig(new_id, cfg.label or (_("Custom") .. " " .. slot), cfg.path, cfg.collection)
@@ -587,7 +592,7 @@ function M.migrateOldCustomSlots()
 
     M.saveCustomQAList(qa_list)
 
-    local tabs = G_reader_settings:readSetting("navbar_tabs")
+    local tabs = SUISettings:get("simpleui_bar_tabs")
     if type(tabs) == "table" then
         -- Build a new table instead of mutating while iterating (B6).
         local new_tabs, changed = {}, false
@@ -600,12 +605,12 @@ function M.migrateOldCustomSlots()
                 new_tabs[#new_tabs + 1] = id
             end
         end
-        if changed then G_reader_settings:saveSetting("navbar_tabs", new_tabs) end
+        if changed then SUISettings:set("simpleui_bar_tabs", new_tabs) end
     end
 
     for slot = 1, 3 do
-        local key = "navbar_homescreen_quick_actions_" .. slot .. "_items"
-        local dqa = G_reader_settings:readSetting(key)
+        local key = "simpleui_hs_qa_" .. slot .. "_items"
+        local dqa = SUISettings:get(key)
         if type(dqa) == "table" then
             local changed = false
             local new_dqa = {}
@@ -618,15 +623,15 @@ function M.migrateOldCustomSlots()
                     changed = true
                 end
             end
-            if changed then G_reader_settings:saveSetting(key, new_dqa) end
+            if changed then SUISettings:set(key, new_dqa) end
         end
     end
 
-    G_reader_settings:saveSetting("navbar_custom_qa_migrated_v1", true)
+    SUISettings:set("simpleui_cqa_migrated_v1", true)
 
-    local legacy_enabled = G_reader_settings:readSetting("navbar_enabled")
-    if legacy_enabled ~= nil and G_reader_settings:readSetting("simpleui_enabled") == nil then
-        G_reader_settings:saveSetting("simpleui_enabled", legacy_enabled)
+    local legacy_enabled = SUISettings:get("simpleui_bar_enabled")
+    if legacy_enabled ~= nil and SUISettings:get("simpleui_enabled") == nil then
+        SUISettings:set("simpleui_enabled", legacy_enabled)
     end
 end
 
@@ -636,14 +641,14 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.applyFirstRunDefaults()
-    if not G_reader_settings:readSetting("simpleui_defaults_v1") then
+    if not SUISettings:get("simpleui_defaults_v1") then
         -- Bottom bar
-        G_reader_settings:saveSetting("navbar_enabled",        true)
-        G_reader_settings:saveSetting("navbar_topbar_enabled", true)
-        G_reader_settings:saveSetting("navbar_mode",           "both")
-        G_reader_settings:saveSetting("navbar_bar_size",       "default")
-        G_reader_settings:saveSetting("navbar_tabs",
-            { "home", "homescreen", "history", "continue", "power" })
+        SUISettings:set("simpleui_bar_enabled",        true)
+        SUISettings:set("simpleui_topbar_enabled", true)
+        SUISettings:set("simpleui_bar_mode",           "both")
+        SUISettings:set("simpleui_bar_size",       "default")
+        SUISettings:set("simpleui_bar_tabs",
+            { "home", "wifi_toggle", "homescreen", "history", "power" })
 
         -- Top bar: clock left, battery + wifi right; rest hidden
         M.saveTopbarConfig({
@@ -652,35 +657,59 @@ function M.applyFirstRunDefaults()
             order_right = { "wifi", "battery" },
         })
 
-        -- Homescreen modules: header + currently + recent on; everything else off
-        local PFX = "navbar_homescreen_"
-        G_reader_settings:saveSetting(PFX .. "header_enabled",  true)
-        G_reader_settings:saveSetting(PFX .. "header",          "clock_date")
-        G_reader_settings:saveSetting(PFX .. "currently",       true)
-        G_reader_settings:saveSetting(PFX .. "recent",          true)
-        G_reader_settings:saveSetting(PFX .. "collections",     false)
-        G_reader_settings:saveSetting(PFX .. "reading_goals",   false)
-        G_reader_settings:saveSetting(PFX .. "reading_stats_enabled",          false)
-        G_reader_settings:saveSetting(PFX .. "quick_actions_1_enabled",        true)
-        G_reader_settings:saveSetting(PFX .. "quick_actions_1_items",          { "bookmark_browser" })
-        G_reader_settings:saveSetting(PFX .. "quick_actions_2_enabled",        false)
-        G_reader_settings:saveSetting(PFX .. "quick_actions_3_enabled",        false)
+        -- Homescreen modules: quote + currently + recent on; everything else off
+        local PFX = "simpleui_hs_"
+        -- Quote of the Day on
+        SUISettings:set(PFX .. "quote_enabled",          true)
+        -- Currently Reading on
+        SUISettings:set(PFX .. "currently",              true)
+        -- Recent Books on
+        SUISettings:set(PFX .. "recent",                 true)
+        -- All other modules explicitly off
+        SUISettings:set(PFX .. "clock_enabled",          false)
+        SUISettings:set(PFX .. "clock_date",             false)
+        SUISettings:set(PFX .. "clock_battery",          false)
+        SUISettings:set(PFX .. "coverdeck",              false)
+        SUISettings:set(PFX .. "new_books",              false)
+        SUISettings:set(PFX .. "tbr",                    false)
+        SUISettings:set(PFX .. "collections",            false)
+        SUISettings:set(PFX .. "reading_goals",          false)
+        SUISettings:set(PFX .. "reading_stats_enabled",  false)
+        SUISettings:set(PFX .. "quick_actions_1_enabled", false)
+        SUISettings:set(PFX .. "quick_actions_2_enabled", false)
+        SUISettings:set(PFX .. "quick_actions_3_enabled", false)
+        SUISettings:set(PFX .. "action_list_enabled",    false)
+        -- Module order: quote first, then currently, then recent
+        SUISettings:set(PFX .. "module_order",
+            { "quote", "currently", "recent", "clock", "coverdeck",
+              "new_books", "tbr", "collections", "reading_goals",
+              "reading_stats", "quick_actions_1", "quick_actions_2",
+              "quick_actions_3", "action_list" })
 
         -- Fix 6: write currently_show_* defaults explicitly so behaviour does not
         -- silently depend on nilOrTrue returning true for absent keys.
         -- Title, author and progress bar on by default; stats off except percent.
-        G_reader_settings:saveSetting(PFX .. "currently_show_title",          true)
-        G_reader_settings:saveSetting(PFX .. "currently_show_author",         true)
-        G_reader_settings:saveSetting(PFX .. "currently_show_progress",       true)
-        G_reader_settings:saveSetting(PFX .. "currently_show_percent",        true)
-        G_reader_settings:saveSetting(PFX .. "currently_show_book_days",      false)
-        G_reader_settings:saveSetting(PFX .. "currently_show_book_time",      false)
-        G_reader_settings:saveSetting(PFX .. "currently_show_book_remaining", false)
+        SUISettings:set(PFX .. "currently_show_title",          true)
+        SUISettings:set(PFX .. "currently_show_author",         true)
+        SUISettings:set(PFX .. "currently_show_progress",       true)
+        SUISettings:set(PFX .. "currently_show_percent",        true)
+        SUISettings:set(PFX .. "currently_show_book_days",      false)
+        SUISettings:set(PFX .. "currently_show_book_time",      false)
+        SUISettings:set(PFX .. "currently_show_book_remaining", false)
 
-        -- General
-        G_reader_settings:saveSetting("start_with", "filemanager")
+        -- Folder covers: enabled, auto mode (single below 4 books, quad above)
+        SUISettings:set("simpleui_fc_enabled",      true)
+        SUISettings:set("simpleui_fc_folder_style", "auto")
+        SUISettings:set("simpleui_fc_cover_mode",   "2_3")
+        SUISettings:set("simpleui_fc_subfolder_cover", true)
 
-        G_reader_settings:saveSetting("simpleui_defaults_v1", true)
+        -- Browse by Author / Series / Tags: enabled by default
+        SUISettings:set("simpleui_browsemeta_enabled", true)
+
+        -- General: start with SimpleUI homescreen
+        G_reader_settings:saveSetting("start_with", "homescreen_simpleui")
+
+        SUISettings:set("simpleui_defaults_v1", true)
     end
 
     -- ---------------------------------------------------------------------------
@@ -688,16 +717,16 @@ function M.applyFirstRunDefaults()
     -- Runs once on existing installs that already have simpleui_defaults_v1 set.
     -- Guard key: "simpleui_defaults_v2". Safe to call on every init.
     -- ---------------------------------------------------------------------------
-    if not G_reader_settings:readSetting("simpleui_defaults_v2") then
+    if not SUISettings:get("simpleui_defaults_v2") then
         -- Visibility: search button on
-        G_reader_settings:saveSetting("simpleui_tb_item_search_button", true)
+        SUISettings:set("simpleui_tb_item_search_button", true)
         -- FM layout: up_button left slot-0, search_button left slot-1, menu_button right
-        G_reader_settings:saveSetting("simpleui_tb_fm_cfg", {
+        SUISettings:set("simpleui_tb_fm_cfg", {
             side        = { menu_button = "right", up_button = "left", search_button = "left" },
             order_left  = { "up_button", "search_button" },
             order_right = { "menu_button" },
         })
-        G_reader_settings:saveSetting("simpleui_defaults_v2", true)
+        SUISettings:set("simpleui_defaults_v2", true)
     end
 
     -- ---------------------------------------------------------------------------
@@ -705,20 +734,20 @@ function M.applyFirstRunDefaults()
     --     positioned on the right side, to the left of the menu button.
     -- Guard key: "simpleui_defaults_v3". Safe to call on every init.
     -- ---------------------------------------------------------------------------
-    if not G_reader_settings:readSetting("simpleui_defaults_v3") then
+    if not SUISettings:get("simpleui_defaults_v3") then
         -- Feature on by default.
-        G_reader_settings:saveSetting("simpleui_browsemeta_enabled", true)
+        SUISettings:set("simpleui_browsemeta_enabled", true)
         -- Browse button visible.
-        G_reader_settings:saveSetting("simpleui_tb_item_browse_button", true)
+        SUISettings:set("simpleui_tb_item_browse_button", true)
         -- FM layout: back + search on the left, browse + menu on the right.
         -- browse_button is left of menu_button (order_right is rendered RTL: last = outermost).
-        G_reader_settings:saveSetting("simpleui_tb_fm_cfg", {
+        SUISettings:set("simpleui_tb_fm_cfg", {
             side        = { menu_button = "right", up_button = "left",
                             search_button = "left", browse_button = "right" },
             order_left  = { "up_button", "search_button" },
             order_right = { "browse_button", "menu_button" },
         })
-        G_reader_settings:saveSetting("simpleui_defaults_v3", true)
+        SUISettings:set("simpleui_defaults_v3", true)
     end
 end
 
@@ -1210,14 +1239,14 @@ end
 -- Returns true when the navpager mode is active.
 -- Reads settings directly (no cache) — called rarely (build time, menu toggle).
 function M.isNavpagerEnabled()
-    return G_reader_settings:isTrue("navbar_navpager_enabled")
+    return SUISettings:isTrue("simpleui_bar_navpager_enabled")
 end
 
 -- Returns true when dot-pager mode is active on the homescreen.
 -- Dot-pager shows a row of dots (one per page) instead of the chevron bar,
 -- and obeys the same pagination visibility rules as the default bar.
 function M.isDotPagerEnabled()
-    return G_reader_settings:nilOrTrue("navbar_dotpager_always")
+    return SUISettings:nilOrTrue("simpleui_bar_dotpager_always")
 end
 
 
@@ -1308,10 +1337,10 @@ end
 -- Scale system — module-level and label scale with optional linking.
 --
 -- Settings layout:
---   navbar_homescreen_module_scale          global module scale (integer %)
---   navbar_homescreen_label_scale           label scale (integer %)
---   navbar_homescreen_<pfx><id>_scale       per-module scale override (integer %)
---   navbar_homescreen_scale_linked          bool; true = all scales move together
+--   simpleui_hs_module_scale               global module scale (integer %)
+--   simpleui_hs_label_scale                label scale (integer %)
+--   simpleui_hs_<id>_scale                 per-module scale override (integer %)
+--   simpleui_hs_scale_linked               bool; true = all scales move together
 --
 -- API for modules:
 --   Config.getModuleScale(mod_id, pfx)      → float multiplier for build()/getHeight()
@@ -1330,9 +1359,9 @@ local SCALE_MAX  = 200
 local SCALE_STEP = 10
 local SCALE_DEF  = 100
 
-local MODULE_SCALE_KEY      = "navbar_homescreen_module_scale"
-local LABEL_SCALE_KEY       = "navbar_homescreen_label_scale"
-local SCALE_LINKED_KEY      = "navbar_homescreen_scale_linked"
+local MODULE_SCALE_KEY      = "simpleui_hs_module_scale"
+local LABEL_SCALE_KEY       = "simpleui_hs_label_scale"
+local SCALE_LINKED_KEY      = "simpleui_hs_scale_linked"
 local ITEM_LABEL_SCALE_SUFFIX = "_item_label_scale"
 
 -- Clamp an integer percentage to valid range.
@@ -1342,32 +1371,32 @@ end
 
 -- Returns the per-module setting key for a given module id and pfx.
 local function _modKey(mod_id, pfx)
-    return (pfx or "navbar_homescreen_") .. (mod_id or "") .. "_scale"
+    return (pfx or "simpleui_hs_") .. (mod_id or "") .. "_scale"
 end
 
 local function _itemLabelKey(mod_id, pfx)
-    return (pfx or "navbar_homescreen_") .. (mod_id or "") .. ITEM_LABEL_SCALE_SUFFIX
+    return (pfx or "simpleui_hs_") .. (mod_id or "") .. ITEM_LABEL_SCALE_SUFFIX
 end
 
 -- ---------------------------------------------------------------------------
 -- Bar size (bottom bar) — numeric % stored as "navbar_bar_size_pct"
--- Legacy string key ("navbar_bar_size") is ignored; we read/write the pct key.
+-- Legacy string key ("simpleui_bar_size") is ignored; we read/write the pct key.
 -- ---------------------------------------------------------------------------
 
-local BAR_SIZE_KEY     = "navbar_bar_size_pct"
+local BAR_SIZE_KEY     = "simpleui_bar_size_pct"
 local BAR_SIZE_DEF     = 100
 local BAR_SIZE_MIN     = 50
 local BAR_SIZE_MAX     = 150
 
 function M.getBarSizePct()
-    local v = G_reader_settings:readSetting(BAR_SIZE_KEY)
+    local v = SUISettings:get(BAR_SIZE_KEY)
     local n = tonumber(v)
     if not n then return BAR_SIZE_DEF end
     return math.max(BAR_SIZE_MIN, math.min(BAR_SIZE_MAX, math.floor(n)))
 end
 
 function M.setBarSizePct(pct)
-    G_reader_settings:saveSetting(BAR_SIZE_KEY,
+    SUISettings:set(BAR_SIZE_KEY,
         math.max(BAR_SIZE_MIN, math.min(BAR_SIZE_MAX, math.floor(pct))))
 end
 
@@ -1380,20 +1409,20 @@ M.BAR_SIZE_STEP = SCALE_STEP
 -- Topbar size — numeric % stored as "navbar_topbar_size_pct"
 -- ---------------------------------------------------------------------------
 
-local TOPBAR_SIZE_KEY = "navbar_topbar_size_pct"
+local TOPBAR_SIZE_KEY = "simpleui_topbar_size_pct"
 local TOPBAR_SIZE_DEF = 100
 local TOPBAR_SIZE_MIN = 50
 local TOPBAR_SIZE_MAX = 150
 
 function M.getTopbarSizePct()
-    local v = G_reader_settings:readSetting(TOPBAR_SIZE_KEY)
+    local v = SUISettings:get(TOPBAR_SIZE_KEY)
     local n = tonumber(v)
     if not n then return TOPBAR_SIZE_DEF end
     return math.max(TOPBAR_SIZE_MIN, math.min(TOPBAR_SIZE_MAX, math.floor(n)))
 end
 
 function M.setTopbarSizePct(pct)
-    G_reader_settings:saveSetting(TOPBAR_SIZE_KEY,
+    SUISettings:set(TOPBAR_SIZE_KEY,
         math.max(TOPBAR_SIZE_MIN, math.min(TOPBAR_SIZE_MAX, math.floor(pct))))
 end
 
@@ -1408,21 +1437,21 @@ M.TOPBAR_SIZE_STEP = SCALE_STEP
 -- 100% = default BOT_SP; 0% = no bottom margin.
 -- ---------------------------------------------------------------------------
 
-local BOT_MARGIN_KEY  = "navbar_bottom_margin_pct"
+local BOT_MARGIN_KEY  = "simpleui_bar_bottom_margin_pct"
 local BOT_MARGIN_DEF  = 100
 local BOT_MARGIN_MIN  = 0
 local BOT_MARGIN_MAX  = 300
 local BOT_MARGIN_STEP = 10
 
 function M.getBottomMarginPct()
-    local v = G_reader_settings:readSetting(BOT_MARGIN_KEY)
+    local v = SUISettings:get(BOT_MARGIN_KEY)
     local n = tonumber(v)
     if not n then return BOT_MARGIN_DEF end
     return math.max(BOT_MARGIN_MIN, math.min(BOT_MARGIN_MAX, math.floor(n)))
 end
 
 function M.setBottomMarginPct(pct)
-    G_reader_settings:saveSetting(BOT_MARGIN_KEY,
+    SUISettings:set(BOT_MARGIN_KEY,
         math.max(BOT_MARGIN_MIN, math.min(BOT_MARGIN_MAX, math.floor(pct))))
 end
 
@@ -1436,20 +1465,20 @@ M.BOT_MARGIN_STEP = BOT_MARGIN_STEP
 -- Stored as "navbar_rs_text_scale_pct" (integer %).
 -- ---------------------------------------------------------------------------
 
-local RS_TEXT_SCALE_KEY  = "navbar_rs_text_scale_pct"
+local RS_TEXT_SCALE_KEY  = "simpleui_bar_rs_text_scale_pct"
 local RS_TEXT_SCALE_DEF  = 100
 local RS_TEXT_SCALE_MIN  = 50
 local RS_TEXT_SCALE_MAX  = 200
 
 function M.getRSTextScalePct()
-    local v = G_reader_settings:readSetting(RS_TEXT_SCALE_KEY)
+    local v = SUISettings:get(RS_TEXT_SCALE_KEY)
     local n = tonumber(v)
     if not n then return RS_TEXT_SCALE_DEF end
     return math.max(RS_TEXT_SCALE_MIN, math.min(RS_TEXT_SCALE_MAX, math.floor(n)))
 end
 
 function M.setRSTextScalePct(pct)
-    G_reader_settings:saveSetting(RS_TEXT_SCALE_KEY,
+    SUISettings:set(RS_TEXT_SCALE_KEY,
         math.max(RS_TEXT_SCALE_MIN, math.min(RS_TEXT_SCALE_MAX, math.floor(pct))))
 end
 
@@ -1463,20 +1492,20 @@ M.RS_TEXT_SCALE_STEP = SCALE_STEP
 -- Stored as \"navbar_icon_scale_pct\" (integer %).
 -- ---------------------------------------------------------------------------
 
-local ICON_SCALE_KEY  = "navbar_icon_scale_pct"
+local ICON_SCALE_KEY  = "simpleui_bar_icon_scale_pct"
 local ICON_SCALE_DEF  = 100
 local ICON_SCALE_MIN  = 50
 local ICON_SCALE_MAX  = 200
 
 function M.getIconScalePct()
-    local v = G_reader_settings:readSetting(ICON_SCALE_KEY)
+    local v = SUISettings:get(ICON_SCALE_KEY)
     local n = tonumber(v)
     if not n then return ICON_SCALE_DEF end
     return math.max(ICON_SCALE_MIN, math.min(ICON_SCALE_MAX, math.floor(n)))
 end
 
 function M.setIconScalePct(pct)
-    G_reader_settings:saveSetting(ICON_SCALE_KEY,
+    SUISettings:set(ICON_SCALE_KEY,
         math.max(ICON_SCALE_MIN, math.min(ICON_SCALE_MAX, math.floor(pct))))
 end
 
@@ -1490,39 +1519,39 @@ M.ICON_SCALE_STEP = SCALE_STEP
 -- Stored as \"navbar_label_scale_pct\" (integer %).
 -- ---------------------------------------------------------------------------
 
-local LABEL_SCALE_KEY  = "navbar_label_scale_pct"
-local LABEL_SCALE_DEF  = 100
-local LABEL_SCALE_MIN  = 50
-local LABEL_SCALE_MAX  = 200
+local NAVBAR_LABEL_SCALE_KEY  = "simpleui_bar_label_scale_pct"
+local NAVBAR_LABEL_SCALE_DEF  = 100
+local NAVBAR_LABEL_SCALE_MIN  = 50
+local NAVBAR_LABEL_SCALE_MAX  = 200
 
-function M.getLabelScalePct()
-    local v = G_reader_settings:readSetting(LABEL_SCALE_KEY)
+function M.getNavbarLabelScalePct()
+    local v = SUISettings:get(NAVBAR_LABEL_SCALE_KEY)
     local n = tonumber(v)
-    if not n then return LABEL_SCALE_DEF end
-    return math.max(LABEL_SCALE_MIN, math.min(LABEL_SCALE_MAX, math.floor(n)))
+    if not n then return NAVBAR_LABEL_SCALE_DEF end
+    return math.max(NAVBAR_LABEL_SCALE_MIN, math.min(NAVBAR_LABEL_SCALE_MAX, math.floor(n)))
 end
 
-function M.setLabelScalePct(pct)
-    G_reader_settings:saveSetting(LABEL_SCALE_KEY,
-        math.max(LABEL_SCALE_MIN, math.min(LABEL_SCALE_MAX, math.floor(pct))))
+function M.setNavbarLabelScalePct(pct)
+    SUISettings:set(NAVBAR_LABEL_SCALE_KEY,
+        math.max(NAVBAR_LABEL_SCALE_MIN, math.min(NAVBAR_LABEL_SCALE_MAX, math.floor(pct))))
 end
 
-M.LABEL_SCALE_DEF  = LABEL_SCALE_DEF
-M.LABEL_SCALE_MIN  = LABEL_SCALE_MIN
-M.LABEL_SCALE_MAX  = LABEL_SCALE_MAX
-M.LABEL_SCALE_STEP = SCALE_STEP
+M.NAVBAR_LABEL_SCALE_DEF  = NAVBAR_LABEL_SCALE_DEF
+M.NAVBAR_LABEL_SCALE_MIN  = NAVBAR_LABEL_SCALE_MIN
+M.NAVBAR_LABEL_SCALE_MAX  = NAVBAR_LABEL_SCALE_MAX
+M.NAVBAR_LABEL_SCALE_STEP = SCALE_STEP
 
 -- ---------------------------------------------------------------------------
 -- Link flag
 -- ---------------------------------------------------------------------------
 
 function M.isScaleLinked()
-    local v = G_reader_settings:readSetting(SCALE_LINKED_KEY)
-    return v ~= false  -- default true
+    local v = SUISettings:get(SCALE_LINKED_KEY)
+    return v == true  -- default false
 end
 
 function M.setScaleLinked(on)
-    G_reader_settings:saveSetting(SCALE_LINKED_KEY, on)
+    SUISettings:set(SCALE_LINKED_KEY, on)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1533,11 +1562,11 @@ end
 -- If mod_id + pfx given and link is OFF, reads the per-module override first.
 function M.getModuleScale(mod_id, pfx)
     if mod_id and pfx and not M.isScaleLinked() then
-        local v = G_reader_settings:readSetting(_modKey(mod_id, pfx))
+        local v = SUISettings:get(_modKey(mod_id, pfx))
         local n = tonumber(v)
         if n then return _clamp(n) / 100 end
     end
-    local v = G_reader_settings:readSetting(MODULE_SCALE_KEY)
+    local v = SUISettings:get(MODULE_SCALE_KEY)
     local n = tonumber(v)
     if not n then return 1.0 end
     return _clamp(n) / 100
@@ -1546,11 +1575,11 @@ end
 -- Returns integer %.
 function M.getModuleScalePct(mod_id, pfx)
     if mod_id and pfx and not M.isScaleLinked() then
-        local v = G_reader_settings:readSetting(_modKey(mod_id, pfx))
+        local v = SUISettings:get(_modKey(mod_id, pfx))
         local n = tonumber(v)
         if n then return _clamp(n) end
     end
-    local v = G_reader_settings:readSetting(MODULE_SCALE_KEY)
+    local v = SUISettings:get(MODULE_SCALE_KEY)
     local n = tonumber(v)
     if not n then return SCALE_DEF end
     return _clamp(n)
@@ -1562,11 +1591,11 @@ end
 function M.setModuleScale(pct, mod_id, pfx)
     pct = _clamp(pct)
     if mod_id and pfx then
-        G_reader_settings:saveSetting(_modKey(mod_id, pfx), pct)
+        SUISettings:set(_modKey(mod_id, pfx), pct)
     else
-        G_reader_settings:saveSetting(MODULE_SCALE_KEY, pct)
+        SUISettings:set(MODULE_SCALE_KEY, pct)
         if M.isScaleLinked() then
-            G_reader_settings:saveSetting(LABEL_SCALE_KEY, pct)
+            SUISettings:set(LABEL_SCALE_KEY, pct)
         end
     end
 end
@@ -1580,25 +1609,25 @@ end
 local THUMB_SCALE_KEY_SUFFIX = "_thumb_scale"
 
 local function _thumbKey(mod_id, pfx)
-    return (pfx or "navbar_homescreen_") .. (mod_id or "") .. THUMB_SCALE_KEY_SUFFIX
+    return (pfx or "simpleui_hs_") .. (mod_id or "") .. THUMB_SCALE_KEY_SUFFIX
 end
 
 function M.getThumbScale(mod_id, pfx)
-    local v = G_reader_settings:readSetting(_thumbKey(mod_id, pfx))
+    local v = SUISettings:get(_thumbKey(mod_id, pfx))
     local n = tonumber(v)
     if not n then return 1.0 end
     return _clamp(n) / 100
 end
 
 function M.getThumbScalePct(mod_id, pfx)
-    local v = G_reader_settings:readSetting(_thumbKey(mod_id, pfx))
+    local v = SUISettings:get(_thumbKey(mod_id, pfx))
     local n = tonumber(v)
     if not n then return SCALE_DEF end
     return _clamp(n)
 end
 
 function M.setThumbScale(pct, mod_id, pfx)
-    G_reader_settings:saveSetting(_thumbKey(mod_id, pfx), _clamp(pct))
+    SUISettings:set(_thumbKey(mod_id, pfx), _clamp(pct))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1606,21 +1635,21 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.getLabelScale()
-    local v = G_reader_settings:readSetting(LABEL_SCALE_KEY)
+    local v = SUISettings:get(LABEL_SCALE_KEY)
     local n = tonumber(v)
     if not n then return 1.0 end
     return _clamp(n) / 100
 end
 
 function M.getLabelScalePct()
-    local v = G_reader_settings:readSetting(LABEL_SCALE_KEY)
+    local v = SUISettings:get(LABEL_SCALE_KEY)
     local n = tonumber(v)
     if not n then return SCALE_DEF end
     return _clamp(n)
 end
 
 function M.setLabelScale(pct)
-    G_reader_settings:saveSetting(LABEL_SCALE_KEY, _clamp(pct))
+    SUISettings:set(LABEL_SCALE_KEY, _clamp(pct))
 end
 
 -- Returns the scaled LABEL_H value for module getHeight() calls.
@@ -1640,21 +1669,21 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.getItemLabelScale(mod_id, pfx)
-    local v = G_reader_settings:readSetting(_itemLabelKey(mod_id, pfx))
+    local v = SUISettings:get(_itemLabelKey(mod_id, pfx))
     local n = tonumber(v)
     if not n then return 1.0 end
     return _clamp(n) / 100
 end
 
 function M.getItemLabelScalePct(mod_id, pfx)
-    local v = G_reader_settings:readSetting(_itemLabelKey(mod_id, pfx))
+    local v = SUISettings:get(_itemLabelKey(mod_id, pfx))
     local n = tonumber(v)
     if not n then return SCALE_DEF end
     return _clamp(n)
 end
 
 function M.setItemLabelScale(pct, mod_id, pfx)
-    G_reader_settings:saveSetting(_itemLabelKey(mod_id, pfx), _clamp(pct))
+    SUISettings:set(_itemLabelKey(mod_id, pfx), _clamp(pct))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1665,25 +1694,28 @@ end
 
 function M.resetAllScales(pfx, pfx_qa)
     -- Global scales
-    G_reader_settings:delSetting(MODULE_SCALE_KEY)
-    G_reader_settings:delSetting(LABEL_SCALE_KEY)
-    G_reader_settings:delSetting(SCALE_LINKED_KEY)
-    G_reader_settings:delSetting(BAR_SIZE_KEY)
-    G_reader_settings:delSetting(TOPBAR_SIZE_KEY)
+    SUISettings:del(MODULE_SCALE_KEY)
+    SUISettings:del(LABEL_SCALE_KEY)
+    SUISettings:del(SCALE_LINKED_KEY)
+    SUISettings:del(BAR_SIZE_KEY)
+    SUISettings:del(TOPBAR_SIZE_KEY)
+    SUISettings:del(NAVBAR_LABEL_SCALE_KEY)
+    SUISettings:del("simpleui_bar_icon_scale_pct")
+    SUISettings:del("simpleui_bar_rs_text_scale_pct")
     -- Per-module overrides
     local Registry = require("desktop_modules/moduleregistry")
     for _, mod in ipairs(Registry.list()) do
         if mod.id then
-            G_reader_settings:delSetting((pfx or "navbar_homescreen_") .. mod.id .. "_scale")
-            G_reader_settings:delSetting((pfx or "navbar_homescreen_") .. mod.id .. THUMB_SCALE_KEY_SUFFIX)
-            G_reader_settings:delSetting(_itemLabelKey(mod.id, pfx))
+            SUISettings:del((pfx or "simpleui_hs_") .. mod.id .. "_scale")
+            SUISettings:del((pfx or "simpleui_hs_") .. mod.id .. THUMB_SCALE_KEY_SUFFIX)
+            SUISettings:del(_itemLabelKey(mod.id, pfx))
         end
     end
     -- Quick actions per-slot overrides
     if pfx_qa then
         for slot = 1, 3 do
-            G_reader_settings:delSetting(pfx_qa .. slot .. "_scale")
-            G_reader_settings:delSetting(pfx_qa .. slot .. ITEM_LABEL_SCALE_SUFFIX)
+            SUISettings:del(pfx_qa .. slot .. "_scale")
+            SUISettings:del(pfx_qa .. slot .. ITEM_LABEL_SCALE_SUFFIX)
         end
     end
 end
@@ -1790,7 +1822,7 @@ M.GAP_STEP = GAP_STEP
 M.GAP_DEF  = GAP_DEF
 
 local function _gapKey(mod_id, pfx)
-    return (pfx or "navbar_homescreen_") .. (mod_id or "") .. "_gap_pct"
+    return (pfx or "simpleui_hs_") .. (mod_id or "") .. "_gap_pct"
 end
 
 local function _clampGap(n)
@@ -1800,7 +1832,7 @@ end
 -- Returns gap in pixels. Falls back to mod_gap_px when no setting is saved.
 function M.getModuleGapPx(mod_id, pfx, mod_gap_px)
     if mod_id and pfx then
-        local v = G_reader_settings:readSetting(_gapKey(mod_id, pfx))
+        local v = SUISettings:get(_gapKey(mod_id, pfx))
         local n = tonumber(v)
         if n then return math.floor(mod_gap_px * _clampGap(n) / 100) end
     end
@@ -1810,7 +1842,7 @@ end
 -- Returns integer % for SpinWidget.
 function M.getModuleGapPct(mod_id, pfx)
     if mod_id and pfx then
-        local v = G_reader_settings:readSetting(_gapKey(mod_id, pfx))
+        local v = SUISettings:get(_gapKey(mod_id, pfx))
         local n = tonumber(v)
         if n then return _clampGap(n) end
     end
@@ -1820,7 +1852,7 @@ end
 -- Saves gap %.
 function M.setModuleGap(pct, mod_id, pfx)
     if mod_id and pfx then
-        G_reader_settings:saveSetting(_gapKey(mod_id, pfx), _clampGap(pct))
+        SUISettings:set(_gapKey(mod_id, pfx), _clampGap(pct))
     end
 end
 
@@ -1865,7 +1897,7 @@ end
 
 -- Returns true when the section label for mod_id should be hidden.
 function M.isLabelHidden(mod_id)
-    return G_reader_settings:readSetting(_labelHideKey(mod_id)) == true
+    return SUISettings:get(_labelHideKey(mod_id)) == true
 end
 
 -- Call at the start of each module's build() to keep mod.label in sync.
@@ -1887,7 +1919,7 @@ function M.makeLabelToggleItem(mod_id, default_label, refresh, _lc)
         keep_menu_open = true,
         callback       = function()
             -- Store true to hide, nil (remove key) to show — never store false.
-            G_reader_settings:saveSetting(_labelHideKey(mod_id),
+            SUISettings:set(_labelHideKey(mod_id),
                 not M.isLabelHidden(mod_id) and true or nil)
             refresh()
         end,

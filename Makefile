@@ -16,7 +16,9 @@ build:
 		--exclude "$(ROOT_DIR)/LICENSE" \
 		--exclude "$(ROOT_DIR)/README.md" \
 		--exclude "$(ROOT_DIR)/extract_strings.py" \
-		--exclude "$(ROOT_DIR)/$(ZIP_NAME)"
+		--exclude "$(ROOT_DIR)/$(ZIP_NAME)" \
+		--exclude "$(ROOT_DIR)/icons/custom/*" \
+		--exclude "$(ROOT_DIR)/desktop_modules/custom_quotes/*"
 	@echo ">> Done!"
 
 clean:
