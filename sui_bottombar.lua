@@ -1352,6 +1352,11 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         if in_virtual then
             FC_mod.exitSeriesView(fc)
         end
+        -- Exit All Books virtual view if active.
+        local ok_lib, SUILib = pcall(require, "sui_library")
+        if ok_lib and SUILib and SUILib.isAllBooksActive(fc) then
+            SUILib.exitIfActive(fc)
+        end
         if fc.path == home and not in_virtual then
             -- Already at home (and not in a virtual folder). Always go to
             -- page 1 and refresh — this mirrors the "Go to HOME folder" button
@@ -1376,6 +1381,40 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
             end)
         end
         return true
+    end
+
+    -- Library Router: reads simpleui_library_default_mode and routes to the
+    -- appropriate view. Falls back to _goHome() if the target fails or is "folder".
+    local function _goLibrary(target_fm)
+        local default = SUISettings:readSetting("simpleui_library_default_mode") or "folder"
+        local mode = default
+        if default == "last_used" then
+            mode = SUISettings:readSetting("simpleui_last_library_mode") or "folder"
+        end
+
+        local routed = false
+
+        if mode == "all_books" then
+            local ok_lib, SUILib = pcall(require, "sui_library")
+            if ok_lib and SUILib then
+                routed = SUILib.navigateTo(target_fm)
+            end
+        elseif mode == "series" or mode == "author" or mode == "tags" then
+            local ok_bm, BM = pcall(require, "sui_browsemeta")
+            if ok_bm and BM and BM.isEnabled() then
+                local bm_mode = (mode == "author") and "author"
+                             or (mode == "tags")   and "tags"
+                             or "series"
+                BM.navigateTo(target_fm, bm_mode)
+                routed = true
+            end
+        end
+
+        SUISettings:saveSetting("simpleui_last_library_mode", mode)
+
+        if not routed then
+            _goHome(target_fm)
+        end
     end
 
     if hs_open then
@@ -1404,11 +1443,11 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         -- A single setDirty from replaceBar above covers the repaint.
         if action_id == "home" then
             if fm.file_chooser then
-                _goHome(fm)
+                _goLibrary(fm)
             else
                 -- file_chooser not yet created — schedule for next event cycle.
                 UIManager:scheduleIn(0, function()
-                    _goHome(plugin.ui)
+                    _goLibrary(plugin.ui)
                 end)
             end
             return

@@ -61,6 +61,7 @@ local SimpleUIPlugin = WidgetContainer:new{
 
     _lib_watch_timer          = nil,
     _lib_watch_mtime          = nil,
+    _lib_db_mtime             = nil,
 }
 
 -- ---------------------------------------------------------------------------
@@ -935,7 +936,7 @@ local _PLUGIN_MODULES = {
     "sui_i18n", "sui_config", "sui_core", "sui_bottombar", "sui_topbar",
     "sui_patches", "sui_menu", "sui_titlebar", "sui_quickactions",
     "sui_homescreen", "sui_foldercovers", "sui_browsemeta", "sui_updater",
-    "sui_store", "sui_presets", "sui_style",
+    "sui_store", "sui_presets", "sui_style", "sui_library",
     "desktop_modules/moduleregistry",
     "desktop_modules/module_books_shared",
     "desktop_modules/module_clock",
@@ -1161,6 +1162,28 @@ function SimpleUIPlugin:_libWatchStart()
             self._lib_watch_mtime = mtime
         end
 
+        -- Also watch bookinfo_cache.sqlite3 mtime for All Books view.
+        local SUILib = package.loaded["sui_library"]
+        if SUILib then
+            local db_mtime = SUILib.getDbMtime()
+            if db_mtime and self._lib_db_mtime and db_mtime ~= self._lib_db_mtime then
+                self._lib_db_mtime = db_mtime
+                SUILib.invalidateCache()
+                logger.dbg("simpleui: bookinfo_cache mtime changed — library cache invalidated")
+                local FM = package.loaded["apps/filemanager/filemanager"]
+                local fm = FM and FM.instance
+                local fc = fm and fm.file_chooser
+                if fc and SUILib.isAllBooksActive(fc) then
+                    local HS = package.loaded["sui_homescreen"]
+                    if not (HS and HS._instance) then
+                        pcall(function() SUILib.navigateTo(fm) end)
+                    end
+                end
+            elseif db_mtime and not self._lib_db_mtime then
+                self._lib_db_mtime = db_mtime
+            end
+        end
+
         self._lib_watch_timer = UIManager:scheduleIn(interval, _poll)
     end
 
@@ -1177,6 +1200,7 @@ function SimpleUIPlugin:_libWatchStop()
         self._lib_watch_timer = nil
     end
     self._lib_watch_mtime = nil
+    self._lib_db_mtime    = nil
 end
 
 function SimpleUIPlugin:_libWatchCheckNow()
@@ -1241,6 +1265,13 @@ function SimpleUIPlugin:onGrimmLinkShelfSyncComplete(data)
         else
             HS._stats_need_refresh = true
         end
+    end
+
+    -- Invalidate All Books cache so GrimmLink-synced books appear immediately.
+    local SUILib = package.loaded["sui_library"]
+    if SUILib then
+        SUILib.invalidateCache()
+        self._lib_db_mtime = SUILib.getDbMtime()
     end
 
     -- Reset mtime baseline so the mtime watcher doesn't double-fire.

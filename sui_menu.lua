@@ -3445,7 +3445,42 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                             fm.file_chooser:refreshPath()
                         end
                     end
+                    local function _libModeChecked(mode)
+                        return function()
+                            local SUISettings2 = require("sui_store")
+                            return (SUISettings2:readSetting("simpleui_library_default_mode") or "folder") == mode
+                        end
+                    end
+                    local function _libModeSet(mode)
+                        return function()
+                            local SUISettings2 = require("sui_store")
+                            SUISettings2:saveSetting("simpleui_library_default_mode", mode)
+                        end
+                    end
                     return {
+                        {
+                            text = _("Library opens with"),
+                            sub_item_table = {
+                                { text = _("Last used mode"),  keep_menu_open = true,
+                                  checked_func = _libModeChecked("last_used"),
+                                  callback     = _libModeSet("last_used") },
+                                { text = _("All Books"),       keep_menu_open = true,
+                                  checked_func = _libModeChecked("all_books"),
+                                  callback     = _libModeSet("all_books") },
+                                { text = _("By Series"),       keep_menu_open = true,
+                                  checked_func = _libModeChecked("series"),
+                                  callback     = _libModeSet("series") },
+                                { text = _("By Author"),       keep_menu_open = true,
+                                  checked_func = _libModeChecked("author"),
+                                  callback     = _libModeSet("author") },
+                                { text = _("By Tags"),         keep_menu_open = true,
+                                  checked_func = _libModeChecked("tags"),
+                                  callback     = _libModeSet("tags") },
+                                { text = _("Home Folder"),     keep_menu_open = true,
+                                  checked_func = _libModeChecked("folder"),
+                                  callback     = _libModeSet("folder") },
+                            },
+                        },
                         {
                             text         = _("Browse by Author / Series / Tags"),
                             checked_func = function()

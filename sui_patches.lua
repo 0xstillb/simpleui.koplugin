@@ -3306,6 +3306,9 @@ function M.teardownAll(plugin)
         pcall(BM.reset)
     end
 
+    local SUILib = package.loaded["sui_library"]
+    if SUILib then pcall(SUILib.teardown) end
+
     -- Restore wallpaper FM patch.
     -- Do NOT restore _orig_fm_wallpaper_setup: patchFileManagerClass's teardown
     -- above has already restored FileManager.setupLayout to the KOReader native
