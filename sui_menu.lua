@@ -3448,19 +3448,82 @@ SimpleUIPlugin.addToMainMenu = function(self, menu_items)
                     local function _libModeChecked(mode)
                         return function()
                             local SUISettings2 = require("sui_store")
-                            return (SUISettings2:readSetting("simpleui_library_default_mode") or "folder") == mode
+                            return (SUISettings2:readSetting("simpleui_library_default_mode") or "library_root") == mode
                         end
                     end
+                    local function _libraryBaseDir(fm)
+                        local fc = fm and fm.file_chooser
+                        local path = fc and fc.path
+                        if path then
+                            local vroot = path:find("/\u{E257}", 1, true)
+                            if vroot then path = path:sub(1, vroot - 1) end
+                            if lfs.attributes(path, "mode") == "directory" then
+                                return path
+                            end
+                        end
+
+                        local last_real = SUISettings:readSetting("simpleui_last_library_real_path")
+                        if last_real and lfs.attributes(last_real, "mode") == "directory" then
+                            return last_real
+                        end
+
+                        local home = G_reader_settings:readSetting("home_dir")
+                        if home and lfs.attributes(home, "mode") == "directory" then
+                            return home
+                        end
+
+                        return Device.home_dir
+                    end
+
+                    local function _openLibraryModeNow(mode)
+                        local FM = package.loaded["apps/filemanager/filemanager"]
+                        local fm = FM and FM.instance
+                        if not (fm and fm.file_chooser) then return end
+
+                        if mode == "folder" then
+                            local target = _libraryBaseDir(fm)
+                            if target then
+                                pcall(function() fm.file_chooser:changeToPath(target) end)
+                                if fm.updateTitleBarPath then
+                                    pcall(function() fm:updateTitleBarPath(target, true) end)
+                                end
+                            end
+                            return
+                        end
+
+
+                        if mode == "last_used" then
+                            return
+                        end
+
+                        local ok_bm, BM = pcall(require, "sui_browsemeta")
+                        if ok_bm and BM and BM.isEnabled and BM.isEnabled() and BM.navigateTo then
+                            pcall(function()
+                                BM.navigateTo(fm, mode, _libraryBaseDir(fm))
+                            end)
+                        end
+                    end
+
                     local function _libModeSet(mode)
                         return function()
                             local SUISettings2 = require("sui_store")
                             SUISettings2:saveSetting("simpleui_library_default_mode", mode)
+                            if mode ~= "last_used" then
+                                SUISettings2:saveSetting("simpleui_last_library_mode", mode)
+                            end
+                            _openLibraryModeNow(mode)
+                            if plugin and plugin._scheduleRebuild then
+                                plugin:_scheduleRebuild()
+                            end
                         end
                     end
                     return {
                         {
                             text = _("Library opens with"),
                             sub_item_table = {
+                                { text = _("Library Root"),    keep_menu_open = true,
+                                  checked_func = _libModeChecked("library_root"),
+                                  callback     = _libModeSet("library_root") },
                                 { text = _("Last used mode"),  keep_menu_open = true,
                                   checked_func = _libModeChecked("last_used"),
                                   callback     = _libModeSet("last_used") },

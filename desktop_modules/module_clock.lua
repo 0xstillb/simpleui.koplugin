@@ -1,7 +1,6 @@
 -- module_clock.lua — Simple UI
 -- Clock module: clock always visible, with optional date and battery toggles.
 
-local Blitbuffer      = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local datetime        = require("datetime")
 local Device          = require("device")
@@ -23,6 +22,31 @@ local SUISettings = require("sui_store")
 local PAD          = UI.PAD
 local PAD2         = UI.PAD2
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
+
+local _clock_face_cache = {}
+
+local function _tryFace(name, size)
+    local key = name .. ":" .. tostring(size)
+    local cached = _clock_face_cache[key]
+    if cached ~= nil then return cached or nil end
+    local ok, face = pcall(Font.getFace, Font, name, size)
+    if ok and face then
+        _clock_face_cache[key] = face
+        return face
+    end
+    _clock_face_cache[key] = false
+    return nil
+end
+
+local function getClockFace(size)
+    return _tryFace("SundayMarket", size)
+        or Font:getFace("smallinfofont", size)
+end
+
+local function getDateFace(size)
+    return _tryFace("SundayMarket-Script", size)
+        or Font:getFace("smallinfofont", size)
+end
 
 -- ---------------------------------------------------------------------------
 -- Translated date string
@@ -68,11 +92,11 @@ end
 -- Pixel constants — base values at 100% scale; scaled at render time.
 -- ---------------------------------------------------------------------------
 
-local _BASE_CLOCK_W       = Screen:scaleBySize(50)
-local _BASE_CLOCK_FS      = Screen:scaleBySize(44)
-local _BASE_DATE_H        = Screen:scaleBySize(17)
-local _BASE_DATE_GAP      = Screen:scaleBySize(19)
-local _BASE_DATE_FS       = Screen:scaleBySize(11)
+local _BASE_CLOCK_W       = Screen:scaleBySize(60)
+local _BASE_CLOCK_FS      = Screen:scaleBySize(52)
+local _BASE_DATE_H        = Screen:scaleBySize(20)
+local _BASE_DATE_GAP      = Screen:scaleBySize(14)
+local _BASE_DATE_FS       = Screen:scaleBySize(14)
 local _BASE_BATT_FS       = Screen:scaleBySize(10)
 local _BASE_BATT_H        = Screen:scaleBySize(15)
 local _BASE_BATT_GAP      = Screen:scaleBySize(19)
@@ -227,21 +251,16 @@ local function build(w, pfx, vspan_pool)
 
     local vg = VerticalGroup:new{ align = align }
 
-    local function wrapText(wgt)
-        if not wgt.dimen then wgt.dimen = wgt:getSize() end
-        return wgt
-    end
-
     -- Clock
     if show_clock then
         vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = clock_w },
-            wrapText(UI.makeColoredText{
-                text    = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
-                face    = Font:getFace("smallinfofont", clock_fs),
-                bold    = true,
-                fgcolor = theme_fg,   -- nil → KOReader default (black); honours theme palette
-            }),
+            TextWidget:new{
+                text = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
+                face = getClockFace(clock_fs),
+                bold = true,
+                fgcolor = theme_fg,
+            },
         }
     end
 
@@ -249,11 +268,11 @@ local function build(w, pfx, vspan_pool)
         if #vg > 0 then vg[#vg+1] = _vspan(date_gap, vspan_pool) end
         vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = date_h },
-            wrapText(UI.makeColoredText{
+            TextWidget:new{
                 text    = _localDate(),
-                face    = Font:getFace("smallinfofont", date_fs),
+                face    = getDateFace(date_fs),
                 fgcolor = sub_fg,
-            }),
+            },
         }
     end
 
@@ -262,11 +281,11 @@ local function build(w, pfx, vspan_pool)
         local lvl, charging = _battInfo()
         vg[#vg+1] = ContainerClass:new{
             dimen = Geom:new{ w = inner_w, h = batt_h },
-            wrapText(UI.makeColoredText{
+            TextWidget:new{
                 text    = _battText(lvl, charging),
                 face    = Font:getFace("smallinfofont", batt_fs),
                 fgcolor = sub_fg,
-            }),
+            },
         }
     end
 

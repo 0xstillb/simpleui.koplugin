@@ -1352,11 +1352,6 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         if in_virtual then
             FC_mod.exitSeriesView(fc)
         end
-        -- Exit All Books virtual view if active.
-        local ok_lib, SUILib = pcall(require, "sui_library")
-        if ok_lib and SUILib and SUILib.isAllBooksActive(fc) then
-            SUILib.exitIfActive(fc)
-        end
         if fc.path == home and not in_virtual then
             -- Already at home (and not in a virtual folder). Always go to
             -- page 1 and refresh — this mirrors the "Go to HOME folder" button
@@ -1383,38 +1378,109 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
         return true
     end
 
-    -- Library Router: reads simpleui_library_default_mode and routes to the
-    -- appropriate view. Falls back to _goHome() if the target fails or is "folder".
+    local function _isBrowseMetaMode(mode)
+        return mode == "library_root"
+            or mode == "all_books"
+            or mode == "series"
+            or mode == "author"
+            or mode == "tags"
+    end
+
+    local function _normalizeLibraryMode(mode)
+        if mode == "home" then return "folder" end
+        if mode == "browse" or mode == "choose" then return "library_root" end
+        if mode == "home_folder" then return "folder" end
+        if mode == "home_screen"
+            or mode == "last_used"
+            or mode == "folder"
+            or _isBrowseMetaMode(mode) then
+            return mode
+        end
+        return nil
+    end
+
+    local function _stripBrowseMetaVirtualPath(path)
+        if not path then return nil end
+        local vroot = path:find("/\u{E257}", 1, true)
+        if vroot then
+            return path:sub(1, vroot - 1)
+        end
+        return path
+    end
+
+    local function _getLibraryBaseDir(target_fm)
+        local lfs = require("libs/libkoreader-lfs")
+        local fc = target_fm and target_fm.file_chooser
+
+        local current = fc and _stripBrowseMetaVirtualPath(fc.path)
+        if current and lfs.attributes(current, "mode") == "directory" then
+            SUISettings:saveSetting("simpleui_last_library_real_path", current)
+            return current
+        end
+
+        local last_real = SUISettings:readSetting("simpleui_last_library_real_path")
+        if last_real and lfs.attributes(last_real, "mode") == "directory" then
+            return last_real
+        end
+
+        local home = G_reader_settings:readSetting("home_dir")
+        if home and lfs.attributes(home, "mode") == "directory" then
+            return home
+        end
+
+        return Device.home_dir
+    end
+
+    -- Library Router: routes the Library tab to Home Screen, Library Root,
+    -- last used virtual mode, or the real Home Folder.  It no longer depends
+    -- on sui_library.lua; All Books lives in sui_browsemeta.lua.
     local function _goLibrary(target_fm)
-        local default = SUISettings:readSetting("simpleui_library_default_mode") or "folder"
+        local default = _normalizeLibraryMode(
+            SUISettings:readSetting("simpleui_library_default_mode") or "library_root"
+        ) or "library_root"
+
         local mode = default
         if default == "last_used" then
-            mode = SUISettings:readSetting("simpleui_last_library_mode") or "folder"
-        end
-
-        local routed = false
-
-        if mode == "all_books" then
-            local ok_lib, SUILib = pcall(require, "sui_library")
-            if ok_lib and SUILib then
-                routed = SUILib.navigateTo(target_fm)
-            end
-        elseif mode == "series" or mode == "author" or mode == "tags" then
             local ok_bm, BM = pcall(require, "sui_browsemeta")
-            if ok_bm and BM and BM.isEnabled() then
-                local bm_mode = (mode == "author") and "author"
-                             or (mode == "tags")   and "tags"
-                             or "series"
-                BM.navigateTo(target_fm, bm_mode)
-                routed = true
+            local saved = ok_bm and BM and BM.getSavedMode and BM.getSavedMode() or nil
+            mode = _normalizeLibraryMode(saved)
+                or _normalizeLibraryMode(SUISettings:readSetting("simpleui_last_library_mode"))
+                or "library_root"
+        end
+
+        if mode == "home_screen" then
+            _QA().execute("homescreen", {
+                plugin = plugin,
+                fm = target_fm or fm,
+                show_unavailable = showUnavailable,
+                already_active = already_active,
+            })
+            return true
+        end
+
+        if mode == "folder" then
+            SUISettings:saveSetting("simpleui_last_library_mode", "folder")
+            return _goHome(target_fm)
+        end
+
+        if _isBrowseMetaMode(mode) then
+            local ok_bm, BM = pcall(require, "sui_browsemeta")
+            if ok_bm and BM and BM.isEnabled and BM.isEnabled() and BM.navigateTo then
+                local base_dir = _getLibraryBaseDir(target_fm)
+                local ok_nav, nav_result = pcall(function()
+                    return BM.navigateTo(target_fm, mode, base_dir)
+                end)
+                if ok_nav and nav_result ~= false then
+                    SUISettings:saveSetting("simpleui_last_library_mode", mode)
+                    return true
+                end
+                logger.warn("simpleui: Library route failed:", tostring(nav_result))
             end
         end
 
-        SUISettings:saveSetting("simpleui_last_library_mode", mode)
-
-        if not routed then
-            _goHome(target_fm)
-        end
+        -- Safe fallback for disabled BrowseMeta, missing DB, invalid schema, etc.
+        SUISettings:saveSetting("simpleui_last_library_mode", "folder")
+        return _goHome(target_fm)
     end
 
     if hs_open then
@@ -1484,6 +1550,17 @@ function M.navigate(plugin, action_id, fm_self, tabs, force)
     if fm_self ~= fm and fm._navbar_container then
         M.replaceBar(fm, M.buildBarWidget(_resolveActiveTab(action_id, tabs), tabs), tabs)
         UIManager:setDirty(fm, "ui")
+    end
+
+    if action_id == "home" then
+        if fm.file_chooser then
+            _goLibrary(fm)
+        else
+            UIManager:scheduleIn(0, function()
+                _goLibrary(plugin.ui)
+            end)
+        end
+        return
     end
 
     -- Fully delegated to QA.execute.

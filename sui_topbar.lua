@@ -14,7 +14,6 @@ local Geom            = require("ui/geometry")
 local Font            = require("ui/font")
 local Blitbuffer      = require("ffi/blitbuffer")
 local UIManager       = require("ui/uimanager")
-local InfoMessage     = require("ui/widget/infomessage")
 local Device          = require("device")
 local Screen          = Device.screen
 local logger          = require("logger")

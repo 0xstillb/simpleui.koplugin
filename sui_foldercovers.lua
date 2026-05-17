@@ -3,7 +3,6 @@
 
 local _           = require("sui_i18n").translate
 local lfs         = require("libs/libkoreader-lfs")
-local logger      = require("logger")
 local SUISettings = require("sui_store")
 
 -- Widget requires at module level so the require() cache is hit once,
@@ -2758,6 +2757,91 @@ function M.install()
 
     local function _round(v) return math.floor(v + 0.5) end
 
+    -- Shadow + rounded corner helpers (matches module_books_shared values).
+    local _FC_RADIUS     = Screen:scaleBySize(7)
+    local _FC_SHADOW_OFF = Screen:scaleBySize(5)
+    local _FC_SHADOW_CLR = Blitbuffer.gray(0x88)
+
+    local function _paintBookCoverShadow(bb, x0, y0, w, h)
+        local off = _FC_SHADOW_OFF
+        if off <= 0 or w <= 0 or h <= 0 then return end
+        local color = _FC_SHADOW_CLR
+        local r = _FC_RADIUS
+        local rr = r * r
+        local rx = x0 + w
+        local by = y0 + h
+        local sqrt, floor, max = math.sqrt, math.floor, math.max
+
+        -- Right strip: top corner (rows 0..r-1)
+        for row = 0, math.min(r - 1, h - 1) do
+            local dy = r - row - 0.5
+            local sw = max(0, off - r + floor(sqrt(max(0, rr - dy * dy))))
+            if sw > 0 then bb:paintRect(rx, y0 + off + row, sw, 1, color) end
+        end
+        -- Right strip: middle (full width, no rounding)
+        if h > 2 * r then
+            bb:paintRect(rx, y0 + off + r, off, h - 2 * r, color)
+        end
+        -- Right strip: bottom corner (rows h-r..h-1)
+        for row = max(r, h - r), h - 1 do
+            local dy = row - (h - r) + 0.5
+            local sw = max(0, off - r + floor(sqrt(max(0, rr - dy * dy))))
+            if sw > 0 then bb:paintRect(rx, y0 + off + row, sw, 1, color) end
+        end
+
+        -- Bottom strip: left corner (cols 0..r-1)
+        for col = 0, math.min(r - 1, w - 1) do
+            local dx = r - col - 0.5
+            local sh = max(0, off - r + floor(sqrt(max(0, rr - dx * dx))))
+            if sh > 0 then bb:paintRect(x0 + off + col, by, 1, sh, color) end
+        end
+        -- Bottom strip: middle (full height, no rounding)
+        if w > 2 * r then
+            bb:paintRect(x0 + off + r, by, w - 2 * r, off, color)
+        end
+        -- Bottom strip: right corner (cols w-r..w-1)
+        for col = max(r, w - r), w - 1 do
+            local dx = col - (w - r) + 0.5
+            local sh = max(0, off - r + floor(sqrt(max(0, rr - dx * dx))))
+            if sh > 0 then bb:paintRect(x0 + off + col, by, 1, sh, color) end
+        end
+    end
+
+    local function _paintRoundedCoverMask(bb, x0, y0, w, h, shadow_color, bordersize)
+        local border = bordersize or Size.border.thin
+        local r = math.floor(math.min(_FC_RADIUS + border, math.floor(w / 2), math.floor(h / 2)))
+        if r < 2 then return end
+        local inner_r = math.max(0, r - border)
+        local bg = Blitbuffer.COLOR_WHITE
+        local br_bg = shadow_color or bg
+        local border_clr = Blitbuffer.COLOR_BLACK
+        local rr = r * r
+        local irr = inner_r * inner_r
+        for row = 0, r - 1 do
+            local dy = r - row - 0.5
+            local dy2 = dy * dy
+            local outer_cut = r - math.floor(math.sqrt(math.max(0, rr - dy2)))
+            local inner_cut = r - math.floor(math.sqrt(math.max(0, irr - dy2)))
+            if outer_cut > 0 or inner_cut > outer_cut then
+                local yy_top = y0 + row
+                local yy_bot = y0 + h - 1 - row
+                if outer_cut > 0 then
+                    bb:paintRect(x0, yy_top, outer_cut, 1, bg)
+                    bb:paintRect(x0 + w - outer_cut, yy_top, outer_cut, 1, bg)
+                    bb:paintRect(x0, yy_bot, outer_cut, 1, bg)
+                    bb:paintRect(x0 + w - outer_cut, yy_bot, outer_cut, 1, br_bg)
+                end
+                local bw = inner_cut - outer_cut
+                if bw > 0 then
+                    bb:paintRect(x0 + outer_cut, yy_top, bw, 1, border_clr)
+                    bb:paintRect(x0 + w - inner_cut, yy_top, bw, 1, border_clr)
+                    bb:paintRect(x0 + outer_cut, yy_bot, bw, 1, border_clr)
+                    bb:paintRect(x0 + w - inner_cut, yy_bot, bw, 1, border_clr)
+                end
+            end
+        end
+    end
+
     function MosaicMenuItem:paintTo(bb, x, y)
         x = math.floor(x)
         y = math.floor(y)
@@ -2901,6 +2985,10 @@ function M.install()
         end
 
         -- (fw, fh, fx, fy already set above)
+
+        -- Shadow + rounded corners (post-paint)
+        _paintBookCoverShadow(bb, fx, fy, fw, fh)
+        _paintRoundedCoverMask(bb, fx, fy, fw, fh, _FC_SHADOW_CLR, target.bordersize)
 
         -- Left margin of the native progress bar, computed the same way KOReader does
         -- in mosaicmenu.lua paintTo():

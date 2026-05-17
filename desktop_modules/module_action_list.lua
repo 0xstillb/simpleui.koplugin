@@ -22,7 +22,6 @@ local ImageWidget     = require("ui/widget/imagewidget")
 local InputContainer  = require("ui/widget/container/inputcontainer")
 local LeftContainer   = require("ui/widget/container/leftcontainer")
 local RightContainer  = require("ui/widget/container/rightcontainer")
-local TextWidget      = require("ui/widget/textwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
 local VerticalSpan    = require("ui/widget/verticalspan")
 local Screen          = Device.screen

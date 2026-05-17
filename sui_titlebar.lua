@@ -970,11 +970,12 @@ function M.apply(fm_self)
                             title       = _("Browse library"),
                             title_align = "center",
                             buttons = {
-                                {{ text = _check("normal") .. _("Default"),   callback = function() _navigate(dlg, "normal") end }},
-                                {{ text = _check("author") .. _("By author"), callback = function() _navigate(dlg, "author") end }},
-                                {{ text = _check("series") .. _("By series"), callback = function() _navigate(dlg, "series") end }},
-                                {{ text = _check("tags")   .. _("By tags"),   callback = function() _navigate(dlg, "tags")   end }},
-                                {{ text = _("Cancel"),                         callback = function() UIManager:close(dlg)     end }},
+                                {{ text = _check("normal")    .. _("Default"),   callback = function() _navigate(dlg, "normal")    end }},
+                                {{ text = _check("all_books") .. _("By Books"),  callback = function() _navigate(dlg, "all_books") end }},
+                                {{ text = _check("author")    .. _("By author"), callback = function() _navigate(dlg, "author")    end }},
+                                {{ text = _check("series")    .. _("By series"), callback = function() _navigate(dlg, "series")    end }},
+                                {{ text = _check("tags")      .. _("By tags"),   callback = function() _navigate(dlg, "tags")      end }},
+                                {{ text = _("Cancel"),                            callback = function() UIManager:close(dlg)        end }},
                             },
                         }
                         UIManager:show(dlg)

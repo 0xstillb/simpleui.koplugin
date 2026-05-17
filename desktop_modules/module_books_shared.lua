@@ -14,7 +14,6 @@ local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
 local Size            = require("ui/size")
 local TextBoxWidget   = require("ui/widget/textboxwidget")
-local TextWidget      = require("ui/widget/textwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
 local VerticalSpan    = require("ui/widget/verticalspan")
 local Screen          = Device.screen
@@ -23,6 +22,68 @@ local util            = require("util")
 local Config          = require("sui_config")
 
 local SH = {}
+
+local _COVER_RADIUS = Screen:scaleBySize(7)
+SH.COVER_RADIUS = _COVER_RADIUS
+
+local _SHADOW_CLR = Blitbuffer.gray(0x88)
+local _SHADOW_OFF = math.max(1, Screen:scaleBySize(5))
+
+local function _maskCorners(bb, x, y, w, h, radius, bg, bottom_right_bg)
+    if not radius or radius <= 0 then return end
+    bg = bg or Blitbuffer.COLOR_WHITE
+    bottom_right_bg = bottom_right_bg or bg
+
+    local r = math.min(radius, math.floor(w / 2), math.floor(h / 2))
+    if r <= 0 then return end
+
+    local r2 = r * r
+    for j = 0, r - 1 do
+        local dy  = r - j - 0.5
+        local dy2 = dy * dy
+        local run
+        if dy2 >= r2 then
+            run = r
+        else
+            run = math.floor(r - math.sqrt(r2 - dy2))
+        end
+        if run > 0 then
+            bb:paintRect(x,           y + j,         run, 1, bg)
+            bb:paintRect(x + w - run, y + j,         run, 1, bg)
+            bb:paintRect(x,           y + h - 1 - j, run, 1, bg)
+            bb:paintRect(x + w - run, y + h - 1 - j, run, 1, bottom_right_bg)
+        end
+    end
+end
+
+local function _addCornerMask(frame, bg, bottom_right_bg)
+    if not frame then return frame end
+    local r = frame.radius or _COVER_RADIUS
+    if not r or r <= 0 then return frame end
+    local outer_r = r + (frame.bordersize or 0)
+    bg = bg or Blitbuffer.COLOR_WHITE
+    bottom_right_bg = bottom_right_bg or bg
+
+    local orig = frame.paintTo
+    function frame:paintTo(bb, x, y)
+        orig(self, bb, x, y)
+        local sz = self:getSize()
+        _maskCorners(bb, math.floor(x), math.floor(y), sz.w, sz.h, outer_r, bg, bottom_right_bg)
+    end
+    return frame
+end
+
+function SH.addCornerMask(widget, radius, bg)
+    if not widget then return widget end
+    local r = radius or _COVER_RADIUS
+    local orig = widget.paintTo
+    function widget:paintTo(bb, x, y)
+        orig(self, bb, x, y)
+        local sz = self:getSize()
+        _maskCorners(bb, math.floor(x), math.floor(y), sz.w, sz.h, r, bg)
+    end
+    return widget
+end
 
 -- ---------------------------------------------------------------------------
 -- applyCustomProps — overlay custom_metadata.lua overrides onto doc_props.
@@ -193,11 +254,34 @@ end
 -- ---------------------------------------------------------------------------
 -- coverPlaceholder
 -- ---------------------------------------------------------------------------
--- Renders a FakeCover-style placeholder (mirroring KOReader's coverbrowser
--- mosaicmenu.lua FakeCover widget) for books that have no cover image.
--- Displays title and authors as text with decreasing font sizes until they
--- fit, at the 2:3 proportions used by the homescreen modules.
---
+-- ---------------------------------------------------------------------------
+-- wrapWithShadow — solid gray drop shadow behind a cover widget.
+-- ---------------------------------------------------------------------------
+function SH.wrapWithShadow(cover_widget, w, h)
+    if not cover_widget then return nil end
+    local off = _SHADOW_OFF
+    local radius = _COVER_RADIUS
+    local shadow = FrameContainer:new{
+        width      = w,
+        height     = h,
+        bordersize = 0,
+        radius     = radius,
+        padding    = 0,
+        margin     = 0,
+        background = _SHADOW_CLR,
+        VerticalSpan:new{ width = 0 },
+    }
+    shadow.overlap_offset = { off, off }
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = w + off, h = h + off },
+        shadow,
+        cover_widget,
+    }
+end
+
+-- ---------------------------------------------------------------------------
+-- coverPlaceholder — D4 "Double Frame" style
+-- ---------------------------------------------------------------------------
 -- title   : book title string (or nil — filename used as fallback by callers)
 -- authors : book authors string (or nil)
 -- w, h    : exact pixel dimensions of the cell (should be ~2:3 ratio)
@@ -210,12 +294,12 @@ function SH.coverPlaceholder(title, authors, w, h)
     w = tonumber(w) or 100
     h = tonumber(h) or 150
 
+    local off     = _SHADOW_OFF
+    local cover_w = w - off
+    local cover_h = h - off
     local border = Size.border.thin
-    -- Inner dimensions (FakeCover uses width/height = outer - 2*bordersize,
-    -- since margin=0 and padding=0)
-    local width  = w - 2 * border
-    local height = h - 2 * border
-    -- FakeCover uses 7/8 of width for text to leave lateral breathing room
+    local width  = cover_w - 2 * border
+    local height = cover_h - 2 * border
     local text_width = math.floor(7 / 8 * width)
 
     -- BD-wrap title (mirrors FakeCover logic)
@@ -331,48 +415,56 @@ function SH.coverPlaceholder(title, authors, w, h)
     end
     table.insert(vgroup, VerticalSpan:new{ width = inter_pad })
 
-    return FrameContainer:new{
-        width      = w,
-        height     = h,
+    local result = _addCornerMask(FrameContainer:new{
+        width      = cover_w,
+        height     = cover_h,
         bordersize = border,
+        radius     = _COVER_RADIUS,
         margin     = 0,
         padding    = 0,
         color      = _CLR_COVER_BORDER,
         background = Blitbuffer.COLOR_WHITE,
         CenterContainer:new{
-            dimen = Geom:new{ w = width, h = height },
+            dimen = Geom:new{ w = cover_w - 2 * border, h = cover_h - 2 * border },
             vgroup,
         },
-    }
+    }, Blitbuffer.COLOR_WHITE, _SHADOW_CLR)
+    return SH.wrapWithShadow(result, cover_w, cover_h)
 end
 
 -- ---------------------------------------------------------------------------
 -- getBookCover
 -- ---------------------------------------------------------------------------
 function SH.getBookCover(filepath, w, h, align, stretch_limit)
-    -- Reserve 1px on each side for the border: request a bb that is 2px smaller.
-    local inner_w = math.max(1, w - 2)
-    local inner_h = math.max(1, h - 2)
+    local off      = _SHADOW_OFF
+    local cover_w  = w - off
+    local cover_h  = h - off
+    local border_w = Screen:scaleBySize(1)
+    local radius   = _COVER_RADIUS
+    local inner_w  = math.max(1, cover_w - 2 * border_w)
+    local inner_h  = math.max(1, cover_h - 2 * border_w)
     local bb = Config.getCoverBB(filepath, inner_w, inner_h, align, stretch_limit)
     if not bb then return nil end
     local ok, img = pcall(function()
         return require("ui/widget/imagewidget"):new{
             image            = bb,
-            image_disposable = false,  -- bb is owned by the cover cache; must not be freed here
+            image_disposable = false,
             width            = inner_w,
             height           = inner_h,
-            -- bb is already scaled to exactly inner_w×inner_h by getCoverBB.
             scale_factor     = 1,
         }
     end)
     if not (ok and img) then return nil end
-    -- padding=0 + bordersize=1: the FrameContainer outer size is inner_w+2 × inner_h+2 = w×h.
-    return FrameContainer:new{
-        bordersize = 1, color = _CLR_COVER_BORDER,
-        padding    = 0, margin = 0,
-        dimen      = Geom:new{ w = w, h = h },
+    local cover_frame = _addCornerMask(FrameContainer:new{
+        bordersize = border_w,
+        color      = _CLR_COVER_BORDER,
+        radius     = radius,
+        padding    = 0,
+        margin     = 0,
+        dimen      = Geom:new{ w = cover_w, h = cover_h },
         img,
-    }
+    }, Blitbuffer.COLOR_WHITE, _SHADOW_CLR)
+    return SH.wrapWithShadow(cover_frame, cover_w, cover_h)
 end
 
 -- ---------------------------------------------------------------------------

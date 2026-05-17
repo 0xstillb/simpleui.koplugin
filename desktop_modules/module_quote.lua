@@ -16,8 +16,6 @@ local Blitbuffer     = require("ffi/blitbuffer")
 
 local Device         = require("device")
 
-local Font           = require("ui/font")
-
 local CenterContainer = require("ui/widget/container/centercontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan  = require("ui/widget/horizontalspan")

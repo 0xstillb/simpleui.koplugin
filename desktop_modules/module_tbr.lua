@@ -31,9 +31,7 @@ local InputContainer  = require("ui/widget/container/inputcontainer")
 local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local TextWidget      = require("ui/widget/textwidget")
 local VerticalGroup   = require("ui/widget/verticalgroup")
-local UIManager       = require("ui/uimanager")
 local lfs             = require("libs/libkoreader-lfs")
 local _ = require("sui_i18n").translate
 

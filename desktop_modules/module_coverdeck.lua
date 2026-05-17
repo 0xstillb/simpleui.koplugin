@@ -9,7 +9,6 @@ local Geom           = require("ui/geometry")
 local GestureRange   = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup   = require("ui/widget/overlapgroup")
-local TextWidget     = require("ui/widget/textwidget")
 local VerticalGroup  = require("ui/widget/verticalgroup")
 local Screen         = Device.screen
 local _ = require("sui_i18n").translate

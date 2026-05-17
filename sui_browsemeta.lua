@@ -64,9 +64,11 @@ local VROOT_SEP = "/" .. VROOT   -- pre-built; avoids alloc on every _findVroot
 local SYM_AUTHOR = "\u{F2C0}"
 local SYM_SERIES = "\u{ECD7}"
 local SYM_TAGS   = "\u{F02B}"
+local SYM_ALL    = "\u{F02D}"
 local NULL_MARKER = "\u{2205}"
 
 local DIMS = {
+    all_books = { symbol = SYM_ALL,    db_column = nil,         label = _("Books"), multi_value = false },
     author = { symbol = SYM_AUTHOR, db_column = "authors",  label = _("Authors"), multi_value = true  },
     series = { symbol = SYM_SERIES, db_column = "series",   label = _("Series"),  multi_value = false },
     tags   = { symbol = SYM_TAGS,   db_column = "keywords", label = _("Tags"),    multi_value = true  },
@@ -75,7 +77,7 @@ local DIMS = {
 local SYM_TO_DIM = {}
 for k, v in pairs(DIMS) do SYM_TO_DIM[v.symbol] = k end
 
-local DIMS_ORDER = { "author", "series", "tags" }
+local DIMS_ORDER = { "all_books", "author", "series", "tags" }
 
 -- ---------------------------------------------------------------------------
 -- Module state
@@ -164,6 +166,8 @@ local function _parseVirtualPath(path)
     local level
     if nparts == 0 then
         level = "root"
+    elseif nparts == 1 and dim_key == "all_books" then
+        level = "all_books"
     elseif nparts == 1 and dim_key then
         level = "dim_list"
     else
@@ -234,6 +238,14 @@ end
 local _SQL_BASE = "SELECT directory, filename, title, authors, series, series_index, keywords"
                .. " FROM bookinfo WHERE directory GLOB ?"
 
+local function _joinPath(directory, filename)
+    if not directory or directory == "" then return filename end
+    if directory:sub(-1) == "/" then
+        return directory .. filename
+    end
+    return directory .. "/" .. filename
+end
+
 -- Returns { {fullpath, filename, title=, authors=, series=, series_index=}, ... }
 -- lfs.attributes() is NOT called here; validation happens in the render loop
 -- where the attr table is needed anyway, keeping this function to pure SQL.
@@ -270,7 +282,7 @@ local function _getMatchingFiles(base_dir, filters)
             if not row then break end
             -- Concatenate in Lua; avoids SQLite per-row string concat.
             results[#results + 1] = {
-                row[1] .. row[2], row[2],
+                _joinPath(row[1], row[2]), row[2],
                 title        = row[3],
                 authors      = row[4],
                 series       = row[5],
@@ -364,7 +376,14 @@ end
 -- Comparator is a strict weak order — series equality test is explicit.
 local function _sortFiles(files, dim_key)
     local is_author = (dim_key == "author")
+    local is_all_books = (dim_key == "all_books")
     table.sort(files, function(a, b)
+        if is_all_books then
+            local at = a.title or a[2]
+            local bt = b.title or b[2]
+            if at ~= bt then return _strcollSafe(at, bt) end
+            return _strcollSafe(a[2], b[2])
+        end
         if is_author then
             -- In author mode group books by series, then by index within series.
             local as, bs = a.series, b.series
@@ -439,9 +458,9 @@ local function _getVirtualList(fc, path, collate)
     if level == "root" then
         for i, dk in ipairs(DIMS_ORDER) do
             local dim   = DIMS[dk]
-            local text  = dim.symbol .. "  " .. (_("Browse by") .. " " .. dim.label)
             local vpath = _dimPath(base_dir, dk)
             if collate then
+                local text = dim.symbol .. "  " .. (_("Browse by") .. " " .. dim.label)
                 local item = fc:getListItem(nil, text, vpath, _fakeAttr(i), collate)
                 item.mandatory = nil
                 dirs[#dirs + 1] = item
@@ -449,11 +468,62 @@ local function _getVirtualList(fc, path, collate)
                 dirs[#dirs + 1] = true
             end
         end
+
+        -- Real-folder fallback inside the virtual Library root.  This lets the
+        -- Library tab open a chooser while still offering the normal Home
+        -- Folder / Folder Browser entry without creating any physical folders.
+        if collate and base_dir and lfs.attributes(base_dir, "mode") == "directory" then
+            local attr = lfs.attributes(base_dir) or _fakeAttr(#dirs + 1)
+            local item = fc:getListItem(nil, _("Home Folder"), base_dir, attr, collate)
+            item.mandatory = nil
+            item.sui_browsemeta_home_folder = true
+            dirs[#dirs + 1] = item
+        elseif not collate then
+            dirs[#dirs + 1] = true
+        end
+
         return dirs, files
     end
 
     if not base_dir or not dim_key then return dirs, files end
     _ensureCacheBaseDir(base_dir)
+
+    if level == "all_books" then
+        local cached = _matching_files_cache[path]
+        if not cached then
+            cached = _getMatchingFiles(base_dir, {})
+            _sortFiles(cached, dim_key)
+            _matching_files_cache[path] = cached
+        end
+        for _, row in ipairs(cached) do
+            local fullpath = row[1]
+            local fname    = row[2]
+            local attr = lfs.attributes(fullpath)
+            if attr and attr.mode == "file" and fc:show_file(fname, fullpath) then
+                local item = fc:getListItem(path, fname, fullpath, attr, collate)
+                if row.title or row.authors or row.series then
+                    item.doc_props = {
+                        display_title = row.title,
+                        title         = row.title,
+                        authors       = row.authors,
+                        series        = row.series,
+                        series_index  = row.series_index,
+                        keywords      = row.keywords,
+                    }
+                end
+                if collate and row.authors and row.authors ~= "" then
+                    item.mandatory = row.authors:gsub("\n.*", " et al.")
+                elseif collate and row.series and row.series ~= "" then
+                    item.mandatory = row.series
+                    if row.series_index then
+                        item.mandatory = item.mandatory .. " #" .. tostring(row.series_index)
+                    end
+                end
+                files[#files + 1] = item
+            end
+        end
+        return dirs, files
+    end
 
     if level == "dim_list" then
         local values = _meta_values_cache[path]
@@ -560,9 +630,11 @@ local function _getVirtualList(fc, path, collate)
                 if row.title or row.authors or row.series then
                     item.doc_props = {
                         display_title = row.title,
+                        title         = row.title,
                         authors       = row.authors,
                         series        = row.series,
                         series_index  = row.series_index,
+                        keywords      = row.keywords,
                     }
                 end
                 -- Contextual mandatory text:
@@ -633,8 +705,26 @@ function M.getSavedMode()
     return SUISettings:readSetting(_MODE_KEY) or "normal"
 end
 
+local function _isVirtualLibraryMode(mode)
+    return mode == "library_root"
+        or mode == "all_books"
+        or mode == "author"
+        or mode == "series"
+        or mode == "tags"
+end
+
 function M.setSavedMode(mode)
+    mode = mode or "normal"
     SUISettings:saveSetting(_MODE_KEY, mode)
+
+    -- Keep the bottom-bar Library router in sync without depending on a
+    -- separate sui_library module.  Normal filesystem mode maps to the
+    -- Folder/Home Folder entry.
+    if _isVirtualLibraryMode(mode) then
+        SUISettings:saveSetting("simpleui_last_library_mode", mode)
+    elseif mode == "folder" or mode == "normal" then
+        SUISettings:saveSetting("simpleui_last_library_mode", "folder")
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -657,34 +747,69 @@ function M.exitToNormal(fc, fm)
     end
 end
 
-function M.navigateTo(fm, mode)
+function M.navigateTo(fm, mode, base_dir)
     local fc = fm and fm.file_chooser
-    if not fc then return end
+    if not fc then return false end
 
-    local base = _baseDir(fc.path)
+    mode = mode or "library_root"
+    local base = base_dir or _baseDir(fc.path)
+    if not base or base == "" then base = _baseDir(fc.path) end
 
-    if mode == "normal" then
+    if mode == "normal" or mode == "folder" then
         M.exitToNormal(fc, fm)
-        return
+        return true
     end
+
+    if mode == "library_root" then
+        local target = base .. VROOT_SEP
+        fc._browse_by_meta_entry_path = target
+        if fm then fm._navbar_suppress_path_change = true end
+        fc:changeToPath(target)
+        if fm then fm._navbar_suppress_path_change = nil end
+        if fm and fm.updateTitleBarPath then
+            pcall(function() fm:updateTitleBarPath(_("Library"), true) end)
+        end
+        if fc.onGotoPage then
+            pcall(function() fc:onGotoPage(1) end)
+        end
+        M.setSavedMode("library_root")
+        return true
+    end
+
+    if mode == "all_books" then
+        local target = _dimPath(base, "all_books")
+        fc._browse_by_meta_entry_path = target
+        if fm then fm._navbar_suppress_path_change = true end
+        fc:changeToPath(target)
+        if fm then fm._navbar_suppress_path_change = nil end
+        if fm and fm.updateTitleBarPath then
+            pcall(function() fm:updateTitleBarPath(_("All Books"), true) end)
+        end
+        if fc.onGotoPage then
+            pcall(function() fc:onGotoPage(1) end)
+        end
+        M.setSavedMode("all_books")
+        return true
+    end
+
+    if not DIMS[mode] then return false end
 
     local target = _dimPath(base, mode)
     -- Always mark the dim_list root as the entry point so the up button is
     -- never shown when the user is at the top-level Authors/Series list.
     fc._browse_by_meta_entry_path = target
-    fm._navbar_suppress_path_change = true
+    if fm then fm._navbar_suppress_path_change = true end
     fc:changeToPath(target)
-    fm._navbar_suppress_path_change = nil
-    if fm.updateTitleBarPath then
+    if fm then fm._navbar_suppress_path_change = nil end
+    if fm and fm.updateTitleBarPath then
         pcall(function() fm:updateTitleBarPath(target) end)
     end
     -- Force the titlebar to re-evaluate the back-button state for page 1.
-    -- onGotoPage triggers _resolveIsSub which re-checks the path-based state,
-    -- ensuring the back button is correct when lock_home_folder is active.
     if fc.onGotoPage then
         pcall(function() fc:onGotoPage(1) end)
     end
     M.setSavedMode(mode)
+    return true
 end
 
 -- navigateToRoot(fc, fm, mode)
@@ -697,6 +822,29 @@ function M.navigateToRoot(fc, fm, mode)
     if not fc or not mode then return end
     local base   = _baseDir(fc.path)
     local target = _dimPath(base, mode)
+    if mode == "all_books" then
+        fc._browse_by_meta_entry_path = target
+        if fc.path == target then
+            if fm then fm._navbar_suppress_path_change = true end
+            pcall(function() fc:onGotoPage(1) end)
+            pcall(function() fc:refreshPath() end)
+            if fm then fm._navbar_suppress_path_change = nil end
+            if fm and fm.updateTitleBarPath then
+                pcall(function() fm:updateTitleBarPath(_("All Books"), true) end)
+            end
+        else
+            if fm then fm._navbar_suppress_path_change = true end
+            fc:changeToPath(target)
+            if fm then fm._navbar_suppress_path_change = nil end
+            if fm and fm.updateTitleBarPath then
+                pcall(function() fm:updateTitleBarPath(_("All Books"), true) end)
+            end
+            if fc.onGotoPage then
+                pcall(function() fc:onGotoPage(1) end)
+            end
+        end
+        return
+    end
     -- Re-set the entry path so the up button stays hidden at this level.
     fc._browse_by_meta_entry_path = target
     -- If we are already at the dim_list root, just go to page 1 + refresh.
@@ -1080,12 +1228,17 @@ local function _installPatches()
         _orig_onMenuSelect = FileChooser.onMenuSelect
         local orig = _orig_onMenuSelect
         FileChooser.onMenuSelect = function(fc, item)
+            if item and item.sui_browsemeta_home_folder then
+                M.setSavedMode("folder")
+            end
+
             if item and item.path and _isVirtual(item.path) then
                 if item.is_go_up and _pathLevel(fc.path) == "dim_list" then
                     local FM = _getFileManager()
                     M.exitToNormal(fc, FM and FM.instance)
                     return true
                 end
+                M.setSavedMode(M.getCurrentMode({ path = item.path }))
                 fc:changeToPath(item.path, item.is_go_up and fc.path)
                 -- Re-evaluate the back-button after entering a virtual sub-folder,
                 -- so lock_home_folder does not suppress it incorrectly.

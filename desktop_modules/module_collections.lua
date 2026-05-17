@@ -679,7 +679,6 @@ function M.getMenuItems(ctx_menu)
             _UIManager:show(InfoMessage:new{ text = _lc("Collection is empty."), timeout = 2 }); return
         end
         local overrides     = M.getCoverOverrides()
-        local ButtonDialog  = require("ui/widget/buttondialog")
         local cover_buttons = {}
         local _n            = coll_name
         cover_buttons[#cover_buttons + 1] = {{

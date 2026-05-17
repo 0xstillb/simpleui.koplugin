@@ -936,7 +936,7 @@ local _PLUGIN_MODULES = {
     "sui_i18n", "sui_config", "sui_core", "sui_bottombar", "sui_topbar",
     "sui_patches", "sui_menu", "sui_titlebar", "sui_quickactions",
     "sui_homescreen", "sui_foldercovers", "sui_browsemeta", "sui_updater",
-    "sui_store", "sui_presets", "sui_style", "sui_library",
+    "sui_store", "sui_presets", "sui_style",
     "desktop_modules/moduleregistry",
     "desktop_modules/module_books_shared",
     "desktop_modules/module_clock",
@@ -1162,25 +1162,30 @@ function SimpleUIPlugin:_libWatchStart()
             self._lib_watch_mtime = mtime
         end
 
-        -- Also watch bookinfo_cache.sqlite3 mtime for All Books view.
-        local SUILib = package.loaded["sui_library"]
-        if SUILib then
-            local db_mtime = SUILib.getDbMtime()
-            if db_mtime and self._lib_db_mtime and db_mtime ~= self._lib_db_mtime then
-                self._lib_db_mtime = db_mtime
-                SUILib.invalidateCache()
-                logger.dbg("simpleui: bookinfo_cache mtime changed — library cache invalidated")
-                local FM = package.loaded["apps/filemanager/filemanager"]
-                local fm = FM and FM.instance
-                local fc = fm and fm.file_chooser
-                if fc and SUILib.isAllBooksActive(fc) then
-                    local HS = package.loaded["sui_homescreen"]
-                    if not (HS and HS._instance) then
-                        pcall(function() SUILib.navigateTo(fm) end)
+        -- Also watch bookinfo_cache.sqlite3 mtime for BrowseMeta views.
+        local BM = package.loaded["sui_browsemeta"]
+        if BM and BM.reset then
+            local ok_lfs2, lfs2 = pcall(require, "libs/libkoreader-lfs")
+            if ok_lfs2 then
+                local DataStorage = require("datastorage")
+                local db_path = DataStorage:getSettingsDir() .. "/bookinfo_cache.sqlite3"
+                local db_mtime = lfs2.attributes(db_path, "modification")
+                if db_mtime and self._lib_db_mtime and db_mtime ~= self._lib_db_mtime then
+                    self._lib_db_mtime = db_mtime
+                    BM.reset()
+                    logger.dbg("simpleui: bookinfo_cache mtime changed — BrowseMeta cache invalidated")
+                    local FM = package.loaded["apps/filemanager/filemanager"]
+                    local fm2 = FM and FM.instance
+                    local fc2 = fm2 and fm2.file_chooser
+                    if fc2 and BM.getPathLevel(fc2.path) then
+                        local HS = package.loaded["sui_homescreen"]
+                        if not (HS and HS._instance) then
+                            pcall(function() fc2:refreshPath() end)
+                        end
                     end
+                elseif db_mtime and not self._lib_db_mtime then
+                    self._lib_db_mtime = db_mtime
                 end
-            elseif db_mtime and not self._lib_db_mtime then
-                self._lib_db_mtime = db_mtime
             end
         end
 
@@ -1267,12 +1272,12 @@ function SimpleUIPlugin:onGrimmLinkShelfSyncComplete(data)
         end
     end
 
-    -- Invalidate All Books cache so GrimmLink-synced books appear immediately.
-    local SUILib = package.loaded["sui_library"]
-    if SUILib then
-        SUILib.invalidateCache()
-        self._lib_db_mtime = SUILib.getDbMtime()
+    -- Invalidate BrowseMeta caches so GrimmLink-synced books appear immediately.
+    local BM = package.loaded["sui_browsemeta"]
+    if BM and BM.reset then
+        BM.reset()
     end
+    self._lib_db_mtime = nil
 
     -- Reset mtime baseline so the mtime watcher doesn't double-fire.
     if self._lib_watch_mtime then
